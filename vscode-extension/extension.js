@@ -5,11 +5,38 @@ const vscode = require('vscode');
 const http = require('http');
 const https = require('https');
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
+class EventBuffer {
+  /** @param {number} max */
+  constructor(max) {
+    this.max = max;
+    /** @type {Array<any>} */
+    this.items = [];
+  }
+
+  /** @param {any} evt */
+  push(evt) {
+    this.items.push(evt);
+    if (this.items.length > this.max) {
+      this.items.splice(0, this.items.length - this.max);
+    }
+  }
+
+  toArray() {
+    return this.items.slice();
+  }
+}
+
 function getConfig() {
   const cfg = vscode.workspace.getConfiguration('reos');
   return {
     serverUrl: cfg.get('serverUrl', 'http://127.0.0.1:8010'),
     enabled: cfg.get('mirroringEnabled', false),
+    maxEventsInPanel: cfg.get('maxEventsInPanel', 200),
+    sendNoteBody: cfg.get('sendNoteBody', false),
   };
 }
 
@@ -73,13 +100,27 @@ function postJson(urlString, path, body, timeoutMs = 1500) {
 async function sendEvent(output, kind, payload) {
   const cfg = getConfig();
 
+  // Always record what the extension *observed* (even if mirroring is off), so
+  // you can verify the data boundaries in real time.
+  const observed = {
+    observed_at: nowIso(),
+    kind,
+    enabled: cfg.enabled,
+    payload,
+    sent: false,
+    status: null,
+    error: null,
+  };
+
   if (!cfg.enabled) {
-    return;
+    return observed;
   }
 
   if (!isLocalhostUrl(cfg.serverUrl)) {
-    output.appendLine('[reos] Refusing to send: serverUrl is not localhost.');
-    return;
+    const msg = 'Refusing to send: serverUrl is not localhost.';
+    output.appendLine(`[reos] ${msg}`);
+    observed.error = msg;
+    return observed;
   }
 
   const event = {
@@ -92,9 +133,15 @@ async function sendEvent(output, kind, payload) {
 
   try {
     const res = await postJson(cfg.serverUrl, '/events', event);
+    observed.sent = true;
+    observed.status = res.status;
     output.appendLine(`[reos] sent ${kind} -> ${res.status}`);
+    return observed;
   } catch (err) {
+    observed.sent = false;
+    observed.error = String(err);
     output.appendLine(`[reos] send failed (${kind}): ${String(err)}`);
+    return observed;
   }
 }
 
@@ -112,6 +159,94 @@ function updateStatusBar(statusBar) {
 function activate(context) {
   const output = vscode.window.createOutputChannel('ReOS');
 
+  let panel = null;
+  let buffer = new EventBuffer(getConfig().maxEventsInPanel);
+
+  function refreshBufferLimit() {
+    const cfg = getConfig();
+    if (cfg.maxEventsInPanel !== buffer.max) {
+      buffer = new EventBuffer(cfg.maxEventsInPanel);
+      // Note: we intentionally drop old events when resizing to keep semantics simple.
+    }
+  }
+
+  function postToPanel() {
+    if (!panel) return;
+    try {
+      panel.webview.postMessage({ type: 'events', events: buffer.toArray() });
+    } catch {
+      // ignore
+    }
+  }
+
+  function ensurePanel() {
+    if (panel) {
+      panel.reveal();
+      postToPanel();
+      return;
+    }
+
+    panel = vscode.window.createWebviewPanel(
+      'reosEvents',
+      'ReOS Events',
+      vscode.ViewColumn.Beside,
+      { enableScripts: true }
+    );
+
+    panel.webview.html = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ReOS Events</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; padding: 10px; }
+      .hint { opacity: 0.8; margin-bottom: 10px; }
+      pre { white-space: pre-wrap; word-break: break-word; }
+      .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+      button { cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div class="hint">
+      Shows what this extension observes and (if enabled) sends to ReOS. Metadata-only by default.
+    </div>
+    <div class="row">
+      <button id="refresh">Refresh</button>
+      <span id="count"></span>
+    </div>
+    <pre id="out">(waiting for events...)</pre>
+    <script>
+      const vscode = acquireVsCodeApi();
+      const out = document.getElementById('out');
+      const count = document.getElementById('count');
+      document.getElementById('refresh').addEventListener('click', () => {
+        vscode.postMessage({ type: 'refresh' });
+      });
+      window.addEventListener('message', (event) => {
+        const msg = event.data;
+        if (!msg || msg.type !== 'events') return;
+        const events = msg.events || [];
+        count.textContent = `${events.length} events`;
+        out.textContent = JSON.stringify(events, null, 2);
+      });
+    </script>
+  </body>
+</html>`;
+
+    panel.webview.onDidReceiveMessage((msg) => {
+      if (msg && msg.type === 'refresh') {
+        postToPanel();
+      }
+    });
+
+    panel.onDidDispose(() => {
+      panel = null;
+    });
+
+    postToPanel();
+  }
+
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   updateStatusBar(statusBar);
 
@@ -121,7 +256,9 @@ function activate(context) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('reos')) {
+        refreshBufferLimit();
         updateStatusBar(statusBar);
+        postToPanel();
       }
     })
   );
@@ -133,6 +270,13 @@ function activate(context) {
       await setEnabled(!cfg.enabled);
       updateStatusBar(statusBar);
       output.appendLine(`[reos] mirroring ${!cfg.enabled ? 'enabled' : 'disabled'}`);
+      postToPanel();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('reos.openEventPanel', async () => {
+      ensurePanel();
     })
   );
 
@@ -179,12 +323,21 @@ function activate(context) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('reos.sendNote', async () => {
+      const cfg = getConfig();
       const note = await vscode.window.showInputBox({
         title: 'Send a short note to ReOS (metadata-only recommended)',
         prompt: 'Keep it short. Avoid pasting sensitive content; this is stored locally but still recorded.',
       });
       if (!note) return;
-      await sendEvent(output, 'note', { note_length: note.length, note });
+
+      // Default is *not* to send note body, only length, unless user explicitly enables it.
+      const payload = cfg.sendNoteBody
+        ? { note_length: note.length, note }
+        : { note_length: note.length };
+
+      const observed = await sendEvent(output, 'note', payload);
+      buffer.push(observed);
+      postToPanel();
     })
   );
 
@@ -193,21 +346,25 @@ function activate(context) {
     vscode.window.onDidChangeActiveTextEditor(async (editor) => {
       if (!editor || !editor.document) return;
       const doc = editor.document;
-      await sendEvent(output, 'active_editor', {
+      const observed = await sendEvent(output, 'active_editor', {
         uri: String(doc.uri),
         languageId: doc.languageId,
         workspaceFolder: vscode.workspace.getWorkspaceFolder(doc.uri)?.uri?.fsPath || null,
       });
+      buffer.push(observed);
+      postToPanel();
     })
   );
 
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (doc) => {
-      await sendEvent(output, 'save', {
+      const observed = await sendEvent(output, 'save', {
         uri: String(doc.uri),
         languageId: doc.languageId,
         workspaceFolder: vscode.workspace.getWorkspaceFolder(doc.uri)?.uri?.fsPath || null,
       });
+      buffer.push(observed);
+      postToPanel();
     })
   );
 

@@ -13,6 +13,7 @@
   "activationEvents": [
     "onStartupFinished",
     "onCommand:reos.toggleMirroring",
+    "onCommand:reos.openEventPanel",
     "onCommand:reos.sendNote",
     "onCommand:reos.pingService"
   ],
@@ -22,6 +23,10 @@
       {
         "command": "reos.toggleMirroring",
         "title": "ReOS: Toggle Mirroring"
+      },
+      {
+        "command": "reos.openEventPanel",
+        "title": "ReOS: Open Event Panel"
       },
       {
         "command": "reos.sendNote",
@@ -44,6 +49,18 @@
           "type": "boolean",
           "default": false,
           "description": "When enabled, sends metadata-only VS Code activity events to the local ReOS service."
+        },
+        "reos.maxEventsInPanel": {
+          "type": "number",
+          "default": 200,
+          "minimum": 20,
+          "maximum": 2000,
+          "description": "Maximum number of recent events kept in the local ReOS panel buffer."
+        },
+        "reos.sendNoteBody": {
+          "type": "boolean",
+          "default": false,
+          "description": "If enabled, includes the note text when using 'ReOS: Send Note'. Off by default to avoid capturing content."
         }
       }
     }

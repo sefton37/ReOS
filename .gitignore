@@ -22,6 +22,9 @@ venv/
 # ReOS local data
 .reos-data/
 *.log
+*.sqlite3
+*.db
+*.sqlite
 
 # Node
 node_modules/

@@ -20,12 +20,15 @@ It does **not** read document contents automatically.
 - Status bar: **ReOS: Mirroring Off/On** (click to toggle)
 - Command palette:
   - `ReOS: Ping Local Service`
+   - `ReOS: Open Event Panel`
   - `ReOS: Toggle Mirroring`
   - `ReOS: Send Note (Metadata Only)`
 
 ### Settings
 - `reos.serverUrl` (default `http://127.0.0.1:8010`)
 - `reos.mirroringEnabled` (default `false`)
+- `reos.maxEventsInPanel` (default `200`)
+- `reos.sendNoteBody` (default `false`; opt-in to include note text)
 
 ### Charter alignment
 - Localhost-only guard: the extension refuses to send events to non-localhost URLs.

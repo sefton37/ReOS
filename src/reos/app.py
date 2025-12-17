@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import FastAPI
 
+from .db import get_db
 from .models import (
     Event,
     EventIngestResponse,
@@ -16,6 +18,13 @@ from .ollama import check_ollama
 from .storage import append_event, iter_events
 from .tools import list_tools
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # noqa: ARG001
+    """Lifespan context for startup/shutdown."""
+    get_db().migrate()
+    yield
+
 app = FastAPI(
     title="ReOS Local Kernel",
     version="0.0.0a0",
@@ -23,6 +32,7 @@ app = FastAPI(
         "Local-only attention kernel scaffold. No cloud calls. "
         "Mirrors events to local storage and produces reflective summaries."
     ),
+    lifespan=lifespan,
 )
 
 
