@@ -30,11 +30,17 @@ if [[ "${1:-}" == "--service" ]]; then
   shift
 fi
 
+if [[ "${1:-}" == "--mcp" ]]; then
+  mode="mcp"
+  shift
+fi
+
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   cat <<'EOF'
 Usage:
   ./reos            # launch ReOS desktop GUI
   ./reos --service  # launch ReOS local service (FastAPI)
+  ./reos --mcp      # launch ReOS MCP server (stdio)
 
 Notes:
   - Set REOS_REPO_PATH=/path/to/repo to choose which repo to observe.
@@ -53,7 +59,13 @@ if [[ "$mode" == "gui" ]]; then
   # Qt xcb platform plugin depends on libxcb-cursor on many Debian/Ubuntu installs.
   # If it's missing, PySide6 will abort with: "Could not load the Qt platform plugin xcb".
   if command -v ldconfig >/dev/null 2>&1; then
-    if ! ldconfig -p 2>/dev/null | grep -qi 'libxcb-cursor\.so\.0'; then
+    # NOTE: This script uses `set -o pipefail`. When `grep -q` finds a match it exits
+    # early, which can SIGPIPE `ldconfig` and cause the pipeline to have a non-zero
+    # status even though the library is present. Disable pipefail for this probe.
+    if ! (
+      set +o pipefail
+      ldconfig -p 2>/dev/null | grep -qi 'libxcb-cursor\.so\.0'
+    ); then
       if command -v apt-get >/dev/null 2>&1; then
         echo "ReOS: missing system dependency for GUI (libxcb-cursor)." >&2
         echo "Fix: sudo apt update && sudo apt install -y libxcb-cursor0" >&2
@@ -64,6 +76,8 @@ if [[ "$mode" == "gui" ]]; then
   fi
 
   exec "$python_bin" -m reos.gui "$@"
+elif [[ "$mode" == "mcp" ]]; then
+  exec "$python_bin" -m reos.mcp "$@"
 else
   exec "$python_bin" -m reos "$@"
 fi

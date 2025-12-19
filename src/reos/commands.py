@@ -15,7 +15,7 @@ from .alignment import (
     is_git_repo,
 )
 from .attention import classify_attention_pattern, get_current_session_summary
-from .db import Database
+from .db import get_db
 
 
 @dataclass(frozen=True)
@@ -136,7 +136,7 @@ def get_command_registry() -> list[Command]:
 def handle_reflect_recent() -> str:
     """Reflect on recent attention patterns."""
     try:
-        db = Database()
+        db = get_db()
         classification = classify_attention_pattern(db)
         return json.dumps(classification, indent=2)
     except Exception as e:
@@ -146,7 +146,7 @@ def handle_reflect_recent() -> str:
 def handle_inspect_session(params: dict[str, Any]) -> str:
     """Inspect the current session."""
     try:
-        db = Database()
+        db = get_db()
         summary = get_current_session_summary(db)
         return json.dumps(summary, indent=2)
     except Exception as e:
@@ -156,7 +156,7 @@ def handle_inspect_session(params: dict[str, Any]) -> str:
 def handle_list_events(params: dict[str, Any]) -> str:
     """List recent events."""
     try:
-        db = Database()
+        db = get_db()
         limit = int(params.get("limit", 20))
         events = db.iter_events_recent(limit=limit)
         # Summarize: show kind, timestamp, key metadata
@@ -191,7 +191,7 @@ def handle_note(params: dict[str, Any]) -> str:
     """Store a note about attention/intention."""
     try:
         text = params.get("text", "")
-        db = Database()
+        db = get_db()
         import uuid
 
         note_id = str(uuid.uuid4())
@@ -213,7 +213,7 @@ def handle_review_alignment(params: dict[str, Any]) -> str:
     """Review current repo changes against roadmap + charter."""
     try:
         include_diff = bool(params.get("include_diff", False))
-        db = Database()
+        db = get_db()
         report = analyze_alignment(db=db, include_diff=include_diff)
         return json.dumps(report, indent=2)
     except Exception as e:
@@ -223,7 +223,7 @@ def handle_review_alignment(params: dict[str, Any]) -> str:
 def handle_review_trigger_status(params: dict[str, Any]) -> str:
     """Return current context budget estimate and trigger state."""
     try:
-        db = Database()
+        db = get_db()
 
         repo_path_param = params.get("repo_path")
         repo_path: Path | None = None

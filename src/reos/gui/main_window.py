@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QSize, Qt, QTimer
+import json
+from dataclasses import asdict, is_dataclass
+
+from PySide6.QtCore import QSize, Qt, QThread, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QPushButton,
     QSplitter,
@@ -19,12 +20,33 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..db import Database
+from ..agent import ChatAgent
+from ..db import Database, get_db
 from ..errors import record_error
 from ..git_poll import poll_git_repo
 from ..logging_setup import configure_logging
+from .projects_window import ProjectsWindow
+from .settings_window import SettingsWindow
 
 logger = logging.getLogger(__name__)
+
+
+class _ChatAgentThread(QThread):
+    def __init__(self, *, agent: ChatAgent, user_text: str) -> None:
+        super().__init__()
+        self._agent = agent
+        self._user_text = user_text
+        self.answer: str | None = None
+        self.trace: object | None = None
+        self.error: str | None = None
+
+    def run(self) -> None:  # noqa: D401
+        try:
+            answer, trace = self._agent.respond(self._user_text)
+            self.answer = answer
+            self.trace = trace
+        except Exception as exc:  # noqa: BLE001
+            self.error = str(exc)
 
 
 class MainWindow(QMainWindow):
@@ -35,6 +57,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("ReOS - Attention Kernel")
         self.resize(QSize(1920, 1080))  # 1080p-ish (width for 3 panes)
 
+        self._db = get_db()
+        self._agent = ChatAgent(db=self._db)
+        self._projects_window: ProjectsWindow | None = None
+        self._settings_window: SettingsWindow | None = None
+        self._chat_thread: _ChatAgentThread | None = None
+
         central = QWidget()
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
@@ -42,7 +70,7 @@ class MainWindow(QMainWindow):
         # Left pane: Navigation
         left_pane = self._create_nav_pane()
 
-        # Center pane: Chat
+        # Center pane: Chat (always)
         center_pane = self._create_chat_pane()
 
         # Right pane: Inspection
@@ -61,83 +89,67 @@ class MainWindow(QMainWindow):
         self._last_review_trigger_id: str | None = None
         self._last_alignment_trigger_id: str | None = None
 
-        # Refresh every 30 seconds to poll git + show repo status
+        # Refresh every 30 seconds to poll git + emit checkpoint prompts in chat
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self._refresh_nav_pane)
         self.refresh_timer.start(30000)  # 30 second refresh
 
     def _create_nav_pane(self) -> QWidget:
-        """Left navigation pane: shows git repo status and checkpoint signals."""
+        """Left navigation pane."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        title = QLabel("Git Repo")
-        title.setStyleSheet(
-            "font-weight: bold; font-size: 14px;"
-        )
+        title = QLabel("Navigation")
+        title.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(title)
 
-        # Session summary from SQLite
-        self.nav_list = QListWidget()
-        self.nav_list.itemClicked.connect(self._on_nav_item_clicked)
-        layout.addWidget(self.nav_list)
-        
-        # Refresh nav pane with current session data
-        self._refresh_nav_pane()
+        projects_btn = QPushButton("Projects")
+        projects_btn.clicked.connect(self._open_projects_window)
+        layout.addWidget(projects_btn)
+
+        settings_btn = QPushButton("Settings")
+        settings_btn.clicked.connect(self._open_settings_window)
+        layout.addWidget(settings_btn)
 
         layout.addStretch()
         return widget
+
+    def _open_projects_window(self) -> None:
+        if self._projects_window is None:
+            self._projects_window = ProjectsWindow(db=self._db)
+
+        self._projects_window.refresh()
+        self._projects_window.show()
+        self._projects_window.raise_()
+        self._projects_window.activateWindow()
+
+    def _open_settings_window(self) -> None:
+        if self._settings_window is None:
+            self._settings_window = SettingsWindow(db=self._db)
+
+        self._settings_window.refresh()
+        self._settings_window.show()
+        self._settings_window.raise_()
+        self._settings_window.activateWindow()
     
     def _refresh_nav_pane(self) -> None:
-        """Refresh navigation pane with current git repo data."""
+        """Poll git + emit checkpoint prompts in the chat."""
         try:
             configure_logging()
-            db = Database()
+            db = self._db
             repo_summary = poll_git_repo()
-            
-            # Clear current list
-            self.nav_list.clear()
 
             status_text = repo_summary.get("status", "no_repo_detected")
             if status_text != "ok":
-                item = QListWidgetItem("No git repo detected (set REOS_REPO_PATH)")
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-                self.nav_list.addItem(item)
                 self._check_review_trigger(db)
                 return
-
-            repo = repo_summary.get("repo", "")
-            branch = repo_summary.get("branch")
-            changed_files_count = repo_summary.get("changed_files_count", 0)
-
-            repo_item = QListWidgetItem(f"Repo: {repo}")
-            repo_item.setFlags(repo_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-            self.nav_list.addItem(repo_item)
-
-            branch_text = branch if branch else "(detached)"
-            branch_item = QListWidgetItem(f"Branch: {branch_text}")
-            branch_item.setFlags(branch_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-            self.nav_list.addItem(branch_item)
-
-            changes_item = QListWidgetItem(f"Working tree: {changed_files_count} changed files")
-            changes_item.setFlags(changes_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-            self.nav_list.addItem(changes_item)
-
-            diff_stat = repo_summary.get("diff_stat")
-            if isinstance(diff_stat, str) and diff_stat:
-                stat_item = QListWidgetItem("Diffstat: " + diff_stat.replace("\n", " | "))
-                stat_item.setFlags(stat_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-                self.nav_list.addItem(stat_item)
 
             self._check_review_trigger(db)
                 
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to refresh nav pane")
             record_error(source="reos", operation="gui_refresh_nav_pane", exc=exc)
-            item = QListWidgetItem(f"Error loading repo: {exc}")
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-            self.nav_list.clear()
-            self.nav_list.addItem(item)
+            self.chat_display.append(f"\nReOS: Error during refresh: {exc}")
 
     def _check_review_trigger(self, db: Database) -> None:
         """If a new review-trigger event exists, append a checkpoint prompt."""
@@ -186,18 +198,6 @@ class MainWindow(QMainWindow):
             )
             self.chat_display.append(f"\nReOS: {msg}")
             return
-
-    def _on_nav_item_clicked(self, item: QListWidgetItem) -> None:
-        """Handle navigation item click: load project context."""
-        project_name = item.data(Qt.ItemDataRole.UserRole)
-        if not project_name:
-            return
-        
-        # In center pane, show: "Loaded project: {project_name}"
-        # This is a placeholder for future implementation
-        msg = f"Project context for: {project_name}\n(Project inspection coming next)"
-        self.chat_display.append(f"\nReOS: {msg}")
-
 
     def _create_chat_pane(self) -> QWidget:
         """Center chat pane."""
@@ -260,7 +260,7 @@ class MainWindow(QMainWindow):
         return widget
 
     def _on_send_message(self) -> None:
-        """Handle user message (placeholder for now)."""
+        """Handle user message."""
         text = self.chat_input.text().strip()
         if not text:
             return
@@ -269,9 +269,50 @@ class MainWindow(QMainWindow):
         self.chat_display.append(f"\nYou: {text}")
         self.chat_input.clear()
 
-        # Placeholder response
-        response = (
-            "\nReOS: I received your message. "
-            "(Command interpreter and Ollama integration coming next.)"
-        )
-        self.chat_display.append(response)
+        if self._chat_thread is not None and self._chat_thread.isRunning():
+            self.chat_display.append("\nReOS: One moment — still thinking on the last message.")
+            return
+
+        self.chat_display.append("\nReOS: (thinking…)")
+        self.inspection_display.setText("Running local tools (metadata-first)…")
+
+        thread = _ChatAgentThread(agent=self._agent, user_text=text)
+        thread.finished.connect(self._on_agent_finished)
+        self._chat_thread = thread
+        thread.start()
+
+    def _on_agent_finished(self) -> None:
+        thread = self._chat_thread
+        self._chat_thread = None
+        if thread is None:
+            return
+
+        if thread.error:
+            msg = thread.error
+            if "Ollama" in msg or "11434" in msg:
+                msg = (
+                    msg
+                    + "\n\nHint: start Ollama and set REOS_OLLAMA_MODEL, e.g. `export REOS_OLLAMA_MODEL=llama3.2`."
+                )
+            self.chat_display.append(f"\nReOS: {msg}")
+            self.inspection_display.setText(msg)
+            return
+
+        answer = thread.answer or "(no response)"
+        self.chat_display.append(f"\nReOS: {answer}")
+
+        trace = thread.trace
+        try:
+            payload: object
+            if is_dataclass(trace):
+                payload = asdict(trace)
+            else:
+                payload = {
+                    "tool_calls": getattr(trace, "tool_calls", None),
+                    "tool_results": getattr(trace, "tool_results", None),
+                }
+
+            trace_json = json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+        except Exception:
+            trace_json = str(trace)
+        self.inspection_display.setText(trace_json)

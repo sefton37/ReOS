@@ -23,6 +23,7 @@ class Settings:
     host: str = os.environ.get("REOS_HOST", "127.0.0.1")
     port: int = int(os.environ.get("REOS_PORT", "8010"))
     ollama_url: str = os.environ.get("REOS_OLLAMA_URL", "http://127.0.0.1:11434")
+    ollama_model: str | None = os.environ.get("REOS_OLLAMA_MODEL")
 
     # Git companion: which repo ReOS should observe.
     # If unset, ReOS will fall back to the workspace root if it's a git repo.
