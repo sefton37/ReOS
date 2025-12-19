@@ -117,6 +117,60 @@ def _handle_tool_call(db: Database, *, name: str, arguments: dict[str, Any] | No
         raise McpError(code=code, message=exc.message, data=exc.data) from exc
 
 
+def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any] | None:
+    """Handle a single JSON-RPC request.
+
+    Returns a JSON-RPC response object, or None for notifications / ignored input.
+    """
+
+    method = req.get("method")
+    req_id = req.get("id")
+    params = req.get("params")
+
+    try:
+        if method == "initialize":
+            result = {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "reos-mcp", "version": "0.1.0"},
+            }
+            return _jsonrpc_result(req_id=req_id, result=result)
+
+        # Notifications can omit id; ignore.
+        if req_id is None:
+            return None
+
+        if method == "tools/list":
+            return _jsonrpc_result(req_id=req_id, result=_tool_list_response())
+
+        if method == "tools/call":
+            if not isinstance(params, dict):
+                raise McpError(code=-32602, message="params must be an object")
+            name = params.get("name")
+            arguments = params.get("arguments")
+            if not isinstance(name, str) or not name:
+                raise McpError(code=-32602, message="name is required")
+            if arguments is not None and not isinstance(arguments, dict):
+                raise McpError(code=-32602, message="arguments must be an object")
+
+            result = _handle_tool_call(db, name=name, arguments=arguments)
+            return _jsonrpc_result(req_id=req_id, result=result)
+
+        if req_id is None:
+            return None
+        raise McpError(code=-32601, message=f"Method not found: {method}")
+
+    except McpError as exc:
+        return _jsonrpc_error(req_id=req_id, code=exc.code, message=exc.message, data=exc.data)
+    except Exception as exc:  # noqa: BLE001
+        return _jsonrpc_error(
+            req_id=req_id,
+            code=-32099,
+            message="Internal error",
+            data={"error": str(exc)},
+        )
+
+
 def run_stdio_server() -> None:
     """Run an MCP JSON-RPC server over stdio."""
 
@@ -140,55 +194,9 @@ def run_stdio_server() -> None:
         if not isinstance(req, dict):
             continue
 
-        method = req.get("method")
-        req_id = req.get("id")
-        params = req.get("params")
-
-        try:
-            if method == "initialize":
-                result = {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "reos-mcp", "version": "0.1.0"},
-                }
-                _write(_jsonrpc_result(req_id=req_id, result=result))
-                continue
-
-            # Notifications can omit id; ignore.
-            if req_id is None:
-                continue
-
-            if method == "tools/list":
-                _write(_jsonrpc_result(req_id=req_id, result=_tool_list_response()))
-                continue
-
-            if method == "tools/call":
-                if not isinstance(params, dict):
-                    raise McpError(code=-32602, message="params must be an object")
-                name = params.get("name")
-                arguments = params.get("arguments")
-                if not isinstance(name, str) or not name:
-                    raise McpError(code=-32602, message="name is required")
-                if arguments is not None and not isinstance(arguments, dict):
-                    raise McpError(code=-32602, message="arguments must be an object")
-
-                result = _handle_tool_call(db, name=name, arguments=arguments)
-                _write(_jsonrpc_result(req_id=req_id, result=result))
-                continue
-
-            raise McpError(code=-32601, message=f"Method not found: {method}")
-
-        except McpError as exc:
-            _write(_jsonrpc_error(req_id=req_id, code=exc.code, message=exc.message, data=exc.data))
-        except Exception as exc:  # noqa: BLE001
-            _write(
-                _jsonrpc_error(
-                    req_id=req_id,
-                    code=-32099,
-                    message="Internal error",
-                    data={"error": str(exc)},
-                )
-            )
+        resp = _handle_jsonrpc_request(db, req)
+        if resp is not None:
+            _write(resp)
 
 
 __all__ = ["run_stdio_server", "_safe_repo_path"]

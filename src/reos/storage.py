@@ -11,6 +11,10 @@ from .models import Event
 from .settings import settings
 
 
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
 def append_event(event: Event) -> str:
     """Store an event to SQLite; fallback to JSONL for debugging."""
     db = get_db()
@@ -79,7 +83,7 @@ def _maybe_emit_review_trigger(
 
         # Throttle based on most recent triggers in DB.
         cooldown = timedelta(minutes=max(1, settings.review_trigger_cooldown_minutes))
-        now = datetime.now(UTC)
+        now = _utcnow()
         for evt in db.iter_events_recent(limit=200):
             if evt.get("kind") != "review_trigger":
                 continue
@@ -145,7 +149,7 @@ def _maybe_emit_alignment_trigger(
             return
 
         cooldown = timedelta(minutes=max(1, settings.review_trigger_cooldown_minutes))
-        now = datetime.now(UTC)
+        now = _utcnow()
         for evt in db.iter_events_recent(limit=200):
             if evt.get("kind") != "alignment_trigger":
                 continue

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from reos.app import app
 
 
-def test_health_ok() -> None:
+def test_health_ok(isolated_db_singleton) -> None:  # noqa: ANN001
     client = TestClient(app)
     res = client.get("/health")
     assert res.status_code == 200
@@ -14,7 +14,7 @@ def test_health_ok() -> None:
     assert "timestamp" in body
 
 
-def test_ingest_event_and_reflect() -> None:
+def test_ingest_event_and_reflect(isolated_db_singleton) -> None:  # noqa: ANN001
     client = TestClient(app)
 
     res = client.post(

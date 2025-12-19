@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 _RECENT_SIGNATURES: dict[str, datetime] = {}
 
 
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
 def _error_signature(*, operation: str, exc: BaseException) -> str:
     material = f"{operation}|{type(exc).__name__}|{str(exc)}".encode("utf-8", errors="replace")
     return hashlib.sha256(material).hexdigest()
@@ -39,7 +43,7 @@ def record_error(
     """
 
     signature = _error_signature(operation=operation, exc=exc)
-    now = datetime.now(UTC)
+    now = _utcnow()
 
     if dedupe_window_seconds > 0:
         cutoff = now - timedelta(seconds=dedupe_window_seconds)

@@ -46,31 +46,124 @@ def _now_iso() -> str:
 class ProjectsWidget(QWidget):
     """Projects screen for managing `project_charter`."""
 
+    # Keep the SQLite schema as-is (ground truth), but simplify the editor UX.
+    # Hidden fields are stored as empty strings when creating a new charter and
+    # are left untouched on updates.
+
     _OPTIONAL_FIELDS = {"origin_story", "current_state_summary"}
 
-    _REQUIRED_TEXT_FIELDS: list[tuple[str, str]] = [
-        ("project_name", "Project name"),
-        ("project_owner", "Project owner"),
-        ("core_intent", "Core intent"),
-        ("problem_statement", "Problem statement"),
-        ("non_goals", "Non-goals"),
-        ("definition_of_done", "Definition of done"),
-        ("success_signals", "Success signals"),
-        ("failure_conditions", "Failure conditions"),
-        ("sunset_criteria", "Sunset criteria"),
-        ("time_horizon", "Time horizon"),
-        ("energy_profile", "Energy profile"),
-        ("allowed_scope", "Allowed scope"),
-        ("forbidden_scope", "Forbidden scope"),
-        ("primary_values", "Primary values"),
-        ("acceptable_tradeoffs", "Acceptable tradeoffs"),
-        ("unacceptable_tradeoffs", "Unacceptable tradeoffs"),
-        ("attention_budget", "Attention budget"),
-        ("distraction_tolerance", "Distraction tolerance"),
-        ("intervention_style", "Intervention style"),
-        ("origin_story", "Origin story (optional)"),
-        ("current_state_summary", "Current state summary (optional)"),
+    _VISIBLE_FIELDS: list[tuple[str, str, str, bool]] = [
+        (
+            "project_name",
+            "Project name",
+            "Short name, e.g. 'ReOS'.",
+            True,
+        ),
+        (
+            "project_owner",
+            "Project owner",
+            "Who holds the intent + can say 'no'.",
+            True,
+        ),
+        (
+            "core_intent",
+            "Core intent",
+            "Why this exists (one sentence).",
+            True,
+        ),
+        (
+            "problem_statement",
+            "Problem statement",
+            "The pain or gap you're resolving.",
+            True,
+        ),
+        (
+            "non_goals",
+            "Non-goals",
+            "Explicitly out of scope (bullets).",
+            True,
+        ),
+        (
+            "definition_of_done",
+            "Definition of done",
+            "Concrete exit criteria; measurable.",
+            True,
+        ),
+        (
+            "success_signals",
+            "Success signals",
+            "Signals you're on track (bullets).",
+            True,
+        ),
+        (
+            "time_horizon",
+            "Time horizon",
+            "Timebox, e.g. '2 weeks' or 'M1B'.",
+            True,
+        ),
+        (
+            "allowed_scope",
+            "Allowed scope",
+            "What is allowed to change.",
+            True,
+        ),
+        (
+            "forbidden_scope",
+            "Forbidden scope",
+            "Hard boundaries; no exceptions.",
+            True,
+        ),
+        (
+            "primary_values",
+            "Primary values",
+            "Values to optimize for, e.g. 'local-first, transparency'.",
+            True,
+        ),
+        (
+            "attention_budget",
+            "Attention budget",
+            "How much attention this deserves, e.g. '3 hrs/week'.",
+            True,
+        ),
+        (
+            "intervention_style",
+            "Intervention style",
+            "How ReOS should nudge: gentle, direct, quiet, etc.",
+            True,
+        ),
     ]
+
+    _HIDDEN_REQUIRED_DB_FIELDS: set[str] = {
+        # These remain in the DB schema but aren't in the simplified editor.
+        "failure_conditions",
+        "sunset_criteria",
+        "energy_profile",
+        "acceptable_tradeoffs",
+        "unacceptable_tradeoffs",
+        "distraction_tolerance",
+    }
+
+    _ALL_DB_TEXT_FIELDS: set[str] = {
+        "core_intent",
+        "problem_statement",
+        "non_goals",
+        "definition_of_done",
+        "success_signals",
+        "failure_conditions",
+        "sunset_criteria",
+        "time_horizon",
+        "energy_profile",
+        "allowed_scope",
+        "forbidden_scope",
+        "primary_values",
+        "acceptable_tradeoffs",
+        "unacceptable_tradeoffs",
+        "attention_budget",
+        "distraction_tolerance",
+        "intervention_style",
+        "origin_story",
+        "current_state_summary",
+    }
 
     def __init__(self, *, db: Database) -> None:
         super().__init__()
@@ -128,21 +221,34 @@ class ProjectsWidget(QWidget):
         self._text_fields: dict[str, QTextEdit] = {}
         self._line_fields: dict[str, QLineEdit] = {}
 
-        # Project name/owner as single-line.
-        self._line_fields["project_name"] = QLineEdit()
-        form.addRow("Project name", self._line_fields["project_name"])
+        def label_with_help(*, title: str, help_text: str) -> QWidget:
+            w = QWidget()
+            v = QVBoxLayout(w)
+            v.setContentsMargins(0, 0, 0, 0)
+            v.setSpacing(2)
 
-        self._line_fields["project_owner"] = QLineEdit()
-        form.addRow("Project owner", self._line_fields["project_owner"])
+            t = QLabel(title)
+            t.setStyleSheet("font-weight: 600;")
+            v.addWidget(t)
 
-        # Everything else as multi-line text.
-        for field, label in self._REQUIRED_TEXT_FIELDS:
+            h = QLabel(help_text)
+            h.setWordWrap(True)
+            h.setStyleSheet("color: #666; font-size: 11px;")
+            v.addWidget(h)
+            return w
+
+        # Build simplified field set.
+        for field, title, help_text, _required in self._VISIBLE_FIELDS:
             if field in {"project_name", "project_owner"}:
+                box = QLineEdit()
+                self._line_fields[field] = box
+                form.addRow(label_with_help(title=title, help_text=help_text), box)
                 continue
+
             box = QTextEdit()
-            box.setMinimumHeight(60)
+            box.setMinimumHeight(70)
             self._text_fields[field] = box
-            form.addRow(label, box)
+            form.addRow(label_with_help(title=title, help_text=help_text), box)
 
         buttons = QHBoxLayout()
         right.addLayout(buttons)
@@ -240,23 +346,17 @@ class ProjectsWidget(QWidget):
         if not isinstance(choice, RepoChoice):
             return None, "Select a detected repo first."
 
-        record: dict[str, str] = {
-            "repo_id": choice.repo_id,
-            "project_name": self._line_fields["project_name"].text().strip(),
-            "project_owner": self._line_fields["project_owner"].text().strip(),
-        }
+        record: dict[str, str] = {"repo_id": choice.repo_id}
 
-        for field, _label in self._REQUIRED_TEXT_FIELDS:
-            if field in {"project_name", "project_owner"}:
-                continue
-            record[field] = self._text_fields[field].toPlainText().strip()
+        # Collect only visible fields.
+        for field, _title, _help, required in self._VISIBLE_FIELDS:
+            if field in self._line_fields:
+                record[field] = self._line_fields[field].text().strip()
+            else:
+                record[field] = self._text_fields[field].toPlainText().strip()
 
-        # Validate required fields.
-        for key, value in record.items():
-            if key in self._OPTIONAL_FIELDS:
-                continue
-            if not value:
-                return None, f"Missing required field: {key}"
+            if required and not record[field]:
+                return None, f"Missing required field: {field}"
 
         return record, None
 
@@ -269,7 +369,10 @@ class ProjectsWidget(QWidget):
         now = _now_iso()
         if self._selected_project_id is None:
             project_id = str(uuid.uuid4())
-            full = {
+            # On create, we must satisfy the full DB schema. Keep hidden fields
+            # empty by default; users can always extend later if we add an
+            # advanced editor.
+            full: dict[str, str] = {
                 "project_id": project_id,
                 "created_at": now,
                 "last_reaffirmed_at": now,
@@ -277,6 +380,9 @@ class ProjectsWidget(QWidget):
                 "ingested_at": now,
                 **record,
             }
+            for field in self._ALL_DB_TEXT_FIELDS:
+                if field not in full:
+                    full[field] = ""
             self._db.insert_project_charter(record=full)
             self._selected_project_id = project_id
             self._set_status("Project charter created.")
