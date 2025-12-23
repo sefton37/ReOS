@@ -7,6 +7,12 @@ from typing import Any
 from .db import Database
 from .mcp_tools import Tool, ToolError, call_tool, list_tools, render_tool_result
 from .ollama import OllamaClient
+from .re_reasoning import (
+    build_re_context_bundle,
+    re_reasoning_system_prompt,
+    reasoning_breakdown_text,
+    validate_re_output,
+)
 
 
 @dataclass(frozen=True)
@@ -262,4 +268,39 @@ class ChatAgent:
             "TOOL_RESULTS:\n" + json.dumps(tool_dump, indent=2, ensure_ascii=False)
         )
 
-        return ollama.chat_text(system=system, user=user, temperature=temperature, top_p=top_p)
+        active_project_id = self._db.get_active_project_id()
+        bundle = build_re_context_bundle(
+            user_prompt=user_text,
+            active_project_id=active_project_id if isinstance(active_project_id, str) else None,
+            active_project_charter=self._db.get_active_project_charter(),
+            tool_results=tool_results,
+        )
+
+        system_with_re = system + "\n\n" + re_reasoning_system_prompt(bundle)
+
+        draft = ollama.chat_text(system=system_with_re, user=user, temperature=temperature, top_p=top_p)
+        problems = validate_re_output(draft)
+        if not problems:
+            return draft
+
+        # One repair pass to enforce the mandatory structure.
+        repair_user = (
+            "You must rewrite the assistant response to strictly follow the mandatory R/E output structure.\n"
+            "Do not add extra sections; keep it direct; include rubric scores (0-2) for each dimension.\n\n"
+            "ORIGINAL_USER_MESSAGE:\n" + user_text + "\n\n"
+            "TOOL_RESULTS:\n" + json.dumps(tool_dump, indent=2, ensure_ascii=False) + "\n\n"
+            "DRAFT_RESPONSE_TO_REWRITE:\n" + draft
+        )
+
+        repaired = ollama.chat_text(
+            system=system_with_re,
+            user=repair_user,
+            temperature=temperature,
+            top_p=top_p,
+        )
+        problems_2 = validate_re_output(repaired)
+        if not problems_2:
+            return repaired
+
+        # Hard fail: return a deterministic breakdown rather than pretending confidence.
+        return reasoning_breakdown_text(problems=problems_2, bundle=bundle)
