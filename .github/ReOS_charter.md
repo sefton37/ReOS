@@ -318,6 +318,16 @@ No emotional manipulation
 
 ReOS is built on the premise that freedom requires awareness, not control.
 
+Current Implementation Snapshot (Dec 2025)
+
+This section is descriptive (not prescriptive): it captures the current codebase state so expectations stay aligned.
+
+- Python kernel (authoritative): Git observation, SQLite storage, Ollama reasoning.
+- Desktop UI (current, feature-complete): PySide6 app under `src/reos/gui/` (launched via `reos-gui` / `python -m reos.gui`).
+- TypeScript UI migration (in progress): Tauri+Vite scaffold under `apps/reos-tauri/` that spawns `python -m reos.ui_rpc_server` over stdio JSON-RPC.
+	- Current TS capability: chat `chat/respond` + trace rendering.
+	- Not yet migrated: projects/KB editor, settings/personas, event browsing/trigger UX, and full inspection parity.
+
 Closing Principle
 
 ReOS does not exist to make people better workers.

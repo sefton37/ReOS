@@ -10,6 +10,8 @@ __pycache__/
 *.egg-info/
 .eggs/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 dist/
@@ -33,6 +35,19 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Vite / TypeScript
+**/.vite/
+**/dist/
+*.tsbuildinfo
+
+# Rust / Tauri
+**/target/
+**/.tauri/
+
 # Editors
 *.swp
 .idea/
+
+# direnv
+.direnv/
+.envrc

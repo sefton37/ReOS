@@ -16,6 +16,74 @@ fi
 
 repo_root="$(cd "$(dirname "$script_source")" && pwd)"
 
+ui_mode="auto" # auto|pyside|tauri
+
+free_vite_port_if_needed() {
+  local port=1420
+
+  if ! command -v lsof >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local pids
+  pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+
+  local pid
+  for pid in $pids; do
+    local args
+    args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+    if [[ "$args" == *vite* ]] || [[ "$args" == *"node"*"vite"* ]]; then
+      echo "ReOS: Port $port in use by prior dev server (pid $pid); stopping it…" >&2
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+}
+
+can_launch_tauri() {
+  local tauri_dir="$repo_root/apps/reos-tauri"
+
+  if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+    return 1
+  fi
+
+  if [[ ! -d "$tauri_dir" ]]; then
+    return 1
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [[ -f "$HOME/.cargo/env" ]]; then
+    # shellcheck disable=SC1091
+    source "$HOME/.cargo/env"
+  fi
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! command -v rustc >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! command -v pkg-config >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! pkg-config --exists glib-2.0 gio-2.0 >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! pkg-config --exists webkit2gtk-4.1 >/dev/null 2>&1 && ! pkg-config --exists webkit2gtk-4.0 >/dev/null 2>&1; then
+    return 1
+  fi
+
+  return 0
+}
+
 python_bin="$repo_root/.venv/bin/python"
 if [[ ! -x "$python_bin" ]]; then
   echo "ReOS: missing venv interpreter at $python_bin" >&2
@@ -35,12 +103,33 @@ if [[ "${1:-}" == "--mcp" ]]; then
   shift
 fi
 
+if [[ "${1:-}" == "--ui" ]]; then
+  ui_mode="${2:-}"
+  shift 2
+fi
+
+if [[ "${1:-}" == "--tauri" ]]; then
+  ui_mode="tauri"
+  shift
+fi
+
+if [[ "${1:-}" == "--pyside" ]]; then
+  ui_mode="pyside"
+  shift
+fi
+
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   cat <<'EOF'
 Usage:
-  ./reos            # launch ReOS desktop GUI
-  ./reos --service  # launch ReOS local service (FastAPI)
-  ./reos --mcp      # launch ReOS MCP server (stdio)
+  ./reos                       # launch ReOS desktop UI (auto)
+  ./reos --ui tauri            # launch TypeScript/Tauri UI (dev)
+  ./reos --ui pyside           # launch PySide6 UI
+  ./reos --service             # launch ReOS local service (FastAPI)
+  ./reos --mcp                 # launch ReOS MCP server (stdio)
+
+Aliases:
+  ./reos --tauri
+  ./reos --pyside
 
 Notes:
   - Set REOS_REPO_PATH=/path/to/repo to choose which repo to observe.
@@ -54,6 +143,33 @@ if [[ "$mode" == "gui" ]]; then
     echo "ReOS: no GUI display detected (DISPLAY/WAYLAND_DISPLAY is empty)." >&2
     echo "Run the service instead: ./reos --service" >&2
     exit 2
+  fi
+
+  if [[ "$ui_mode" == "tauri" ]]; then
+    if ! can_launch_tauri; then
+      echo "ReOS: cannot launch Tauri UI (missing prerequisites)." >&2
+      echo "Required: npm + Rust toolchain + pkg-config + webkit2gtk, plus apps/reos-tauri." >&2
+      echo "On Ubuntu/Debian, run: $repo_root/install-tauri-deps.sh" >&2
+      exit 4
+    fi
+
+    "$repo_root/scripts/bootstrap.sh" >/dev/null
+    free_vite_port_if_needed
+
+    echo "ReOS: launching TypeScript/Tauri UI (dev)…" >&2
+    cd "$repo_root/apps/reos-tauri"
+    exec npm run tauri:dev
+  fi
+
+  if [[ "$ui_mode" == "auto" ]]; then
+    if can_launch_tauri; then
+      "$repo_root/scripts/bootstrap.sh" >/dev/null
+      free_vite_port_if_needed
+
+      echo "ReOS: launching TypeScript/Tauri UI (dev)…" >&2
+      cd "$repo_root/apps/reos-tauri"
+      exec npm run tauri:dev
+    fi
   fi
 
   # Qt xcb platform plugin depends on libxcb-cursor on many Debian/Ubuntu installs.

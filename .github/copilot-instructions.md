@@ -12,7 +12,7 @@ ReOS is **not** a task manager and **not** a surveillance tool. It is a memory +
 
 ### Current Architecture (Git-First)
 
-**Tech Stack**: Python 3.12, PySide6 (ReOS GUI), FastAPI (optional local event service), Ollama (local LLM), SQLite (local persistence), Git CLI.
+**Tech Stack**: Python 3.12 (local kernel), PySide6 (current ReOS GUI), Tauri+Vite+TypeScript (UI migration in progress), FastAPI (optional local event service), Ollama (local LLM), SQLite (local persistence), Git CLI.
 
 **Key Components**:
 1. **Git Observer** (Primary Observer)
@@ -30,12 +30,17 @@ ReOS is **not** a task manager and **not** a surveillance tool. It is a memory +
    - File: `src/reos/db.py`
 
 4. **Command Registry** (Reasoning About Alignment)
-   - Commands are repo-centric and compare changes against `docs/tech-roadmap.md` + `ReOS_charter.md`.
+   - Commands are repo-centric and compare changes against `docs/tech-roadmap.md` + `.github/ReOS_charter.md`.
    - File: `src/reos/commands.py`
 
 5. **Ollama Layer** (Local LLM)
    - All reasoning local; no cloud calls.
    - File: `src/reos/ollama.py`
+
+6. **TypeScript Desktop Shell (Tauri) — In Progress**
+   - Minimal TS UI scaffold that spawns a Python kernel over stdio JSON-RPC.
+   - Current capability: `chat/respond` + trace rendering (not yet feature parity with PySide6).
+   - Files: `apps/reos-tauri/`, `src/reos/ui_rpc_server.py`
 
 ### Design Principles
 
@@ -50,7 +55,7 @@ ReOS is **not** a task manager and **not** a surveillance tool. It is a memory +
 ### When Working on ReOS Code
 
 **Before Writing Code**:
-1. Check the charter ([ReOS_charter.md](../ReOS_charter.md)) — does this serve "protect, reflect, return attention"?
+1. Check the charter ([.github/ReOS_charter.md](ReOS_charter.md)) — does this serve "protect, reflect, return attention"?
 2. Ask: "Does this strengthen the Git-first + ReOS bifocal system, or create distraction?"
 3. If adding data collection: "Is this metadata-only? Does user consent?"
 4. If adding UI/language: "Is this compassionate, non-prescriptive, non-judgmental?"
@@ -145,6 +150,11 @@ Result: Your editor stays primary; ReOS stays a quiet companion that helps you r
 python -m reos.gui          # Launch app
 reos-gui                     # (same, via script entry)
 
+# TypeScript Desktop App (Tauri) — migration in progress
+cd apps/reos-tauri
+npm install
+npm run tauri:dev
+
 # FastAPI Service (feeds events into SQLite)
 python -m reos.app          # Runs on http://127.0.0.1:8010
 
@@ -168,7 +178,10 @@ mypy src/ --ignore-missing-imports  # Type checking
 | `src/reos/app.py` | FastAPI service (event ingestion) | Core |
 | `tests/test_db.py` | SQLite tests | Tests |
 | `docs/tech-roadmap.md` | Architecture & milestones | Planning |
-| `ReOS_charter.md` | Core values & principles | Vision |
+| `.github/ReOS_charter.md` | Core values & principles | Vision |
+| `docs/ui-migration-typescript.md` | UI migration plan + contracts | Planning |
+| `src/reos/ui_rpc_server.py` | UI JSON-RPC kernel for Tauri | Core |
+| `apps/reos-tauri/` | TypeScript/Tauri desktop shell | GUI |
 
 ### Before You Ask for Help
 
@@ -182,4 +195,4 @@ mypy src/ --ignore-missing-imports  # Type checking
 
 If the latter, you're off-vision. Attention is labor and sacred. We protect it, reflect it; we don't optimize it.
 
-When in doubt, re-read [ReOS_charter.md](../ReOS_charter.md) and ask for clarification before proceeding.
+When in doubt, re-read [.github/ReOS_charter.md](ReOS_charter.md) and ask for clarification before proceeding.
