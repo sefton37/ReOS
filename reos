@@ -155,6 +155,15 @@ if [[ "$mode" == "gui" ]]; then
     exit 4
   fi
 
+  # Debug fingerprint: makes it obvious which frontend sources this launcher is running.
+  if command -v sha256sum >/dev/null 2>&1; then
+    main_ts_sha="$(sha256sum "$repo_root/apps/reos-tauri/src/main.ts" 2>/dev/null | awk '{print $1}' || true)"
+    css_sha="$(sha256sum "$repo_root/apps/reos-tauri/src/style.css" 2>/dev/null | awk '{print $1}' || true)"
+    if [[ -n "$main_ts_sha" && -n "$css_sha" ]]; then
+      echo "ReOS: UI fingerprint main.ts=$main_ts_sha style.css=$css_sha" >&2
+    fi
+  fi
+
   "$repo_root/scripts/bootstrap.sh" >/dev/null
   free_vite_port_if_needed
 

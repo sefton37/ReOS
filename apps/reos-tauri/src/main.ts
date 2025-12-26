@@ -397,6 +397,12 @@ function buildUi() {
     // Immediately show an empty ReOS bubble with a thinking animation.
     const pending = appendThinking();
 
+    // Ensure the browser paints the new bubbles before we start the kernel RPC.
+    // Note: `requestAnimationFrame` alone can resume into a microtask that still
+    // runs before paint, so we also yield a macrotask.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
     try {
       const res = (await kernelRequest('chat/respond', { text })) as ChatRespondResult;
       pending.bubble.classList.remove('thinking');

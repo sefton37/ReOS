@@ -28,7 +28,7 @@ The PySide6 UI previously lived under `src/reos/gui/`, and has now been removed.
     - `Database` (`get_db()`)
     - `ChatAgent` (local Ollama tool-using agent)
     - Timers:
-      - Every 30s: `poll_git_repo()` and then checks DB for `alignment_trigger` events
+      - Every 30s: `poll_git_repo()` and then checks DB for checkpoint/review events
       - Commit review background thread (if enabled by settings)
   - Shows:
     - Chat conversation
@@ -61,9 +61,8 @@ The PySide6 UI previously lived under `src/reos/gui/`, and has now been removed.
   - Polls git metadata (`status`, `diff --stat`) and inserts a `git_poll` event.
 
 - `src/reos/storage.py`:
-  - `append_event()` inserts to SQLite and may emit:
-    - `alignment_trigger` (metadata-only heuristic)
-    - `review_trigger` (context budget heuristic) — present but currently not called in `append_event()`
+  - `append_event()` inserts to SQLite.
+  - `review_trigger` (context budget heuristic) can be emitted by trigger logic.
 
 ### Tool boundary (already close to UI-ready)
 - `src/reos/mcp_tools.py` + `src/reos/mcp_server.py`:
@@ -141,7 +140,7 @@ The PySide6 UI currently depends on:
 
 3. **Repo status + triggers**
    - Periodic git summary
-   - Recent events, including `alignment_trigger` and `commit_review`
+  - Recent events, including `review_trigger` and `commit_review`
 
 4. **Projects/KB**
    - List projects, browse KB file tree, edit a markdown page

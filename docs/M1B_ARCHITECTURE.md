@@ -9,12 +9,9 @@ M1b pivots ReOS to be a companion to **Git**, not a companion to a specific edit
   - `git diff --stat`
   - `git diff --numstat`
 - Stores `git_poll` events in SQLite.
-- Runs alignment heuristics that ask two questions:
-  1) **Drift**: do current changes map to `docs/tech-roadmap.md` and `ReOS_charter.md`?
-  2) **Threads**: are changes spread across too many areas/files (multiple threads)?
+- Uses alignment analysis on-demand (e.g., during reviews) rather than emitting automatic drift/thread checkpoint events.
 - Emits throttled checkpoint events:
   - `review_trigger` (context budget pressure)
-  - `alignment_trigger` (drift/thread breadth signals)
 
 ## Data Boundaries
 

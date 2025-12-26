@@ -145,12 +145,34 @@ def _handle_persona_set_active(db: Database, *, persona_id: str | None) -> dict[
 
 
 def _handle_projects_list(db: Database) -> dict[str, Any]:
-    # We intentionally treat projects as filesystem-backed first.
+    # Projects have two sources of truth today:
+    # - Filesystem-backed project folders under `projects/<id>/...`
+    # - SQLite-backed project_charter rows used by the agent/tooling
+    #
+    # If we only list filesystem projects, the UI can show an empty Projects
+    # section while the DB still has an active_project_id, which feels like a
+    # disconnect. So we return the union.
     from .projects_fs import list_project_ids
 
+    project_ids: set[str] = set(list_project_ids())
+
+    for row in db.iter_project_charters():
+        pid = row.get("project_id")
+        if isinstance(pid, str) and pid:
+            project_ids.add(pid)
+
+    active_project_id = db.get_active_project_id()
+    if isinstance(active_project_id, str) and active_project_id:
+        # Strict behavior: an active project must actually exist.
+        # If it doesn't exist in either the filesystem-backed project list or
+        # the SQLite-backed charter list, clear it.
+        if active_project_id not in project_ids:
+            db.set_active_project_id(project_id=None)
+            active_project_id = None
+
     return {
-        "projects": list_project_ids(),
-        "active_project_id": db.get_active_project_id(),
+        "projects": sorted(project_ids),
+        "active_project_id": active_project_id,
     }
 
 

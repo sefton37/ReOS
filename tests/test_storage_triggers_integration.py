@@ -20,8 +20,7 @@ def test_append_event_does_not_emit_triggers_for_single_file_change(
 ) -> None:
     repo = temp_git_repo
 
-    # Create a big change in a single file so alignment_trigger won't fire (file_count=1),
-    # but context budget can.
+    # Create a big change in a single file.
     big = repo / "src" / "reos" / "example.py"
     big.write_text(big.read_text(encoding="utf-8") + ("\n".join(["x = 1"] * 200) + "\n"), encoding="utf-8")
 

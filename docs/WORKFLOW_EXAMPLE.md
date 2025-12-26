@@ -94,9 +94,9 @@ Signals include:
 
 ### Phase 3: ReOS surfaces a gentle checkpoint
 
-When thresholds are crossed (with cooldown), ReOS emits an `alignment_trigger` event and the GUI displays a short prompt:
+When thresholds are crossed (with cooldown), ReOS can emit a `review_trigger` event (context-budget heuristic) and the GUI can display a short prompt:
 
-- “Quick checkpoint: your current changes may be opening multiple threads or drifting from the roadmap/charter. Want to run `review_alignment`?”
+- “Quick checkpoint: your current changes may be getting large. Want to run an alignment review?”
 
 ### Phase 4: Deeper review (LLM cites code changes)
 

@@ -74,6 +74,10 @@ body,
 	min-width: 64px;
 }
 
+.chat-bubble.reos.thinking {
+	animation: reos-thinking 1.35s infinite ease-in-out;
+}
+
 .typing-dots {
 	display: inline-flex;
 	gap: 6px;
@@ -107,6 +111,18 @@ body,
 	50% {
 		transform: translateY(-2px);
 		opacity: 0.95;
+	}
+}
+
+@keyframes reos-thinking {
+	0%,
+	100% {
+		transform: translateY(0);
+		opacity: 0.92;
+	}
+	50% {
+		transform: translateY(-1px);
+		opacity: 1;
 	}
 }
 

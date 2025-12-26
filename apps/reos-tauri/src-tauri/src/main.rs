@@ -4,11 +4,11 @@ mod kernel;
 
 use kernel::{KernelError, KernelProcess};
 use serde_json::Value;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tauri::State;
 
-struct KernelState(Mutex<Option<KernelProcess>>);
+struct KernelState(Arc<Mutex<Option<KernelProcess>>>);
 
 #[tauri::command]
 fn kernel_start(state: State<'_, KernelState>) -> Result<(), String> {
@@ -22,20 +22,29 @@ fn kernel_start(state: State<'_, KernelState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn kernel_request(state: State<'_, KernelState>, method: String, params: Value) -> Result<Value, String> {
-    let mut guard = state.0.lock().map_err(|_| "lock poisoned".to_string())?;
-    if guard.is_none() {
-        let proc = KernelProcess::start().map_err(|e| e.to_string())?;
-        *guard = Some(proc);
-    }
+async fn kernel_request(state: State<'_, KernelState>, method: String, params: Value) -> Result<Value, String> {
+    // IMPORTANT: The Python RPC is blocking I/O (stdin/stdout). If we do it on
+    // Tauri's main thread, the WebView can miss paints, which feels like UI lag.
+    // Offload to a background thread so the user message + thinking bubble
+    // render immediately.
+    let state = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut guard = state.lock().map_err(|_| "lock poisoned".to_string())?;
+        if guard.is_none() {
+            let proc = KernelProcess::start().map_err(|e| e.to_string())?;
+            *guard = Some(proc);
+        }
 
-    let proc = guard.as_mut().ok_or_else(|| KernelError::NotStarted.to_string())?;
-    proc.request(&method, params).map_err(|e| e.to_string())
+        let proc = guard.as_mut().ok_or_else(|| KernelError::NotStarted.to_string())?;
+        proc.request(&method, params).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("kernel_request join error: {e}"))?
 }
 
 fn main() {
     tauri::Builder::default()
-        .manage(KernelState(Mutex::new(None)))
+    .manage(KernelState(Arc::new(Mutex::new(None))))
         .invoke_handler(tauri::generate_handler![kernel_start, kernel_request])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
