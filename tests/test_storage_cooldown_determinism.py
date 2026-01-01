@@ -25,9 +25,14 @@ def test_alignment_trigger_is_never_emitted(
         p.write_text(f"# unmapped {i}\n", encoding="utf-8")
         paths.append(p)
 
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True, text=True)
     subprocess.run(
-        ["git", "-C", str(repo), "commit", "-m", "add unmapped files"],
+        ["git", "-C", str(repo), "add", "-A"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "commit.gpgsign=false", "commit", "-m", "add unmapped files"],
         check=True,
         capture_output=True,
         text=True,

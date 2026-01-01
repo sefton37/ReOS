@@ -30,7 +30,7 @@ def isolated_db_singleton(tmp_path: Path) -> Iterator[Path]:
 
 def run_git(repo: Path, args: list[str]) -> str:
     completed = subprocess.run(
-        ["git", "-C", str(repo), *args],
+        ["git", "-C", str(repo), "-c", "commit.gpgsign=false", *args],
         check=True,
         capture_output=True,
         text=True,
