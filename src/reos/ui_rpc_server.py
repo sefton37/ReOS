@@ -24,6 +24,16 @@ from typing import Any
 from .agent import ChatAgent
 from .db import Database, get_db
 from .mcp_tools import ToolError, call_tool, list_tools
+from .user import (
+    AuthenticationError,
+    RecoveryError,
+    SessionError,
+    UserError,
+    UserExistsError,
+    UserNotFoundError,
+    UserService,
+    get_user_service,
+)
 from .play_fs import create_act as play_create_act
 from .play_fs import create_beat as play_create_beat
 from .play_fs import create_scene as play_create_scene
@@ -481,6 +491,230 @@ def _handle_play_kb_write_apply(
     return {"path": path, **res}
 
 
+# ============================================================================
+# User Presence Handlers
+# ============================================================================
+
+
+def _handle_user_status(db: Database) -> dict[str, Any]:
+    """Check if a user exists and if there's an active session."""
+    svc = get_user_service(db)
+    has_user = svc.has_user()
+    current_user_id = svc.get_current_user_id()
+    session = svc.get_session()
+
+    return {
+        "has_user": has_user,
+        "current_user_id": current_user_id,
+        "has_session": session is not None,
+        "session_user_id": session.user_id if session else None,
+    }
+
+
+def _handle_user_register(
+    db: Database,
+    *,
+    display_name: str,
+    password: str,
+    short_bio: str = "",
+) -> dict[str, Any]:
+    """Register a new user account."""
+    svc = get_user_service(db)
+    try:
+        result = svc.register(
+            display_name=display_name,
+            password=password,
+            short_bio=short_bio,
+        )
+        return {
+            "user_id": result.user_id,
+            "display_name": result.display_name,
+            "session_id": result.session_id,
+            "recovery_phrase": result.recovery_phrase,
+        }
+    except UserExistsError as exc:
+        raise RpcError(code=-32010, message=exc.message) from exc
+    except UserError as exc:
+        raise RpcError(code=-32011, message=exc.message) from exc
+
+
+def _handle_user_authenticate(db: Database, *, password: str) -> dict[str, Any]:
+    """Authenticate with password."""
+    svc = get_user_service(db)
+    try:
+        result = svc.authenticate(password=password)
+        return {
+            "user_id": result.user_id,
+            "display_name": result.display_name,
+            "session_id": result.session_id,
+        }
+    except UserNotFoundError as exc:
+        raise RpcError(code=-32012, message=exc.message) from exc
+    except AuthenticationError as exc:
+        raise RpcError(code=-32013, message=exc.message) from exc
+
+
+def _handle_user_logout(db: Database) -> dict[str, Any]:
+    """Logout and invalidate session."""
+    svc = get_user_service(db)
+    svc.logout()
+    return {"ok": True}
+
+
+def _handle_user_card(db: Database) -> dict[str, Any]:
+    """Get the current user's card with profile and bio."""
+    svc = get_user_service(db)
+    try:
+        card = svc.get_user_card()
+        return {
+            "profile": {
+                "user_id": card.profile.user_id,
+                "display_name": card.profile.display_name,
+                "created_at": card.profile.created_at.isoformat(),
+                "updated_at": card.profile.updated_at.isoformat(),
+            },
+            "bio": {
+                "short_bio": card.bio.short_bio,
+                "full_bio": card.bio.full_bio,
+                "skills": card.bio.skills,
+                "interests": card.bio.interests,
+                "goals": card.bio.goals,
+                "context": card.bio.context,
+            },
+            "has_recovery_phrase": card.has_recovery_phrase,
+            "encryption_enabled": card.encryption_enabled,
+        }
+    except SessionError as exc:
+        raise RpcError(code=-32014, message=exc.message) from exc
+    except UserNotFoundError as exc:
+        raise RpcError(code=-32012, message=exc.message) from exc
+
+
+def _handle_user_update_profile(
+    db: Database,
+    *,
+    display_name: str | None = None,
+    short_bio: str | None = None,
+    full_bio: str | None = None,
+    skills: list[str] | None = None,
+    interests: list[str] | None = None,
+    goals: str | None = None,
+    context: str | None = None,
+) -> dict[str, Any]:
+    """Update user profile and bio."""
+    svc = get_user_service(db)
+    try:
+        card = svc.update_profile(
+            display_name=display_name,
+            short_bio=short_bio,
+            full_bio=full_bio,
+            skills=skills,
+            interests=interests,
+            goals=goals,
+            context=context,
+        )
+        return {
+            "profile": {
+                "user_id": card.profile.user_id,
+                "display_name": card.profile.display_name,
+                "created_at": card.profile.created_at.isoformat(),
+                "updated_at": card.profile.updated_at.isoformat(),
+            },
+            "bio": {
+                "short_bio": card.bio.short_bio,
+                "full_bio": card.bio.full_bio,
+                "skills": card.bio.skills,
+                "interests": card.bio.interests,
+                "goals": card.bio.goals,
+                "context": card.bio.context,
+            },
+            "has_recovery_phrase": card.has_recovery_phrase,
+            "encryption_enabled": card.encryption_enabled,
+        }
+    except SessionError as exc:
+        raise RpcError(code=-32014, message=exc.message) from exc
+    except UserError as exc:
+        raise RpcError(code=-32011, message=exc.message) from exc
+
+
+def _handle_user_change_password(
+    db: Database,
+    *,
+    current_password: str,
+    new_password: str,
+) -> dict[str, Any]:
+    """Change password and re-encrypt data."""
+    svc = get_user_service(db)
+    try:
+        result = svc.change_password(
+            current_password=current_password,
+            new_password=new_password,
+        )
+        return {
+            "user_id": result.user_id,
+            "display_name": result.display_name,
+            "session_id": result.session_id,
+        }
+    except AuthenticationError as exc:
+        raise RpcError(code=-32013, message=exc.message) from exc
+    except SessionError as exc:
+        raise RpcError(code=-32014, message=exc.message) from exc
+    except UserError as exc:
+        raise RpcError(code=-32011, message=exc.message) from exc
+
+
+def _handle_user_recover(
+    db: Database,
+    *,
+    recovery_phrase: str,
+    new_password: str,
+) -> dict[str, Any]:
+    """Recover account using recovery phrase."""
+    svc = get_user_service(db)
+    try:
+        result = svc.recover_account(
+            recovery_phrase=recovery_phrase,
+            new_password=new_password,
+        )
+        return {
+            "user_id": result.user_id,
+            "display_name": result.display_name,
+            "session_id": result.session_id,
+            "warning": "Your bio data has been reset because it was encrypted with your old password.",
+        }
+    except RecoveryError as exc:
+        raise RpcError(code=-32015, message=exc.message) from exc
+    except UserNotFoundError as exc:
+        raise RpcError(code=-32012, message=exc.message) from exc
+    except UserError as exc:
+        raise RpcError(code=-32011, message=exc.message) from exc
+
+
+def _handle_user_generate_recovery(db: Database) -> dict[str, Any]:
+    """Generate a new recovery phrase."""
+    svc = get_user_service(db)
+    try:
+        recovery_phrase = svc.generate_new_recovery_phrase()
+        return {
+            "recovery_phrase": recovery_phrase,
+            "warning": "Store this phrase securely. It replaces any previous recovery phrase.",
+        }
+    except SessionError as exc:
+        raise RpcError(code=-32014, message=exc.message) from exc
+
+
+def _handle_user_delete(db: Database, *, password: str) -> dict[str, Any]:
+    """Delete user account permanently."""
+    svc = get_user_service(db)
+    try:
+        svc.delete_account(password=password)
+        return {"ok": True, "message": "Account deleted permanently."}
+    except AuthenticationError as exc:
+        raise RpcError(code=-32013, message=exc.message) from exc
+    except SessionError as exc:
+        raise RpcError(code=-32014, message=exc.message) from exc
+
+
 def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any] | None:
     method = req.get("method")
     req_id = req.get("id")
@@ -863,6 +1097,146 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                     text=text,
                     expected_sha256_current=expected_sha256_current,
                 ),
+            )
+
+        # ====================================================================
+        # User Presence Methods
+        # ====================================================================
+
+        if method == "user/status":
+            return _jsonrpc_result(req_id=req_id, result=_handle_user_status(db))
+
+        if method == "user/register":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            display_name = params.get("display_name")
+            password = params.get("password")
+            short_bio = params.get("short_bio", "")
+            if not isinstance(display_name, str) or not display_name.strip():
+                raise RpcError(code=-32602, message="display_name is required")
+            if not isinstance(password, str) or not password:
+                raise RpcError(code=-32602, message="password is required")
+            if short_bio is not None and not isinstance(short_bio, str):
+                raise RpcError(code=-32602, message="short_bio must be a string")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_user_register(
+                    db,
+                    display_name=display_name,
+                    password=password,
+                    short_bio=short_bio or "",
+                ),
+            )
+
+        if method == "user/authenticate":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            password = params.get("password")
+            if not isinstance(password, str) or not password:
+                raise RpcError(code=-32602, message="password is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_user_authenticate(db, password=password),
+            )
+
+        if method == "user/logout":
+            return _jsonrpc_result(req_id=req_id, result=_handle_user_logout(db))
+
+        if method == "user/card":
+            return _jsonrpc_result(req_id=req_id, result=_handle_user_card(db))
+
+        if method == "user/update_profile":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            display_name = params.get("display_name")
+            short_bio = params.get("short_bio")
+            full_bio = params.get("full_bio")
+            skills = params.get("skills")
+            interests = params.get("interests")
+            goals = params.get("goals")
+            context = params.get("context")
+            # Validate string fields
+            for k, v in {
+                "display_name": display_name,
+                "short_bio": short_bio,
+                "full_bio": full_bio,
+                "goals": goals,
+                "context": context,
+            }.items():
+                if v is not None and not isinstance(v, str):
+                    raise RpcError(code=-32602, message=f"{k} must be a string or null")
+            # Validate list fields
+            for k, v in {"skills": skills, "interests": interests}.items():
+                if v is not None:
+                    if not isinstance(v, list):
+                        raise RpcError(code=-32602, message=f"{k} must be a list or null")
+                    if not all(isinstance(item, str) for item in v):
+                        raise RpcError(code=-32602, message=f"{k} must be a list of strings")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_user_update_profile(
+                    db,
+                    display_name=display_name,
+                    short_bio=short_bio,
+                    full_bio=full_bio,
+                    skills=skills,
+                    interests=interests,
+                    goals=goals,
+                    context=context,
+                ),
+            )
+
+        if method == "user/change_password":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            current_password = params.get("current_password")
+            new_password = params.get("new_password")
+            if not isinstance(current_password, str) or not current_password:
+                raise RpcError(code=-32602, message="current_password is required")
+            if not isinstance(new_password, str) or not new_password:
+                raise RpcError(code=-32602, message="new_password is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_user_change_password(
+                    db,
+                    current_password=current_password,
+                    new_password=new_password,
+                ),
+            )
+
+        if method == "user/recover":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            recovery_phrase = params.get("recovery_phrase")
+            new_password = params.get("new_password")
+            if not isinstance(recovery_phrase, str) or not recovery_phrase:
+                raise RpcError(code=-32602, message="recovery_phrase is required")
+            if not isinstance(new_password, str) or not new_password:
+                raise RpcError(code=-32602, message="new_password is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_user_recover(
+                    db,
+                    recovery_phrase=recovery_phrase,
+                    new_password=new_password,
+                ),
+            )
+
+        if method == "user/generate_recovery":
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_user_generate_recovery(db),
+            )
+
+        if method == "user/delete":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            password = params.get("password")
+            if not isinstance(password, str) or not password:
+                raise RpcError(code=-32602, message="password is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_user_delete(db, password=password),
             )
 
         raise RpcError(code=-32601, message=f"Method not found: {method}")

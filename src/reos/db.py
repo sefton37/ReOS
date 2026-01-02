@@ -27,6 +27,8 @@ class Database:
             check_same_thread=False,
         )
         conn.row_factory = sqlite3.Row
+        # Enable foreign key constraints for cascading deletes
+        conn.execute("PRAGMA foreign_keys = ON")
         self._local.conn = conn
         return conn
 
@@ -154,6 +156,82 @@ class Database:
                 ingested_at TEXT NOT NULL
             )
             """
+        )
+
+        # ========================================================================
+        # User Presence Tables
+        # ========================================================================
+
+        # Users table: core user identity (unencrypted metadata)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+
+        # User credentials: password hash and key derivation salt
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_credentials (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                key_salt TEXT NOT NULL,
+                recovery_phrase_hash TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        # User encrypted data: bio and other sensitive info (encrypted at rest)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_encrypted_data (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                data_type TEXT NOT NULL,
+                encrypted_data TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, data_type)
+            )
+            """
+        )
+
+        # User sessions: active authentication sessions
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                is_valid INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        # Create indexes for performance
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_credentials_user_id ON user_credentials(user_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_encrypted_data_user_id ON user_encrypted_data(user_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at ON user_sessions(expires_at)"
         )
 
         conn.commit()
@@ -376,6 +454,223 @@ class Database:
             (session_id,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    # ========================================================================
+    # User Presence Methods
+    # ========================================================================
+
+    def create_user(
+        self,
+        *,
+        user_id: str,
+        display_name: str,
+    ) -> None:
+        """Create a new user record."""
+        now = datetime.now(UTC).isoformat()
+        self._execute(
+            """
+            INSERT INTO users (id, display_name, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, display_name, now, now),
+        )
+        self.connect().commit()
+
+    def get_user(self, *, user_id: str) -> dict[str, object] | None:
+        """Get a user by ID."""
+        row = self._execute(
+            "SELECT * FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def get_user_by_display_name(self, *, display_name: str) -> dict[str, object] | None:
+        """Get a user by display name (case-insensitive)."""
+        row = self._execute(
+            "SELECT * FROM users WHERE LOWER(display_name) = LOWER(?)",
+            (display_name,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def update_user(
+        self,
+        *,
+        user_id: str,
+        display_name: str | None = None,
+    ) -> None:
+        """Update user metadata."""
+        now = datetime.now(UTC).isoformat()
+        if display_name is not None:
+            self._execute(
+                """
+                UPDATE users SET display_name = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (display_name, now, user_id),
+            )
+        self.connect().commit()
+
+    def iter_users(self) -> list[dict[str, object]]:
+        """List all users."""
+        rows = self._execute(
+            "SELECT * FROM users ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def count_users(self) -> int:
+        """Count total users."""
+        row = self._execute("SELECT COUNT(*) FROM users").fetchone()
+        return int(row[0]) if row else 0
+
+    def create_user_credentials(
+        self,
+        *,
+        credential_id: str,
+        user_id: str,
+        password_hash: str,
+        key_salt: str,
+        recovery_phrase_hash: str | None = None,
+    ) -> None:
+        """Create user credentials."""
+        now = datetime.now(UTC).isoformat()
+        self._execute(
+            """
+            INSERT INTO user_credentials
+            (id, user_id, password_hash, key_salt, recovery_phrase_hash, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (credential_id, user_id, password_hash, key_salt, recovery_phrase_hash, now, now),
+        )
+        self.connect().commit()
+
+    def get_user_credentials(self, *, user_id: str) -> dict[str, object] | None:
+        """Get credentials for a user."""
+        row = self._execute(
+            "SELECT * FROM user_credentials WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def update_user_credentials(
+        self,
+        *,
+        user_id: str,
+        password_hash: str | None = None,
+        recovery_phrase_hash: str | None = None,
+    ) -> None:
+        """Update user credentials."""
+        now = datetime.now(UTC).isoformat()
+        if password_hash is not None:
+            self._execute(
+                """
+                UPDATE user_credentials SET password_hash = ?, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (password_hash, now, user_id),
+            )
+        if recovery_phrase_hash is not None:
+            self._execute(
+                """
+                UPDATE user_credentials SET recovery_phrase_hash = ?, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (recovery_phrase_hash, now, user_id),
+            )
+        self.connect().commit()
+
+    def upsert_user_encrypted_data(
+        self,
+        *,
+        data_id: str,
+        user_id: str,
+        data_type: str,
+        encrypted_data: str,
+    ) -> None:
+        """Insert or update encrypted user data."""
+        now = datetime.now(UTC).isoformat()
+        self._execute(
+            """
+            INSERT INTO user_encrypted_data
+            (id, user_id, data_type, encrypted_data, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, data_type) DO UPDATE SET
+                encrypted_data = excluded.encrypted_data,
+                updated_at = excluded.updated_at
+            """,
+            (data_id, user_id, data_type, encrypted_data, now, now),
+        )
+        self.connect().commit()
+
+    def get_user_encrypted_data(
+        self,
+        *,
+        user_id: str,
+        data_type: str,
+    ) -> dict[str, object] | None:
+        """Get encrypted data for a user by type."""
+        row = self._execute(
+            "SELECT * FROM user_encrypted_data WHERE user_id = ? AND data_type = ?",
+            (user_id, data_type),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def create_user_session(
+        self,
+        *,
+        session_id: str,
+        user_id: str,
+        expires_at: str,
+    ) -> None:
+        """Create a new user session."""
+        now = datetime.now(UTC).isoformat()
+        self._execute(
+            """
+            INSERT INTO user_sessions (id, user_id, created_at, expires_at, is_valid)
+            VALUES (?, ?, ?, ?, 1)
+            """,
+            (session_id, user_id, now, expires_at),
+        )
+        self.connect().commit()
+
+    def get_user_session(self, *, session_id: str) -> dict[str, object] | None:
+        """Get a session by ID."""
+        row = self._execute(
+            "SELECT * FROM user_sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def invalidate_user_session(self, *, session_id: str) -> None:
+        """Invalidate a session."""
+        self._execute(
+            "UPDATE user_sessions SET is_valid = 0 WHERE id = ?",
+            (session_id,),
+        )
+        self.connect().commit()
+
+    def invalidate_all_user_sessions(self, *, user_id: str) -> None:
+        """Invalidate all sessions for a user."""
+        self._execute(
+            "UPDATE user_sessions SET is_valid = 0 WHERE user_id = ?",
+            (user_id,),
+        )
+        self.connect().commit()
+
+    def cleanup_expired_sessions(self) -> int:
+        """Remove expired sessions. Returns count of deleted sessions."""
+        now = datetime.now(UTC).isoformat()
+        cursor = self._execute(
+            "DELETE FROM user_sessions WHERE expires_at < ? OR is_valid = 0",
+            (now,),
+        )
+        self.connect().commit()
+        return cursor.rowcount
+
+    def delete_user(self, *, user_id: str) -> None:
+        """Delete a user and all associated data (cascades)."""
+        # SQLite foreign key cascades handle the rest
+        self._execute("DELETE FROM users WHERE id = ?", (user_id,))
+        self.connect().commit()
 
 
 _db_instance: Database | None = None
