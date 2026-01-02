@@ -127,6 +127,10 @@ function buildLoginScreen(onLogin: () => void) {
   const screen = el('div');
   screen.className = 'login-screen';
 
+  // Top section (above center): ASCII art + tagline
+  const top = el('div');
+  top.className = 'login-top';
+
   // ASCII Art Title
   const ascii = el('pre');
   ascii.className = 'login-ascii';
@@ -137,10 +141,17 @@ function buildLoginScreen(onLogin: () => void) {
   tagline.className = 'login-tagline';
   tagline.textContent = 'attention is labor';
 
-  // Byline
+  top.appendChild(ascii);
+  top.appendChild(tagline);
+
+  // Byline - positioned at exact center of screen
   const byline = el('div');
   byline.className = 'login-byline';
   byline.textContent = 'Talking Rock';
+
+  // Bottom section (below center): Login card
+  const bottom = el('div');
+  bottom.className = 'login-bottom';
 
   // Login Card
   const card = el('div');
@@ -192,10 +203,11 @@ function buildLoginScreen(onLogin: () => void) {
   card.appendChild(recovery);
   card.appendChild(errorMsg);
 
-  screen.appendChild(ascii);
-  screen.appendChild(tagline);
+  bottom.appendChild(card);
+
+  screen.appendChild(top);
   screen.appendChild(byline);
-  screen.appendChild(card);
+  screen.appendChild(bottom);
 
   root.appendChild(screen);
 

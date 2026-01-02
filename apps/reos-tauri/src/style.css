@@ -164,13 +164,22 @@ body,
 
 /* Login Screen */
 .login-screen {
+	position: relative;
+	min-height: 100vh;
+	width: 100%;
+	background: linear-gradient(135deg, rgba(17, 24, 39, 0.95) 0%, rgba(31, 41, 55, 0.98) 100%);
+	font-family: system-ui, -apple-system, sans-serif;
+	overflow: hidden;
+}
+
+.login-top {
+	position: absolute;
+	bottom: calc(50% + 8px);
+	left: 50%;
+	transform: translateX(-50%);
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	justify-content: center;
-	min-height: 100vh;
-	background: linear-gradient(135deg, rgba(17, 24, 39, 0.95) 0%, rgba(31, 41, 55, 0.98) 100%);
-	font-family: system-ui, -apple-system, sans-serif;
 }
 
 .login-ascii {
@@ -193,10 +202,20 @@ body,
 }
 
 .login-byline {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
 	font-size: 11px;
 	color: rgba(255, 255, 255, 0.35);
 	letter-spacing: 0.1em;
-	margin-bottom: 48px;
+}
+
+.login-bottom {
+	position: absolute;
+	top: calc(50% + 16px);
+	left: 50%;
+	transform: translateX(-50%);
 }
 
 .login-card {
