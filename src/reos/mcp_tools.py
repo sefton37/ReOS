@@ -323,7 +323,73 @@ def list_tools() -> list[Tool]:
         ),
         Tool(
             name="reos_gpu_summary",
-            description="Get a quick summary of GPU status (availability, utilization, temperature).",
+            description="Get a quick summary of GPU status (availability, utilization, temperature). NVIDIA-specific.",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        # Unified GPU tools (vendor-agnostic)
+        Tool(
+            name="reos_detect_gpus",
+            description="Detect all available GPUs regardless of vendor (NVIDIA, AMD). Returns which GPU types are available.",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="reos_all_gpu_info",
+            description="Get hardware information for all detected GPUs (any vendor: NVIDIA, AMD).",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="reos_all_gpu_usage",
+            description="Get current utilization for all detected GPUs (any vendor: NVIDIA, AMD).",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="reos_all_gpu_summary",
+            description="Get a vendor-agnostic summary of all GPU status. Works with NVIDIA and AMD GPUs.",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        # File structure and drive tools
+        Tool(
+            name="reos_list_directory",
+            description="List directory contents with file statistics (size, permissions, modified time).",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Directory path to list (default: /)"},
+                    "show_hidden": {"type": "boolean", "description": "Include hidden files (default: false)"},
+                    "include_stats": {"type": "boolean", "description": "Include file stats (default: true)"},
+                },
+            },
+        ),
+        Tool(
+            name="reos_directory_tree",
+            description="Get a tree structure of a directory with configurable depth.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Root directory path (default: /)"},
+                    "max_depth": {"type": "integer", "description": "Maximum depth to traverse (default: 2)"},
+                    "show_hidden": {"type": "boolean", "description": "Include hidden files (default: false)"},
+                },
+            },
+        ),
+        Tool(
+            name="reos_block_devices",
+            description="Get information about all block devices (drives, partitions, their types and mount points).",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="reos_drive_info",
+            description="Get detailed information about physical drives including model, size, and partitions.",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="reos_mount_points",
+            description="Get all mount points with usage information (device, filesystem type, size, used, available).",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="reos_filesystem_overview",
+            description="Get a comprehensive overview of filesystem and storage (drives, partitions, mount points, total storage).",
             input_schema={"type": "object", "properties": {}},
         ),
     ]
@@ -821,6 +887,81 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
         from .system_monitor import get_gpu_summary
 
         return get_gpu_summary()
+
+    # Unified GPU tools (vendor-agnostic)
+    if name == "reos_detect_gpus":
+        from .system_monitor import detect_gpus
+
+        return detect_gpus()
+
+    if name == "reos_all_gpu_info":
+        from .system_monitor import get_all_gpu_info
+
+        return get_all_gpu_info()
+
+    if name == "reos_all_gpu_usage":
+        from .system_monitor import get_all_gpu_usage
+
+        return get_all_gpu_usage()
+
+    if name == "reos_all_gpu_summary":
+        from .system_monitor import get_all_gpu_summary
+
+        return get_all_gpu_summary()
+
+    # File structure and drive tools
+    if name == "reos_list_directory":
+        from .system_monitor import SystemMonitorError, list_directory
+
+        path = args.get("path", "/")
+        show_hidden = bool(args.get("show_hidden", False))
+        include_stats = bool(args.get("include_stats", True))
+
+        try:
+            return list_directory(path, show_hidden=show_hidden, include_stats=include_stats)
+        except SystemMonitorError as exc:
+            raise ToolError(code="system_error", message=str(exc)) from exc
+
+    if name == "reos_directory_tree":
+        from .system_monitor import SystemMonitorError, get_directory_tree
+
+        path = args.get("path", "/")
+        max_depth = int(args.get("max_depth", 2))
+        show_hidden = bool(args.get("show_hidden", False))
+
+        try:
+            return get_directory_tree(path, max_depth=max_depth, show_hidden=show_hidden)
+        except SystemMonitorError as exc:
+            raise ToolError(code="system_error", message=str(exc)) from exc
+
+    if name == "reos_block_devices":
+        from .system_monitor import SystemMonitorError, get_block_devices
+
+        try:
+            return get_block_devices()
+        except SystemMonitorError as exc:
+            raise ToolError(code="system_error", message=str(exc)) from exc
+
+    if name == "reos_drive_info":
+        from .system_monitor import SystemMonitorError, get_drive_info
+
+        try:
+            return get_drive_info()
+        except SystemMonitorError as exc:
+            raise ToolError(code="system_error", message=str(exc)) from exc
+
+    if name == "reos_mount_points":
+        from .system_monitor import SystemMonitorError, get_mount_points
+
+        try:
+            return get_mount_points()
+        except SystemMonitorError as exc:
+            raise ToolError(code="system_error", message=str(exc)) from exc
+
+    if name == "reos_filesystem_overview":
+        from .system_monitor import get_filesystem_overview
+
+        return get_filesystem_overview()
 
     raise ToolError(code="unknown_tool", message=f"Unknown tool: {name}")
 

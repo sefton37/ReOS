@@ -338,3 +338,166 @@ class TestGPUMonitoring:
                         assert gpu["memory_used_mb"] == 4096
                         assert gpu["memory_total_mb"] == 12288
                         assert gpu["temperature_c"] == 55
+
+
+class TestAMDGPUMonitoring:
+    def test_rocm_smi_available_returns_bool(self) -> None:
+        """rocm_smi_available should return a boolean."""
+        from reos.system_monitor import rocm_smi_available
+
+        result = rocm_smi_available()
+        assert isinstance(result, bool)
+
+    def test_get_amd_gpu_info_not_available(self) -> None:
+        """Should raise when rocm-smi not available."""
+        from reos.system_monitor import SystemMonitorError, get_amd_gpu_info
+
+        with patch("reos.system_monitor.rocm_smi_available", return_value=False):
+            with pytest.raises(SystemMonitorError, match="rocm-smi not available"):
+                get_amd_gpu_info()
+
+
+class TestUnifiedGPUMonitoring:
+    def test_detect_gpus_returns_dict(self) -> None:
+        """detect_gpus should return a dict with vendor info."""
+        from reos.system_monitor import detect_gpus
+
+        result = detect_gpus()
+        assert isinstance(result, dict)
+        assert "nvidia" in result
+        assert "amd" in result
+        assert "any_gpu" in result
+        assert isinstance(result["nvidia"], bool)
+        assert isinstance(result["amd"], bool)
+
+    def test_get_all_gpu_summary_no_gpu(self) -> None:
+        """get_all_gpu_summary should handle no GPU gracefully."""
+        from reos.system_monitor import get_all_gpu_summary
+
+        with patch("reos.system_monitor.nvidia_smi_available", return_value=False):
+            with patch("reos.system_monitor.rocm_smi_available", return_value=False):
+                summary = get_all_gpu_summary()
+                assert summary["available"] is False
+                assert summary["vendors"] == []
+                assert "message" in summary
+
+    def test_get_all_gpu_summary_with_nvidia(self) -> None:
+        """get_all_gpu_summary should work with NVIDIA GPU."""
+        from reos.system_monitor import get_all_gpu_summary
+
+        mock_info = [{"index": 0, "name": "RTX 4070", "driver_version": "535.0", "vendor": "nvidia"}]
+        mock_usage = [{"index": 0, "name": "RTX 4070", "gpu_utilization_percent": 50, "vendor": "nvidia"}]
+
+        with patch("reos.system_monitor.nvidia_smi_available", return_value=True):
+            with patch("reos.system_monitor.rocm_smi_available", return_value=False):
+                with patch("reos.system_monitor.get_all_gpu_info", return_value=mock_info):
+                    with patch("reos.system_monitor.get_all_gpu_usage", return_value=mock_usage):
+                        summary = get_all_gpu_summary()
+                        assert summary["available"] is True
+                        assert "nvidia" in summary["vendors"]
+
+
+class TestFileStructure:
+    def test_list_directory_current(self, tmp_path: Path) -> None:
+        """list_directory should list directory contents."""
+        from reos.system_monitor import list_directory
+
+        # Create test files
+        (tmp_path / "file1.txt").write_text("test")
+        (tmp_path / "file2.py").write_text("test")
+        (tmp_path / "subdir").mkdir()
+
+        entries = list_directory(str(tmp_path))
+        assert len(entries) == 3
+        names = [e["name"] for e in entries]
+        assert "file1.txt" in names
+        assert "file2.py" in names
+        assert "subdir" in names
+
+    def test_list_directory_hidden_files(self, tmp_path: Path) -> None:
+        """list_directory should handle hidden files correctly."""
+        from reos.system_monitor import list_directory
+
+        (tmp_path / ".hidden").write_text("test")
+        (tmp_path / "visible").write_text("test")
+
+        # Without hidden
+        entries = list_directory(str(tmp_path), show_hidden=False)
+        names = [e["name"] for e in entries]
+        assert "visible" in names
+        assert ".hidden" not in names
+
+        # With hidden
+        entries = list_directory(str(tmp_path), show_hidden=True)
+        names = [e["name"] for e in entries]
+        assert ".hidden" in names
+
+    def test_list_directory_not_found(self) -> None:
+        """list_directory should raise for non-existent path."""
+        from reos.system_monitor import SystemMonitorError, list_directory
+
+        with pytest.raises(SystemMonitorError, match="does not exist"):
+            list_directory("/nonexistent/path/xyz")
+
+    def test_get_directory_tree(self, tmp_path: Path) -> None:
+        """get_directory_tree should return nested structure."""
+        from reos.system_monitor import get_directory_tree
+
+        # Create nested structure
+        (tmp_path / "dir1").mkdir()
+        (tmp_path / "dir1" / "file1.txt").write_text("test")
+        (tmp_path / "dir2").mkdir()
+
+        tree = get_directory_tree(str(tmp_path), max_depth=2)
+        assert tree["type"] == "directory"
+        assert "children" in tree
+        child_names = [c["name"] for c in tree["children"]]
+        assert "dir1" in child_names
+        assert "dir2" in child_names
+
+
+class TestDriveMonitoring:
+    def test_get_block_devices_structure(self) -> None:
+        """get_block_devices should return list of devices."""
+        from reos.system_monitor import get_block_devices
+
+        try:
+            devices = get_block_devices()
+            assert isinstance(devices, list)
+        except SystemMonitorError:
+            pytest.skip("lsblk not available")
+
+    def test_get_drive_info_structure(self) -> None:
+        """get_drive_info should return list of drives."""
+        from reos.system_monitor import get_drive_info
+
+        try:
+            drives = get_drive_info()
+            assert isinstance(drives, list)
+            for drive in drives:
+                assert "name" in drive
+                assert "size" in drive
+                assert "partitions" in drive
+        except SystemMonitorError:
+            pytest.skip("lsblk not available")
+
+    def test_get_mount_points_structure(self) -> None:
+        """get_mount_points should return list of mounts."""
+        from reos.system_monitor import get_mount_points
+
+        try:
+            mounts = get_mount_points()
+            assert isinstance(mounts, list)
+        except SystemMonitorError:
+            pytest.skip("findmnt not available")
+
+    def test_get_filesystem_overview_structure(self) -> None:
+        """get_filesystem_overview should return overview dict."""
+        from reos.system_monitor import get_filesystem_overview
+
+        overview = get_filesystem_overview()
+        assert isinstance(overview, dict)
+        assert "drives" in overview
+        assert "drive_count" in overview
+        assert "mount_points" in overview
+        assert "mount_count" in overview

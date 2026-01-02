@@ -1145,3 +1145,564 @@ def get_gpu_summary() -> dict[str, Any]:
             "error": "Failed to query GPU",
             "gpus": [],
         }
+
+
+# =============================================================================
+# GPU Monitoring (AMD/ROCm)
+# =============================================================================
+
+
+def rocm_smi_available() -> bool:
+    """Check if rocm-smi is available (AMD GPU with ROCm drivers)."""
+    return _command_exists("rocm-smi")
+
+
+def get_amd_gpu_info() -> list[dict[str, Any]]:
+    """Get AMD GPU information using rocm-smi.
+
+    Returns:
+        List of GPU info dicts with model, driver, memory, etc.
+    """
+    if not rocm_smi_available():
+        raise SystemMonitorError("rocm-smi not available (no AMD GPU or ROCm drivers)")
+
+    # Get basic GPU info
+    cmd = ["rocm-smi", "--showid", "--showproductname", "--showdriver", "--showmeminfo", "vram"]
+    result = _run_command(cmd)
+    if result.returncode != 0:
+        raise SystemMonitorError(f"rocm-smi failed: {result.stderr}")
+
+    gpus: list[dict[str, Any]] = []
+    current_gpu: dict[str, Any] = {}
+
+    for line in result.stdout.split("\n"):
+        line = line.strip()
+        if line.startswith("GPU["):
+            # Start of a new GPU entry
+            if current_gpu:
+                gpus.append(current_gpu)
+            idx = line.split("]")[0].replace("GPU[", "")
+            current_gpu = {"index": int(idx) if idx.isdigit() else 0}
+        elif ":" in line:
+            key, _, value = line.partition(":")
+            key = key.strip().lower().replace(" ", "_")
+            value = value.strip()
+            if "card_series" in key or "product_name" in key:
+                current_gpu["name"] = value
+            elif "driver" in key:
+                current_gpu["driver_version"] = value
+            elif "vram_total" in key:
+                # Parse memory like "16368 MB"
+                parts = value.split()
+                if parts and parts[0].isdigit():
+                    current_gpu["memory_total_mb"] = int(parts[0])
+            elif "vram_used" in key:
+                parts = value.split()
+                if parts and parts[0].isdigit():
+                    current_gpu["memory_used_mb"] = int(parts[0])
+
+    if current_gpu:
+        gpus.append(current_gpu)
+
+    return gpus
+
+
+def get_amd_gpu_usage() -> list[dict[str, Any]]:
+    """Get current AMD GPU utilization and status.
+
+    Returns:
+        List of GPU status dicts with utilization, memory, temperature, power.
+    """
+    if not rocm_smi_available():
+        raise SystemMonitorError("rocm-smi not available (no AMD GPU or ROCm drivers)")
+
+    cmd = ["rocm-smi", "--showuse", "--showtemp", "--showpower", "--showmeminfo", "vram", "--showfan"]
+    result = _run_command(cmd)
+    if result.returncode != 0:
+        raise SystemMonitorError(f"rocm-smi failed: {result.stderr}")
+
+    gpus: list[dict[str, Any]] = []
+    current_gpu: dict[str, Any] = {}
+
+    for line in result.stdout.split("\n"):
+        line = line.strip()
+        if line.startswith("GPU["):
+            if current_gpu:
+                gpus.append(current_gpu)
+            idx = line.split("]")[0].replace("GPU[", "")
+            current_gpu = {"index": int(idx) if idx.isdigit() else 0}
+        elif ":" in line:
+            key, _, value = line.partition(":")
+            key = key.strip().lower().replace(" ", "_")
+            value = value.strip()
+
+            if "gpu_use" in key:
+                # Parse "45%"
+                current_gpu["gpu_utilization_percent"] = _parse_int_or_na(value.replace("%", ""))
+            elif "temperature" in key and "edge" in key:
+                # Parse "55.0c"
+                current_gpu["temperature_c"] = _parse_float_or_na(value.lower().replace("c", ""))
+            elif "power" in key and "average" in key:
+                # Parse "120.5 W"
+                current_gpu["power_draw_w"] = _parse_float_or_na(value.split()[0] if value else "")
+            elif "vram_total" in key:
+                parts = value.split()
+                if parts and parts[0].isdigit():
+                    current_gpu["memory_total_mb"] = int(parts[0])
+            elif "vram_used" in key:
+                parts = value.split()
+                if parts and parts[0].isdigit():
+                    current_gpu["memory_used_mb"] = int(parts[0])
+            elif "fan" in key:
+                current_gpu["fan_speed_percent"] = _parse_int_or_na(value.replace("%", ""))
+
+    if current_gpu:
+        gpus.append(current_gpu)
+
+    return gpus
+
+
+def get_amd_gpu_processes() -> list[dict[str, Any]]:
+    """Get processes currently using AMD GPU.
+
+    Returns:
+        List of process info dicts with PID, name, GPU memory usage.
+    """
+    if not rocm_smi_available():
+        raise SystemMonitorError("rocm-smi not available (no AMD GPU or ROCm drivers)")
+
+    cmd = ["rocm-smi", "--showpidgpus"]
+    result = _run_command(cmd)
+    if result.returncode != 0:
+        # This command may not be supported on all ROCm versions
+        return []
+
+    processes = []
+    for line in result.stdout.split("\n"):
+        line = line.strip()
+        if line and not line.startswith("=") and "PID" not in line:
+            parts = line.split()
+            if len(parts) >= 2 and parts[0].isdigit():
+                processes.append({
+                    "pid": int(parts[0]),
+                    "gpu_index": int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0,
+                })
+
+    return processes
+
+
+# =============================================================================
+# GPU Monitoring (Unified/Vendor-Agnostic)
+# =============================================================================
+
+
+def detect_gpus() -> dict[str, Any]:
+    """Detect all available GPUs regardless of vendor.
+
+    Returns:
+        Dict with detected GPU vendors and their availability.
+    """
+    return {
+        "nvidia": nvidia_smi_available(),
+        "amd": rocm_smi_available(),
+        "any_gpu": nvidia_smi_available() or rocm_smi_available(),
+    }
+
+
+def get_all_gpu_info() -> list[dict[str, Any]]:
+    """Get information for all detected GPUs (any vendor).
+
+    Returns:
+        List of GPU info dicts with vendor, model, driver, memory.
+    """
+    gpus = []
+
+    # Try NVIDIA
+    if nvidia_smi_available():
+        try:
+            for gpu in get_gpu_info():
+                gpu["vendor"] = "nvidia"
+                gpus.append(gpu)
+        except SystemMonitorError:
+            pass
+
+    # Try AMD
+    if rocm_smi_available():
+        try:
+            for gpu in get_amd_gpu_info():
+                gpu["vendor"] = "amd"
+                gpus.append(gpu)
+        except SystemMonitorError:
+            pass
+
+    return gpus
+
+
+def get_all_gpu_usage() -> list[dict[str, Any]]:
+    """Get usage information for all detected GPUs (any vendor).
+
+    Returns:
+        List of GPU usage dicts with vendor, utilization, memory, temperature.
+    """
+    gpus = []
+
+    # Try NVIDIA
+    if nvidia_smi_available():
+        try:
+            for gpu in get_gpu_usage():
+                gpu["vendor"] = "nvidia"
+                gpus.append(gpu)
+        except SystemMonitorError:
+            pass
+
+    # Try AMD
+    if rocm_smi_available():
+        try:
+            for gpu in get_amd_gpu_usage():
+                gpu["vendor"] = "amd"
+                gpus.append(gpu)
+        except SystemMonitorError:
+            pass
+
+    return gpus
+
+
+def get_all_gpu_summary() -> dict[str, Any]:
+    """Get a vendor-agnostic summary of all GPU status.
+
+    Returns:
+        Dict with GPU availability, vendors, count, and basic usage stats.
+    """
+    detection = detect_gpus()
+
+    if not detection["any_gpu"]:
+        return {
+            "available": False,
+            "vendors": [],
+            "gpus": [],
+            "message": "No NVIDIA or AMD GPU detected (or drivers not installed)",
+        }
+
+    vendors = []
+    if detection["nvidia"]:
+        vendors.append("nvidia")
+    if detection["amd"]:
+        vendors.append("amd")
+
+    try:
+        all_info = get_all_gpu_info()
+        all_usage = get_all_gpu_usage()
+
+        # Match usage to info by index and vendor
+        gpus = []
+        for info in all_info:
+            vendor = info.get("vendor", "unknown")
+            idx = info.get("index", 0)
+
+            # Find matching usage
+            usage = next(
+                (u for u in all_usage if u.get("vendor") == vendor and u.get("index") == idx),
+                {},
+            )
+
+            gpus.append({
+                "vendor": vendor,
+                "name": info.get("name", usage.get("name", "Unknown")),
+                "driver": info.get("driver_version"),
+                "gpu_util": usage.get("gpu_utilization_percent"),
+                "memory_used_mb": usage.get("memory_used_mb") or info.get("memory_used_mb"),
+                "memory_total_mb": usage.get("memory_total_mb") or info.get("memory_total_mb"),
+                "temperature_c": usage.get("temperature_c"),
+                "power_draw_w": usage.get("power_draw_w"),
+            })
+
+        return {
+            "available": True,
+            "vendors": vendors,
+            "gpu_count": len(gpus),
+            "gpus": gpus,
+        }
+    except SystemMonitorError as e:
+        return {
+            "available": True,
+            "vendors": vendors,
+            "error": str(e),
+            "gpus": [],
+        }
+
+
+# =============================================================================
+# File Structure and Drive Visibility
+# =============================================================================
+
+
+def list_directory(
+    path: str = "/",
+    *,
+    show_hidden: bool = False,
+    include_stats: bool = True,
+) -> list[dict[str, Any]]:
+    """List directory contents with optional file statistics.
+
+    Args:
+        path: Directory path to list.
+        show_hidden: Include hidden files (starting with .).
+        include_stats: Include file size, permissions, modification time.
+
+    Returns:
+        List of file/directory info dicts.
+    """
+    from datetime import datetime
+
+    target = Path(path)
+    if not target.exists():
+        raise SystemMonitorError(f"Path does not exist: {path}")
+    if not target.is_dir():
+        raise SystemMonitorError(f"Path is not a directory: {path}")
+
+    entries = []
+    try:
+        for entry in target.iterdir():
+            if not show_hidden and entry.name.startswith("."):
+                continue
+
+            info: dict[str, Any] = {
+                "name": entry.name,
+                "path": str(entry),
+                "type": "directory" if entry.is_dir() else "file",
+            }
+
+            if entry.is_symlink():
+                info["type"] = "symlink"
+                try:
+                    info["target"] = str(entry.resolve())
+                except OSError:
+                    info["target"] = None
+
+            if include_stats:
+                try:
+                    stat = entry.stat(follow_symlinks=False)
+                    info["size_bytes"] = stat.st_size
+                    info["permissions"] = oct(stat.st_mode)[-3:]
+                    info["modified"] = datetime.fromtimestamp(stat.st_mtime).isoformat()
+                    info["owner_uid"] = stat.st_uid
+                    info["group_gid"] = stat.st_gid
+                except OSError:
+                    pass
+
+            entries.append(info)
+
+        # Sort: directories first, then by name
+        entries.sort(key=lambda e: (e["type"] != "directory", e["name"].lower()))
+
+    except PermissionError as e:
+        raise SystemMonitorError(f"Permission denied: {path}") from e
+
+    return entries
+
+
+def get_directory_tree(
+    path: str = "/",
+    *,
+    max_depth: int = 2,
+    show_hidden: bool = False,
+) -> dict[str, Any]:
+    """Get a tree structure of a directory.
+
+    Args:
+        path: Root directory path.
+        max_depth: Maximum depth to traverse (default 2).
+        show_hidden: Include hidden files/directories.
+
+    Returns:
+        Nested dict representing directory tree.
+    """
+    target = Path(path)
+    if not target.exists():
+        raise SystemMonitorError(f"Path does not exist: {path}")
+    if not target.is_dir():
+        raise SystemMonitorError(f"Path is not a directory: {path}")
+
+    def build_tree(current: Path, depth: int) -> dict[str, Any]:
+        node: dict[str, Any] = {
+            "name": current.name or str(current),
+            "type": "directory",
+            "path": str(current),
+        }
+
+        if depth >= max_depth:
+            node["truncated"] = True
+            return node
+
+        children = []
+        try:
+            for entry in sorted(current.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
+                if not show_hidden and entry.name.startswith("."):
+                    continue
+
+                if entry.is_dir() and not entry.is_symlink():
+                    children.append(build_tree(entry, depth + 1))
+                else:
+                    child: dict[str, Any] = {
+                        "name": entry.name,
+                        "type": "symlink" if entry.is_symlink() else "file",
+                        "path": str(entry),
+                    }
+                    try:
+                        child["size_bytes"] = entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        pass
+                    children.append(child)
+
+            node["children"] = children
+            node["child_count"] = len(children)
+        except PermissionError:
+            node["error"] = "permission denied"
+
+        return node
+
+    return build_tree(target, 0)
+
+
+def get_block_devices() -> list[dict[str, Any]]:
+    """Get information about block devices (drives, partitions).
+
+    Returns:
+        List of block device info dicts.
+    """
+    cmd = ["lsblk", "-J", "-o", "NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,MODEL,SERIAL,ROTA,RM"]
+    result = _run_command(cmd)
+    if result.returncode != 0:
+        raise SystemMonitorError(f"lsblk failed: {result.stderr}")
+
+    import json
+
+    try:
+        data = json.loads(result.stdout)
+        return data.get("blockdevices", [])
+    except json.JSONDecodeError as e:
+        raise SystemMonitorError(f"Failed to parse lsblk output: {e}") from e
+
+
+def get_drive_info() -> list[dict[str, Any]]:
+    """Get detailed information about physical drives.
+
+    Returns:
+        List of drive info dicts with model, size, partitions.
+    """
+    devices = get_block_devices()
+
+    drives = []
+    for dev in devices:
+        if dev.get("type") == "disk":
+            drive: dict[str, Any] = {
+                "name": f"/dev/{dev.get('name', '')}",
+                "size": dev.get("size"),
+                "model": dev.get("model"),
+                "serial": dev.get("serial"),
+                "rotational": dev.get("rota") == "1" or dev.get("rota") is True,
+                "removable": dev.get("rm") == "1" or dev.get("rm") is True,
+                "partitions": [],
+            }
+
+            # Get partitions
+            for child in dev.get("children", []):
+                if child.get("type") == "part":
+                    drive["partitions"].append({
+                        "name": f"/dev/{child.get('name', '')}",
+                        "size": child.get("size"),
+                        "fstype": child.get("fstype"),
+                        "mountpoint": child.get("mountpoint"),
+                    })
+
+            drives.append(drive)
+
+    return drives
+
+
+def get_mount_points() -> list[dict[str, Any]]:
+    """Get all mount points with usage information.
+
+    Returns:
+        List of mount point dicts with device, type, usage.
+    """
+    cmd = ["findmnt", "-J", "-o", "TARGET,SOURCE,FSTYPE,OPTIONS,SIZE,USED,AVAIL,USE%"]
+    result = _run_command(cmd)
+    if result.returncode != 0:
+        # Fallback to df if findmnt fails
+        return get_disk_usage()
+
+    import json
+
+    try:
+        data = json.loads(result.stdout)
+
+        mounts = []
+        for fs in data.get("filesystems", []):
+            mount: dict[str, Any] = {
+                "mountpoint": fs.get("target"),
+                "device": fs.get("source"),
+                "fstype": fs.get("fstype"),
+                "options": fs.get("options"),
+                "size": fs.get("size"),
+                "used": fs.get("used"),
+                "available": fs.get("avail"),
+                "use_percent": fs.get("use%"),
+            }
+            mounts.append(mount)
+
+        return mounts
+    except json.JSONDecodeError:
+        return get_disk_usage()
+
+
+def get_filesystem_overview() -> dict[str, Any]:
+    """Get a comprehensive overview of filesystem and storage.
+
+    Returns:
+        Dict with drives, partitions, and usage summary.
+    """
+    overview: dict[str, Any] = {}
+
+    # Get drives
+    try:
+        overview["drives"] = get_drive_info()
+        overview["drive_count"] = len(overview["drives"])
+    except SystemMonitorError:
+        overview["drives"] = []
+        overview["drive_count"] = 0
+
+    # Get mount points with usage
+    try:
+        mounts = get_mount_points()
+        # Filter out pseudo filesystems for summary
+        real_mounts = [
+            m for m in mounts
+            if m.get("fstype") not in ("tmpfs", "devtmpfs", "squashfs", "overlay", "proc", "sysfs", "devpts", "cgroup", "cgroup2")
+        ]
+        overview["mount_points"] = real_mounts
+        overview["mount_count"] = len(real_mounts)
+    except SystemMonitorError:
+        overview["mount_points"] = []
+        overview["mount_count"] = 0
+
+    # Calculate total storage
+    total_size = 0
+    total_used = 0
+    for drive in overview.get("drives", []):
+        size_str = drive.get("size", "")
+        if size_str:
+            # Parse size like "500G", "1T", "256M"
+            try:
+                if size_str.endswith("T"):
+                    total_size += float(size_str[:-1]) * 1024 * 1024 * 1024 * 1024
+                elif size_str.endswith("G"):
+                    total_size += float(size_str[:-1]) * 1024 * 1024 * 1024
+                elif size_str.endswith("M"):
+                    total_size += float(size_str[:-1]) * 1024 * 1024
+            except ValueError:
+                pass
+
+    overview["total_storage_bytes"] = int(total_size) if total_size > 0 else None
+
+    return overview
