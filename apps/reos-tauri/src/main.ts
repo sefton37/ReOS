@@ -211,8 +211,8 @@ function buildLoginScreen(onLogin: () => void) {
 
   root.appendChild(screen);
 
-  // Handle login
-  const handleLogin = () => {
+  // Handle login with PAM authentication
+  const handleLogin = async () => {
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
 
@@ -225,15 +225,30 @@ function buildLoginScreen(onLogin: () => void) {
       return;
     }
 
-    // For now, accept any non-empty credentials
-    // In a real app, this would validate against a backend
+    // Disable inputs during authentication
+    loginBtn.textContent = 'Authenticating...';
+    loginBtn.disabled = true;
+    usernameInput.disabled = true;
+    passwordInput.disabled = true;
     errorMsg.textContent = '';
-    onLogin();
+
+    try {
+      await invoke('pam_authenticate', { username, password });
+      onLogin();
+    } catch (e) {
+      errorMsg.textContent = 'Invalid credentials';
+      loginBtn.textContent = 'Sign In';
+      loginBtn.disabled = false;
+      usernameInput.disabled = false;
+      passwordInput.disabled = false;
+      passwordInput.value = '';
+      passwordInput.focus();
+    }
   };
 
-  loginBtn.addEventListener('click', handleLogin);
+  loginBtn.addEventListener('click', () => void handleLogin());
   passwordInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') handleLogin();
+    if (e.key === 'Enter') void handleLogin();
   });
   usernameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') passwordInput.focus();
@@ -244,8 +259,16 @@ function buildLoginScreen(onLogin: () => void) {
     errorMsg.textContent = 'Recovery feature coming soon...';
   });
 
-  // Focus username input
-  usernameInput.focus();
+  // Auto-fill username with current system user and focus appropriately
+  void (async () => {
+    try {
+      const currentUser = await invoke('get_current_user') as string;
+      usernameInput.value = currentUser;
+      passwordInput.focus();
+    } catch {
+      usernameInput.focus();
+    }
+  })();
 }
 
 function buildUi() {
