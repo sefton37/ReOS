@@ -91,6 +91,67 @@ def list_tools() -> list[Tool]:
                 "required": ["glob"],
             },
         ),
+        # Thunderbird tools
+        Tool(
+            name="reos_thunderbird_status",
+            description="Check Thunderbird integration status. Returns whether Thunderbird data is available.",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="reos_thunderbird_search_messages",
+            description=(
+                "Search Thunderbird email messages by subject, sender, or recipients. "
+                "Returns matching emails with subject, sender, date, and preview."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search term"},
+                    "folder": {"type": "string", "description": "Optional folder name to filter"},
+                    "limit": {"type": "number", "description": "Max results (default 50)"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="reos_thunderbird_list_folders",
+            description="List email folders in Thunderbird with message counts.",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="reos_thunderbird_search_contacts",
+            description=(
+                "Search Thunderbird address book contacts by name, email, or organization."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search term"},
+                    "limit": {"type": "number", "description": "Max results (default 50)"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="reos_thunderbird_search_calendar",
+            description=(
+                "Search Thunderbird calendar events by title, description, or location."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search term (optional)"},
+                    "start_date": {"type": "string", "description": "Start date filter (ISO format)"},
+                    "end_date": {"type": "string", "description": "End date filter (ISO format)"},
+                    "limit": {"type": "number", "description": "Max results (default 50)"},
+                },
+            },
+        ),
+        Tool(
+            name="reos_thunderbird_list_calendars",
+            description="List available calendars in Thunderbird.",
+            input_schema={"type": "object", "properties": {}},
+        ),
     ]
 
 
@@ -219,6 +280,131 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
                         return results
 
         return results
+
+    # Thunderbird tool handlers
+    if name == "reos_thunderbird_status":
+        from .thunderbird import get_thunderbird_status
+
+        return get_thunderbird_status()
+
+    if name == "reos_thunderbird_search_messages":
+        from .thunderbird import ThunderbirdClient, ThunderbirdError
+
+        query = args.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ToolError(code="invalid_args", message="query is required")
+
+        folder = args.get("folder")
+        limit = int(args.get("limit", 50))
+        if limit < 1 or limit > 200:
+            limit = 50
+
+        try:
+            client = ThunderbirdClient()
+            messages = client.search_messages(query, folder_name=folder, limit=limit)
+            return [
+                {
+                    "id": m.id,
+                    "subject": m.subject,
+                    "sender": m.sender,
+                    "recipients": m.recipients,
+                    "date": m.date.isoformat() if m.date else None,
+                    "snippet": m.snippet,
+                }
+                for m in messages
+            ]
+        except ThunderbirdError as exc:
+            raise ToolError(code="thunderbird_error", message=str(exc)) from exc
+
+    if name == "reos_thunderbird_list_folders":
+        from .thunderbird import ThunderbirdClient, ThunderbirdError
+
+        try:
+            client = ThunderbirdClient()
+            return client.list_folders()
+        except ThunderbirdError as exc:
+            raise ToolError(code="thunderbird_error", message=str(exc)) from exc
+
+    if name == "reos_thunderbird_search_contacts":
+        from .thunderbird import ThunderbirdClient, ThunderbirdError
+
+        query = args.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ToolError(code="invalid_args", message="query is required")
+
+        limit = int(args.get("limit", 50))
+        if limit < 1 or limit > 200:
+            limit = 50
+
+        try:
+            client = ThunderbirdClient()
+            contacts = client.search_contacts(query, limit=limit)
+            return [
+                {
+                    "id": c.id,
+                    "display_name": c.display_name,
+                    "primary_email": c.primary_email,
+                    "secondary_email": c.secondary_email,
+                    "phone_work": c.phone_work,
+                    "phone_home": c.phone_home,
+                    "phone_mobile": c.phone_mobile,
+                    "organization": c.organization,
+                    "notes": c.notes,
+                }
+                for c in contacts
+            ]
+        except ThunderbirdError as exc:
+            raise ToolError(code="thunderbird_error", message=str(exc)) from exc
+
+    if name == "reos_thunderbird_search_calendar":
+        from datetime import datetime, timezone
+
+        from .thunderbird import ThunderbirdClient, ThunderbirdError
+
+        query = args.get("query")  # Optional for calendar
+        limit = int(args.get("limit", 50))
+        if limit < 1 or limit > 200:
+            limit = 50
+
+        start_date = None
+        end_date = None
+        if args.get("start_date"):
+            try:
+                start_date = datetime.fromisoformat(args["start_date"].replace("Z", "+00:00"))
+            except ValueError:
+                raise ToolError(code="invalid_args", message="Invalid start_date format")
+        if args.get("end_date"):
+            try:
+                end_date = datetime.fromisoformat(args["end_date"].replace("Z", "+00:00"))
+            except ValueError:
+                raise ToolError(code="invalid_args", message="Invalid end_date format")
+
+        try:
+            client = ThunderbirdClient()
+            events = client.search_calendar(query, start_date=start_date, end_date=end_date, limit=limit)
+            return [
+                {
+                    "id": e.id,
+                    "title": e.title,
+                    "start_time": e.start_time.isoformat() if e.start_time else None,
+                    "end_time": e.end_time.isoformat() if e.end_time else None,
+                    "location": e.location,
+                    "description": e.description,
+                    "is_all_day": e.is_all_day,
+                }
+                for e in events
+            ]
+        except ThunderbirdError as exc:
+            raise ToolError(code="thunderbird_error", message=str(exc)) from exc
+
+    if name == "reos_thunderbird_list_calendars":
+        from .thunderbird import ThunderbirdClient, ThunderbirdError
+
+        try:
+            client = ThunderbirdClient()
+            return client.list_calendars()
+        except ThunderbirdError as exc:
+            raise ToolError(code="thunderbird_error", message=str(exc)) from exc
 
     raise ToolError(code="unknown_tool", message=f"Unknown tool: {name}")
 
