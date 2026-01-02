@@ -15,11 +15,19 @@ catalog so the UI can reuse those capabilities.
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import json
+import logging
+import signal
 import sys
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Shutdown coordination
+_shutdown_requested = False
 
 from .agent import ChatAgent
 from .db import Database, get_db
@@ -897,16 +905,51 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
         )
 
 
+def _signal_handler(signum: int, _frame: Any) -> None:
+    """Handle shutdown signals gracefully."""
+    global _shutdown_requested
+    sig_name = signal.Signals(signum).name
+    logger.info("Received %s, initiating graceful shutdown", sig_name)
+    _shutdown_requested = True
+
+
+def _cleanup(db: Database) -> None:
+    """Perform cleanup on shutdown."""
+    logger.debug("Running cleanup...")
+    try:
+        db.close()
+        logger.info("Database connection closed")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Error closing database: %s", exc)
+
+
 def run_stdio_server() -> None:
-    """Run the UI kernel server over stdio."""
+    """Run the UI kernel server over stdio.
+
+    Features:
+    - Graceful shutdown on SIGINT/SIGTERM
+    - Automatic cleanup on exit (DB connections)
+    - Logs startup and shutdown events
+    """
+    global _shutdown_requested
+
+    # Set up signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
 
     db = get_db()
     db.migrate()
 
-    while True:
+    # Register cleanup to run on exit
+    atexit.register(_cleanup, db)
+
+    logger.info("ReOS UI kernel server started")
+
+    while not _shutdown_requested:
         line = _readline()
         if line is None:
-            return
+            logger.info("EOF received, shutting down")
+            break
 
         line = line.strip()
         if not line:
@@ -915,17 +958,26 @@ def run_stdio_server() -> None:
         try:
             req = json.loads(line)
         except json.JSONDecodeError:
+            logger.debug("Ignoring malformed JSON input")
             continue
 
         if not isinstance(req, dict):
+            logger.debug("Ignoring non-object JSON input")
             continue
 
         resp = _handle_jsonrpc_request(db, req)
         if resp is not None:
             _write(resp)
 
+    # Explicit cleanup (atexit may not run in all scenarios)
+    _cleanup(db)
+    logger.info("ReOS UI kernel server stopped")
+
 
 def main() -> None:
+    from .logging_setup import configure_logging
+
+    configure_logging()
     run_stdio_server()
 
 
