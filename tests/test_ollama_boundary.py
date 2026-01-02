@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 import pytest
 
 from reos.ollama import OllamaClient, OllamaError, check_ollama, list_ollama_models
@@ -14,7 +15,11 @@ class _FakeResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise RuntimeError(f"http {self.status_code}")
+            raise httpx.HTTPStatusError(
+                f"http {self.status_code}",
+                request=httpx.Request("GET", "http://test"),
+                response=httpx.Response(self.status_code),
+            )
 
     def json(self) -> dict[str, Any]:
         return self._payload
@@ -33,12 +38,12 @@ class _FakeClient:
 
     def get(self, url: str):  # noqa: ARG002
         if self._get_resp is None:
-            raise RuntimeError("boom")
+            raise httpx.ConnectError("Connection refused")
         return self._get_resp
 
     def post(self, url: str, json: dict[str, Any]):  # noqa: ARG002
         if self._post_resp is None:
-            raise RuntimeError("boom")
+            raise httpx.ConnectError("Connection refused")
         return self._post_resp
 
 

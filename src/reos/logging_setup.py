@@ -58,8 +58,10 @@ def configure_logging(*, log_path: Path | None = None) -> None:
             file_handler.setLevel(level)
             file_handler.setFormatter(formatter)
             root.addHandler(file_handler)
-    except Exception:
+    except OSError as exc:
         # Best-effort: logging must never crash the app.
-        pass
+        # Log to stderr since we can't write to file
+        import sys
+        print(f"Warning: Could not set up file logging: {exc}", file=sys.stderr)
 
     _CONFIGURED = True

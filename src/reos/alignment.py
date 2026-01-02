@@ -233,7 +233,8 @@ def get_recent_active_files(db: Database, *, limit: int = 100) -> list[str]:
             import json
 
             meta = json.loads(payload)
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
+            # Malformed payload - skip this event
             continue
 
         uri = meta.get("uri")

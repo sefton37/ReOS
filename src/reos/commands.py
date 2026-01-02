@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +18,8 @@ from .alignment import (
 )
 from .attention import classify_attention_pattern, get_current_session_summary
 from .db import get_db
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -139,7 +143,8 @@ def handle_reflect_recent() -> str:
         db = get_db()
         classification = classify_attention_pattern(db)
         return json.dumps(classification, indent=2)
-    except Exception as e:
+    except (OSError, sqlite3.Error, RuntimeError) as e:
+        logger.warning("handle_reflect_recent failed: %s", e)
         return f"Error reflecting on recent patterns: {e}"
 
 
@@ -149,7 +154,8 @@ def handle_inspect_session(params: dict[str, Any]) -> str:
         db = get_db()
         summary = get_current_session_summary(db)
         return json.dumps(summary, indent=2)
-    except Exception as e:
+    except (OSError, sqlite3.Error, RuntimeError) as e:
+        logger.warning("handle_inspect_session failed: %s", e)
         return f"Error inspecting session: {e}"
 
 
@@ -175,7 +181,8 @@ def handle_list_events(params: dict[str, Any]) -> str:
                         "repo": meta.get("repo"),
                     }
                 )
-            except Exception:
+            except (json.JSONDecodeError, TypeError, KeyError):
+                # Malformed payload - include event without repo info
                 summary.append(
                     {
                         "kind": evt.get("kind"),
@@ -183,7 +190,8 @@ def handle_list_events(params: dict[str, Any]) -> str:
                     }
                 )
         return json.dumps(summary, indent=2)
-    except Exception as e:
+    except (OSError, sqlite3.Error, ValueError) as e:
+        logger.warning("handle_list_events failed: %s", e)
         return f"Error listing events: {e}"
 
 
@@ -193,9 +201,10 @@ def handle_note(params: dict[str, Any]) -> str:
         text = params.get("text", "")
         db = get_db()
         import uuid
+        from datetime import UTC, datetime
 
         note_id = str(uuid.uuid4())
-        now = __import__("datetime").datetime.now(__import__("datetime").UTC).isoformat()
+        now = datetime.now(UTC).isoformat()
         db.insert_event(
             event_id=note_id,
             source="user",
@@ -205,7 +214,8 @@ def handle_note(params: dict[str, Any]) -> str:
             note=text,
         )
         return f"Note stored: {text}"
-    except Exception as e:
+    except (OSError, sqlite3.Error) as e:
+        logger.warning("handle_note failed: %s", e)
         return f"Error storing note: {e}"
 
 
@@ -216,7 +226,8 @@ def handle_review_alignment(params: dict[str, Any]) -> str:
         db = get_db()
         report = analyze_alignment(db=db, include_diff=include_diff)
         return json.dumps(report, indent=2)
-    except Exception as e:
+    except (OSError, sqlite3.Error, RuntimeError) as e:
+        logger.warning("handle_review_alignment failed: %s", e)
         return f"Error reviewing alignment: {e}"
 
 
@@ -278,7 +289,8 @@ def handle_review_trigger_status(params: dict[str, Any]) -> str:
             },
             indent=2,
         )
-    except Exception as e:
+    except (OSError, sqlite3.Error, RuntimeError) as e:
+        logger.warning("handle_review_trigger_status failed: %s", e)
         return f"Error estimating review trigger status: {e}"
 
 

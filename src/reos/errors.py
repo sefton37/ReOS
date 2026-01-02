@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import traceback
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,7 +13,9 @@ from .models import Event
 
 logger = logging.getLogger(__name__)
 
+# Thread-safe storage for deduplication of recent errors
 _RECENT_SIGNATURES: dict[str, datetime] = {}
+_SIGNATURES_LOCK = threading.Lock()
 
 
 def _utcnow() -> datetime:
@@ -47,10 +50,15 @@ def record_error(
 
     if dedupe_window_seconds > 0:
         cutoff = now - timedelta(seconds=dedupe_window_seconds)
-        last_seen = _RECENT_SIGNATURES.get(signature)
-        if last_seen is not None and last_seen >= cutoff:
-            return None
-        _RECENT_SIGNATURES[signature] = now
+        with _SIGNATURES_LOCK:
+            last_seen = _RECENT_SIGNATURES.get(signature)
+            if last_seen is not None and last_seen >= cutoff:
+                return None
+            _RECENT_SIGNATURES[signature] = now
+            # Prune old entries to prevent memory growth
+            stale = [k for k, v in _RECENT_SIGNATURES.items() if v < cutoff]
+            for k in stale:
+                del _RECENT_SIGNATURES[k]
 
     tb_text: str | None = None
     if include_traceback:
@@ -90,6 +98,8 @@ def record_error(
 
         append_event(Event(source=source, ts=now, payload_metadata=payload))
         return None
-    except Exception as write_exc:  # noqa: BLE001
-        logger.debug("Failed to record error event: %s", write_exc)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as write_exc:
+        # Database or serialization failures - log at warning level since
+        # silently dropping errors can mask production issues
+        logger.warning("Failed to record error event: %s: %s", type(write_exc).__name__, write_exc)
         return None

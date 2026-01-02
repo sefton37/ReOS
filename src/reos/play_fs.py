@@ -97,7 +97,8 @@ def _load_json(path: Path) -> _JSON:
         raw = path.read_text(encoding="utf-8", errors="replace")
         data = json.loads(raw) if raw.strip() else {}
         return data if isinstance(data, dict) else {}
-    except Exception:
+    except (OSError, json.JSONDecodeError):
+        # File missing or invalid JSON - return empty dict
         return {}
 
 

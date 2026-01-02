@@ -11,6 +11,7 @@ Note: ReOS is Git-first. This module remains optional/legacy.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -67,13 +68,12 @@ def calculate_fragmentation(
     for row in events:
         try:
             if row[0]:  # payload_metadata is JSON string
-                import json
-
                 meta = json.loads(row[0])
                 if "uri" in meta:
                     files_seen.append(meta["uri"])
                     unique_files_set.add(meta["uri"])
-        except Exception:
+        except (json.JSONDecodeError, TypeError, KeyError):
+            # Malformed event data - skip this row
             pass
 
     if len(files_seen) < 2:
@@ -160,8 +160,6 @@ def get_current_session_summary(db: Database) -> dict[str, Any]:
     for row in events:
         try:
             if row[0]:  # payload_metadata
-                import json
-
                 meta = json.loads(row[0])
                 project = meta.get("projectName", "unknown")
                 if project not in project_map:
@@ -177,7 +175,8 @@ def get_current_session_summary(db: Database) -> dict[str, Any]:
                     if first_ts is None:
                         first_ts = ts
                     last_ts = ts
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError, KeyError):
+            # Malformed event data - skip this row
             pass
 
     # Calculate total duration

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import sqlite3
 import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
@@ -9,6 +11,8 @@ from .alignment import get_default_repo_path, get_review_context_budget, is_git_
 from .db import Database, get_db
 from .models import Event
 from .settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -31,8 +35,9 @@ def append_event(event: Event) -> str:
             note=event.note,
         )
         return event_id
-    except Exception as exc:
+    except (OSError, sqlite3.Error) as exc:
         # Fallback to JSONL for debugging/recovery
+        logger.warning("SQLite insert failed, falling back to JSONL: %s", exc)
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         record = {
             "id": event_id,
@@ -42,8 +47,11 @@ def append_event(event: Event) -> str:
             "note": event.note,
             "error": f"SQLite failed, fell back to JSONL: {str(exc)}",
         }
-        with settings.events_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=True) + "\n")
+        try:
+            with settings.events_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=True) + "\n")
+        except OSError as fallback_exc:
+            logger.error("JSONL fallback also failed: %s", fallback_exc)
         return event_id
 
 
@@ -86,7 +94,8 @@ def _maybe_emit_review_trigger(
                 continue
             try:
                 ts = datetime.fromisoformat(str(evt.get("ts")))
-            except Exception:
+            except (ValueError, TypeError):
+                # Invalid or missing timestamp - skip this event
                 continue
             if now - ts < cooldown:
                 return
@@ -121,8 +130,9 @@ def _maybe_emit_review_trigger(
             payload_metadata=json.dumps(payload),
             note="Review checkpoint suggested (context budget nearing limit)",
         )
-    except Exception:
+    except (OSError, sqlite3.Error, RuntimeError, ValueError) as exc:
         # Best-effort only; ingestion should not fail if budgeting fails.
+        logger.debug("Review trigger emission failed (non-critical): %s", exc)
         return
 
 

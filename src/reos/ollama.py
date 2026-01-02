@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,7 +31,7 @@ def check_ollama(timeout_seconds: float = 1.5, *, url: str | None = None) -> Oll
             payload = res.json()
             models = payload.get("models") or []
             return OllamaHealth(reachable=True, model_count=len(models), error=None)
-    except Exception as exc:  # noqa: BLE001
+    except (httpx.HTTPError, OSError, json.JSONDecodeError) as exc:
         return OllamaHealth(reachable=False, model_count=None, error=str(exc))
 
 
@@ -72,7 +73,8 @@ def _default_model(timeout_seconds: float = 2.0) -> str:
                 first = models[0]
                 if isinstance(first, dict) and isinstance(first.get("name"), str):
                     return first["name"]
-    except Exception:
+    except (httpx.HTTPError, OSError, json.JSONDecodeError):
+        # Network or parsing errors - fall through to raise OllamaError
         pass
 
     raise OllamaError(
@@ -149,7 +151,7 @@ class OllamaClient:
                 res = client.post(url, json=payload)
                 res.raise_for_status()
                 data = res.json()
-        except Exception as exc:  # noqa: BLE001
+        except (httpx.HTTPError, OSError, json.JSONDecodeError) as exc:
             raise OllamaError(str(exc)) from exc
 
         message = data.get("message")

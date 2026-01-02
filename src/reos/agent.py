@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +10,8 @@ from .mcp_tools import Tool, ToolError, call_tool, list_tools, render_tool_resul
 from .ollama import OllamaClient
 from .play_fs import list_acts as play_list_acts
 from .play_fs import read_me_markdown as play_read_me_markdown
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -135,7 +138,9 @@ class ChatAgent:
     def _get_play_context(self) -> str:
         try:
             acts, active_id = play_list_acts()
-        except Exception:  # noqa: BLE001
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            # Play data unavailable - continue without context
+            logger.debug("Failed to load play acts: %s", exc)
             return ""
 
         if not active_id:
@@ -151,7 +156,9 @@ class ChatAgent:
 
         try:
             me = play_read_me_markdown().strip()
-        except Exception:  # noqa: BLE001
+        except (OSError, json.JSONDecodeError) as exc:
+            # Me context unavailable - continue without it
+            logger.debug("Failed to read me.md: %s", exc)
             me = ""
 
         if me:

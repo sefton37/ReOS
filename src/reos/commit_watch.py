@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -11,6 +12,8 @@ from .alignment import get_default_repo_path, get_head_sha, is_git_repo
 from .commit_review import CommitReviewInput, CommitReviewer
 from .db import Database
 from .settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -77,7 +80,9 @@ def poll_commits_and_review(
 
     try:
         head = get_head_sha(repo_path)
-    except Exception:
+    except RuntimeError as exc:
+        # Git command failed - repo may be in bad state or git unavailable
+        logger.debug("Failed to get HEAD SHA: %s", exc)
         return []
 
     # Initialize state without reviewing historical commits.
@@ -97,7 +102,8 @@ def poll_commits_and_review(
             if now - last_review_ts < cooldown:
                 db.set_state(key=state_key, value=head)
                 return []
-        except Exception:
+        except (ValueError, TypeError):
+            # Invalid stored timestamp - ignore and proceed with review
             pass
 
     review_text = reviewer.review(CommitReviewInput(repo_path=repo_path, commit_sha=head))
@@ -107,7 +113,9 @@ def poll_commits_and_review(
     subject = ""
     try:
         subject = get_commit_subject(repo_path, commit_sha=head)
-    except Exception:
+    except (RuntimeError, ValueError) as exc:
+        # Git command failed or invalid commit - use empty subject
+        logger.debug("Failed to get commit subject: %s", exc)
         subject = ""
 
     payload = {
