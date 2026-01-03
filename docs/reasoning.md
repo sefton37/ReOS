@@ -134,27 +134,32 @@ ReOS: Okay, keeping it short.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    ReasoningEngine                           │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌──────────────┐     ┌──────────────┐     ┌─────────────┐ │
-│  │ Complexity   │────▶│ TaskPlanner  │────▶│ Executor    │ │
-│  │ Assessor     │     │              │     │             │ │
-│  └──────────────┘     └──────────────┘     └─────────────┘ │
-│         │                    │                    │         │
-│         ▼                    ▼                    ▼         │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │              ConversationManager                      │  │
-│  │         (natural language formatting)                 │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                            │                                │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │                   SafetyManager                       │  │
-│  │    (backups, rollback stack, risk assessment)         │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      ReasoningEngine                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  ┌──────────────┐     ┌──────────────┐     ┌─────────────────┐  │
+│  │ Complexity   │────▶│ TaskPlanner  │────▶│ AdaptiveExecutor│  │
+│  │ Assessor     │     │              │     │                 │  │
+│  └──────────────┘     └──────────────┘     └────────┬────────┘  │
+│         │                    │                      │            │
+│         │                    │           ┌──────────┴─────────┐ │
+│         │                    │           │  ErrorClassifier   │ │
+│         │                    │           │  AdaptiveReplanner │ │
+│         │                    │           │  ExecutionLearner  │ │
+│         │                    │           └────────────────────┘ │
+│         ▼                    ▼                    │              │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │                ConversationManager                          │ │
+│  │           (natural language formatting)                     │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                              │                                   │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │                     SafetyManager                           │ │
+│  │      (backups, rollback stack, risk assessment)             │ │
+│  └────────────────────────────────────────────────────────────┘ │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Components
@@ -163,7 +168,10 @@ ReOS: Okay, keeping it short.
 |-----------|---------|
 | **ComplexityAssessor** | Fast classification using pattern matching |
 | **TaskPlanner** | Breaks requests into steps with dependencies |
-| **ExecutionEngine** | Runs steps with verification and rollback |
+| **AdaptiveExecutor** | Runs steps with automatic error recovery |
+| **ErrorClassifier** | Diagnoses failures (missing deps, permissions, etc.) |
+| **AdaptiveReplanner** | Dynamically revises plans on failure |
+| **ExecutionLearner** | Learns what works on this specific system |
 | **ConversationManager** | Formats output naturally |
 | **SafetyManager** | Risk analysis, backups, rollback capability |
 
@@ -229,6 +237,72 @@ ReOS: [Executes with progress updates]
 3. **Rollback capability** - Most operations can be undone with a single command
 4. **Transparent execution** - You always see what's being run
 5. **Graceful failure** - If something breaks, changes are rolled back
+
+## Adaptive Execution
+
+When things go wrong during execution, ReOS doesn't just fail - it tries to fix the problem automatically.
+
+### Error Classification
+
+When a step fails, ReOS classifies the error into one of these categories:
+
+| Category | Examples | Automatic Recovery |
+|----------|----------|-------------------|
+| **Missing Dependency** | "command not found", "package not installed" | Install the missing package |
+| **Permission Denied** | "Permission denied", "must be root" | Retry with sudo |
+| **Transient** | "Connection timed out", "Network unreachable" | Wait and retry |
+| **Resource Busy** | "Device busy", "lock file exists" | Wait and retry |
+| **Already Exists** | "File exists", "already installed" | Often fine, continue |
+| **Not Found** | "No such file or directory" | Ask for help |
+| **Conflict** | "Dependency conflict", "version mismatch" | Ask for help |
+
+### Automatic Recovery Example
+
+```
+You: install and configure nginx
+
+ReOS: [Starts executing plan...]
+
+      Step 1: Installing nginx...
+      ✗ Error: Unable to locate package nginx
+
+      → Diagnosed: Missing dependency (apt cache outdated)
+      → Trying fix: Updating package cache first...
+      ✓ apt update completed
+
+      → Retrying: Installing nginx...
+      ✓ nginx installed
+
+      Step 2: Enabling nginx service...
+      ✓ Done
+
+      Completed with 1 recovery action.
+```
+
+### Learning From Experience
+
+ReOS remembers what works on your specific system:
+
+- **Successful patterns** - Steps that worked are more likely to be used again
+- **Failed patterns** - Steps that consistently fail get flagged
+- **System quirks** - Platform-specific behaviors are recorded
+
+This data is stored locally at `~/.config/reos/knowledge.db`.
+
+```
+You: why did you update apt first?
+
+ReOS: I learned that on this system, apt install often fails
+      without a recent cache update. I've seen this 3 times before,
+      so now I do it proactively.
+```
+
+### Recovery Limits
+
+For safety, automatic recovery is limited:
+- Maximum 3 recovery attempts per execution
+- Maximum 2 fix attempts per error type
+- User intervention required for critical or unclassifiable errors
 
 ## Limitations
 

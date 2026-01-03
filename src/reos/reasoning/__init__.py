@@ -7,8 +7,14 @@ Components:
     - ComplexityAssessor: Determines if a request needs planning
     - TaskPlanner: Breaks complex requests into verifiable steps
     - ExecutionEngine: Runs steps with monitoring and rollback
+    - AdaptiveExecutor: Enhanced executor with automatic error recovery
     - ConversationManager: Natural language interface
     - SafetyManager: Risk analysis and rollback capability
+
+Adaptive Features:
+    - ErrorClassifier: Diagnoses failures (missing deps, permissions, etc.)
+    - AdaptiveReplanner: Dynamically revises plans on failure
+    - ExecutionLearner: Learns what works on this specific system
 
 Example:
     from reos.reasoning import ReasoningEngine
@@ -23,6 +29,15 @@ from .executor import ExecutionEngine, StepResult, ExecutionState
 from .conversation import ConversationManager
 from .safety import SafetyManager, RiskLevel, RollbackAction
 from .engine import ReasoningEngine
+from .adaptive import (
+    ErrorClassifier,
+    ErrorCategory,
+    ErrorDiagnosis,
+    AdaptiveReplanner,
+    AdaptiveExecutor,
+    ExecutionLearner,
+    ExecutionMemory,
+)
 
 __all__ = [
     # Main entry point
@@ -38,6 +53,14 @@ __all__ = [
     "ExecutionEngine",
     "StepResult",
     "ExecutionState",
+    # Adaptive execution
+    "ErrorClassifier",
+    "ErrorCategory",
+    "ErrorDiagnosis",
+    "AdaptiveReplanner",
+    "AdaptiveExecutor",
+    "ExecutionLearner",
+    "ExecutionMemory",
     # Conversation
     "ConversationManager",
     # Safety

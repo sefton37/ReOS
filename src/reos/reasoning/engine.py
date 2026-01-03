@@ -16,6 +16,7 @@ from .planner import TaskPlanner, TaskPlan
 from .executor import ExecutionEngine, ExecutionContext, ExecutionState
 from .conversation import ConversationManager, ConversationPreferences, VerbosityLevel
 from .safety import SafetyManager
+from .adaptive import AdaptiveExecutor, ExecutionLearner, ErrorClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,11 @@ class ReasoningEngine:
         self.planner = TaskPlanner(self.safety, llm_planner)
         self.executor = ExecutionEngine(self.safety, tool_executor)
 
+        # Adaptive execution with learning
+        self.learner = ExecutionLearner()
+        self.adaptive_executor = AdaptiveExecutor(self.executor, self.learner)
+        self.error_classifier = ErrorClassifier()
+
         # Conversation settings from config
         conv_prefs = ConversationPreferences(
             verbosity=self.config.verbosity,
@@ -169,6 +175,7 @@ class ReasoningEngine:
         # Active contexts for multi-turn interactions
         self._active_contexts: dict[str, ExecutionContext] = {}
         self._pending_plan: TaskPlan | None = None
+        self._recovery_messages: list[str] = []
 
     def process(
         self,
@@ -269,11 +276,22 @@ class ReasoningEngine:
             },
         )
 
-        # Execute all steps
-        success = self.executor.execute_all(context)
+        # Use adaptive executor for automatic error recovery
+        def on_recovery(explanation: str) -> None:
+            self._recovery_messages.append(explanation)
+            logger.info("Recovery: %s", explanation)
 
-        # Format response
+        success = self.adaptive_executor.execute_with_recovery(
+            context,
+            on_recovery_attempt=on_recovery,
+        )
+
+        # Format response with any recovery messages
         response = self.conversation.format_execution_complete(context)
+        if self._recovery_messages:
+            recovery_summary = "\n".join(f"• {m}" for m in self._recovery_messages)
+            response = f"{response}\n\nRecovery actions taken:\n{recovery_summary}"
+            self._recovery_messages.clear()
 
         return ProcessingResult(
             response=response,

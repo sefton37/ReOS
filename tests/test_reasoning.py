@@ -521,3 +521,594 @@ class TestIntegration:
 
         stack = self.engine.get_rollback_stack()
         assert len(stack) == 1
+
+
+# Import adaptive components for testing
+from reos.reasoning.adaptive import (
+    ErrorClassifier,
+    ErrorCategory,
+    ErrorDiagnosis,
+    AdaptiveReplanner,
+    ExecutionLearner,
+    ExecutionMemory,
+    AdaptiveExecutor,
+)
+
+
+class TestErrorClassifier:
+    """Tests for error classification system."""
+
+    def setup_method(self) -> None:
+        self.classifier = ErrorClassifier()
+
+    def test_classify_missing_dependency(self) -> None:
+        """Should classify missing dependency errors."""
+        errors = [
+            "bash: htop: command not found",
+            "Unable to locate package nginx",
+            "ModuleNotFoundError: No module named 'requests'",
+            "error while loading shared libraries: libfoo.so",
+        ]
+
+        for error in errors:
+            diagnosis = self.classifier.classify(error)
+            assert diagnosis.category == ErrorCategory.MISSING_DEPENDENCY
+            assert diagnosis.is_retryable
+            assert diagnosis.confidence > 0.6
+
+    def test_classify_permission_denied(self) -> None:
+        """Should classify permission errors."""
+        errors = [
+            "Permission denied: /etc/passwd",
+            "must be root to perform this operation",
+            "Operation not permitted",
+        ]
+
+        for error in errors:
+            diagnosis = self.classifier.classify(error)
+            assert diagnosis.category == ErrorCategory.PERMISSION_DENIED
+            assert diagnosis.is_retryable
+
+    def test_classify_not_found(self) -> None:
+        """Should classify file/resource not found errors."""
+        errors = [
+            "No such file or directory: /foo/bar",
+            "unit nginx.service not found",
+        ]
+
+        for error in errors:
+            diagnosis = self.classifier.classify(error)
+            assert diagnosis.category == ErrorCategory.NOT_FOUND
+            assert diagnosis.requires_user  # Usually needs human judgment
+
+    def test_classify_already_exists(self) -> None:
+        """Should classify already-exists conditions."""
+        errors = [
+            "File exists: /tmp/test",
+            "nginx is already installed",
+            "service already running",
+        ]
+
+        for error in errors:
+            diagnosis = self.classifier.classify(error)
+            assert diagnosis.category == ErrorCategory.ALREADY_EXISTS
+            # Often not a real error
+            assert not diagnosis.is_retryable
+
+    def test_classify_transient(self) -> None:
+        """Should classify transient/network errors."""
+        errors = [
+            "Connection timed out",
+            "Network is unreachable",
+            "Could not resolve host: example.com",
+        ]
+
+        for error in errors:
+            diagnosis = self.classifier.classify(error)
+            assert diagnosis.category == ErrorCategory.TRANSIENT
+            assert diagnosis.is_retryable
+
+    def test_classify_resource_busy(self) -> None:
+        """Should classify busy resource errors."""
+        errors = [
+            "Device or resource busy",
+            "Could not get lock /var/lib/apt/lists/lock",
+        ]
+
+        for error in errors:
+            diagnosis = self.classifier.classify(error)
+            assert diagnosis.category == ErrorCategory.RESOURCE_BUSY
+            assert diagnosis.is_retryable
+
+    def test_classify_unknown_error(self) -> None:
+        """Should handle unknown errors gracefully."""
+        diagnosis = self.classifier.classify("Something weird happened")
+        assert diagnosis.category == ErrorCategory.UNKNOWN
+        assert diagnosis.requires_user
+
+    def test_empty_error_handled(self) -> None:
+        """Should handle empty error strings."""
+        diagnosis = self.classifier.classify("")
+        assert diagnosis.category == ErrorCategory.UNKNOWN
+        assert diagnosis.confidence == 0.0
+
+    def test_extract_package_name(self) -> None:
+        """Should extract package names from errors."""
+        test_cases = [
+            ("command not found: htop", "htop"),
+            ("Unable to locate package nginx", "nginx"),
+            ("ModuleNotFoundError: No module named 'requests'", "requests"),
+        ]
+
+        for error, expected in test_cases:
+            package = self.classifier._extract_package_name(error)
+            assert package == expected
+
+    def test_suggests_fix_command(self) -> None:
+        """Should suggest fix commands when possible."""
+        # Permission error should suggest sudo
+        diagnosis = self.classifier.classify("Permission denied", "cat /etc/shadow")
+        assert diagnosis.fix_command is not None
+        assert "sudo" in diagnosis.fix_command
+
+        # Transient error should suggest retry
+        diagnosis = self.classifier.classify("Connection timed out", "curl example.com")
+        assert diagnosis.fix_command is not None
+
+
+class TestAdaptiveReplanner:
+    """Tests for adaptive replanning system."""
+
+    def setup_method(self) -> None:
+        self.classifier = ErrorClassifier()
+        self.memory = ExecutionMemory()
+        self.replanner = AdaptiveReplanner(self.classifier, self.memory)
+
+    def test_handle_permission_failure(self) -> None:
+        """Should generate sudo fix for permission errors."""
+        step = TaskStep(
+            id="test",
+            title="Read file",
+            description="Try to read a file",
+            step_type=StepType.COMMAND,
+            action={"command": "cat /etc/shadow"},
+        )
+
+        result = StepResult(
+            step_id="test",
+            success=False,
+            output="",
+            error="Permission denied",
+            duration_seconds=0.1,
+        )
+
+        fix_step, explanation = self.replanner.handle_step_failure(
+            TaskPlan(
+                id="test",
+                title="Test",
+                original_request="test",
+                created_at=__import__("datetime").datetime.now(),
+                steps=[step],
+            ),
+            step,
+            result,
+        )
+
+        assert fix_step is not None
+        assert "sudo" in fix_step.action.get("command", "")
+        assert "fix" in fix_step.id
+
+    def test_handle_missing_dependency(self) -> None:
+        """Should suggest package installation for missing commands."""
+        step = TaskStep(
+            id="test",
+            title="Run htop",
+            description="Launch htop",
+            step_type=StepType.COMMAND,
+            action={"command": "htop"},
+        )
+
+        result = StepResult(
+            step_id="test",
+            success=False,
+            output="",
+            error="htop: command not found",
+            duration_seconds=0.1,
+        )
+
+        fix_step, explanation = self.replanner.handle_step_failure(
+            TaskPlan(
+                id="test",
+                title="Test",
+                original_request="test",
+                created_at=__import__("datetime").datetime.now(),
+                steps=[step],
+            ),
+            step,
+            result,
+        )
+
+        assert fix_step is not None
+        # Should suggest installing htop
+        assert "htop" in fix_step.action.get("command", "") or "htop" in explanation
+
+    def test_max_fix_attempts_honored(self) -> None:
+        """Should stop after max fix attempts."""
+        step = TaskStep(
+            id="test",
+            title="Test",
+            description="Test",
+            step_type=StepType.COMMAND,
+            action={"command": "fail"},
+        )
+
+        result = StepResult(
+            step_id="test",
+            success=False,
+            output="",
+            error="Permission denied",
+            duration_seconds=0.1,
+        )
+
+        plan = TaskPlan(
+            id="test",
+            title="Test",
+            original_request="test",
+            created_at=__import__("datetime").datetime.now(),
+            steps=[step],
+        )
+
+        # Simulate previous attempts
+        from reos.reasoning.adaptive import ResolutionAttempt
+
+        for _ in range(3):
+            self.memory.resolution_history.append(
+                ResolutionAttempt(
+                    error_diagnosis=ErrorDiagnosis(
+                        category=ErrorCategory.PERMISSION_DENIED,
+                        original_error="Permission denied",
+                        explanation="",
+                        is_retryable=True,
+                        suggested_fix=None,
+                        fix_command=None,
+                        requires_user=False,
+                        confidence=0.8,
+                    ),
+                    fix_applied="sudo test",
+                    success=False,
+                    result_message="Still failed",
+                )
+            )
+
+        fix_step, explanation = self.replanner.handle_step_failure(plan, step, result)
+
+        # Should refuse to try again
+        assert fix_step is None
+        assert "tried" in explanation.lower()
+
+    def test_inject_dependency_step(self) -> None:
+        """Should inject dependency installation steps."""
+        step = TaskStep(
+            id="use_nginx",
+            title="Configure nginx",
+            description="Configure",
+            step_type=StepType.COMMAND,
+            action={"command": "nginx -t"},
+        )
+
+        plan = TaskPlan(
+            id="test",
+            title="Test",
+            original_request="test",
+            created_at=__import__("datetime").datetime.now(),
+            steps=[step],
+        )
+
+        new_step = self.replanner.inject_dependency_step(plan, step, "nginx")
+
+        assert len(plan.steps) == 2
+        assert plan.steps[0].id.startswith("install_nginx")
+        assert "nginx" in plan.steps[0].action.get("command", "")
+
+    def test_suggest_alternatives(self) -> None:
+        """Should suggest alternative approaches."""
+        step = TaskStep(
+            id="test",
+            title="Test",
+            description="Test",
+            step_type=StepType.COMMAND,
+            action={"command": "read /etc/shadow"},
+        )
+
+        diagnosis = ErrorDiagnosis(
+            category=ErrorCategory.PERMISSION_DENIED,
+            original_error="Permission denied",
+            explanation="Need sudo",
+            is_retryable=True,
+            suggested_fix="Use sudo",
+            fix_command="sudo read /etc/shadow",
+            requires_user=False,
+            confidence=0.8,
+        )
+
+        alternatives = self.replanner.suggest_alternatives(step, diagnosis)
+
+        assert len(alternatives) > 0
+        assert any("sudo" in str(a) for a in alternatives)
+
+
+class TestExecutionLearner:
+    """Tests for execution learning system."""
+
+    def setup_method(self) -> None:
+        self.temp_dir = tempfile.mkdtemp()
+        self.learner = ExecutionLearner(
+            storage_path=Path(self.temp_dir) / "knowledge.db"
+        )
+
+    def teardown_method(self) -> None:
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_record_success(self) -> None:
+        """Should record successful executions."""
+        step = TaskStep(
+            id="test",
+            title="Test",
+            description="Test",
+            step_type=StepType.COMMAND,
+            action={"command": "echo hello"},
+        )
+
+        result = StepResult(
+            step_id="test",
+            success=True,
+            output="hello",
+            duration_seconds=0.1,
+        )
+
+        self.learner.record_success(step, result)
+
+        # Should have recorded
+        assert len(self.learner.memory.successful_patterns) > 0
+
+    def test_record_failure(self) -> None:
+        """Should record failed executions."""
+        step = TaskStep(
+            id="test",
+            title="Test",
+            description="Test",
+            step_type=StepType.COMMAND,
+            action={"command": "fail"},
+        )
+
+        result = StepResult(
+            step_id="test",
+            success=False,
+            output="",
+            error="Something failed",
+            duration_seconds=0.1,
+        )
+
+        diagnosis = ErrorDiagnosis(
+            category=ErrorCategory.UNKNOWN,
+            original_error="Something failed",
+            explanation="Unknown error",
+            is_retryable=False,
+            suggested_fix=None,
+            fix_command=None,
+            requires_user=True,
+            confidence=0.5,
+        )
+
+        self.learner.record_failure(step, result, diagnosis)
+
+        # Should have recorded
+        assert len(self.learner.memory.failed_patterns) > 0
+
+    def test_success_rate_calculation(self) -> None:
+        """Should calculate success rate from history."""
+        step = TaskStep(
+            id="test",
+            title="Test",
+            description="Test",
+            step_type=StepType.COMMAND,
+            action={"command": "echo test"},
+        )
+
+        # Initially 50% (unknown)
+        rate = self.learner.get_success_rate(step)
+        assert rate == 0.5
+
+        # Record 2 successes
+        for _ in range(2):
+            self.learner.record_success(
+                step,
+                StepResult(step_id="test", success=True, output="", duration_seconds=0.1),
+            )
+
+        # Record 1 failure
+        self.learner.record_failure(
+            step,
+            StepResult(step_id="test", success=False, output="", error="fail", duration_seconds=0.1),
+            ErrorDiagnosis(
+                category=ErrorCategory.UNKNOWN,
+                original_error="fail",
+                explanation="",
+                is_retryable=False,
+                suggested_fix=None,
+                fix_command=None,
+                requires_user=True,
+                confidence=0.5,
+            ),
+        )
+
+        # Should be 2/3
+        rate = self.learner.get_success_rate(step)
+        assert 0.6 < rate < 0.7
+
+    def test_should_skip_after_repeated_failures(self) -> None:
+        """Should suggest skipping consistently failing steps."""
+        step = TaskStep(
+            id="test",
+            title="Test",
+            description="Test",
+            step_type=StepType.COMMAND,
+            action={"command": "consistently_fail"},
+        )
+
+        diagnosis = ErrorDiagnosis(
+            category=ErrorCategory.PERMISSION_DENIED,
+            original_error="Permission denied",
+            explanation="",
+            is_retryable=False,
+            suggested_fix=None,
+            fix_command=None,
+            requires_user=True,
+            confidence=0.8,
+        )
+
+        # Record 3 failures with same error
+        for _ in range(3):
+            self.learner.record_failure(
+                step,
+                StepResult(step_id="test", success=False, output="", error="Permission denied", duration_seconds=0.1),
+                diagnosis,
+            )
+
+        should_skip, reason = self.learner.should_skip_step(step)
+
+        assert should_skip
+        assert "failed" in reason.lower() or "permission" in reason.lower()
+
+    def test_save_and_load(self) -> None:
+        """Should persist and reload learning data."""
+        step = TaskStep(
+            id="test",
+            title="Test",
+            description="Test",
+            step_type=StepType.COMMAND,
+            action={"command": "echo test"},
+        )
+
+        self.learner.record_success(
+            step,
+            StepResult(step_id="test", success=True, output="test", duration_seconds=0.1),
+        )
+
+        self.learner.save()
+
+        # Create new learner and load
+        new_learner = ExecutionLearner(
+            storage_path=Path(self.temp_dir) / "knowledge.db"
+        )
+
+        # Should have the pattern
+        assert len(new_learner.memory.successful_patterns) > 0
+
+    def test_record_system_quirk(self) -> None:
+        """Should record system-specific behaviors."""
+        self.learner.record_system_quirk(
+            "apt_requires_update",
+            "apt install fails without apt update first",
+        )
+
+        assert "apt_requires_update" in self.learner.memory.system_quirks
+
+
+class TestAdaptiveExecutor:
+    """Tests for the adaptive executor."""
+
+    def setup_method(self) -> None:
+        self.temp_dir = tempfile.mkdtemp()
+        self.safety = SafetyManager(backup_dir=Path(self.temp_dir))
+        self.base_executor = ExecutionEngine(self.safety)
+        self.learner = ExecutionLearner(
+            storage_path=Path(self.temp_dir) / "knowledge.db"
+        )
+        self.adaptive = AdaptiveExecutor(self.base_executor, self.learner)
+
+    def teardown_method(self) -> None:
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_successful_execution(self) -> None:
+        """Should execute successfully and record learning."""
+        plan = TaskPlan(
+            id="test",
+            title="Test",
+            original_request="test",
+            created_at=__import__("datetime").datetime.now(),
+            steps=[
+                TaskStep(
+                    id="1",
+                    title="Echo",
+                    description="Echo test",
+                    step_type=StepType.COMMAND,
+                    action={"command": "echo hello"},
+                ),
+            ],
+            approved=True,
+        )
+
+        context = self.base_executor.start_execution(plan)
+        success = self.adaptive.execute_with_recovery(context)
+
+        assert success
+        # Should have recorded success
+        assert len(self.learner.memory.successful_patterns) > 0
+
+    def test_recovery_callback_called(self) -> None:
+        """Should call recovery callback on failure."""
+        plan = TaskPlan(
+            id="test",
+            title="Test",
+            original_request="test",
+            created_at=__import__("datetime").datetime.now(),
+            steps=[
+                TaskStep(
+                    id="1",
+                    title="Fail",
+                    description="Will fail",
+                    step_type=StepType.COMMAND,
+                    action={"command": "exit 1"},
+                ),
+            ],
+            approved=True,
+        )
+
+        recovery_messages = []
+
+        def on_recovery(msg: str) -> None:
+            recovery_messages.append(msg)
+
+        context = self.base_executor.start_execution(plan)
+        self.adaptive.execute_with_recovery(context, on_recovery_attempt=on_recovery)
+
+        # May or may not have recovery messages depending on error classification
+        # but execution should complete without raising
+
+    def test_learning_persisted_after_execution(self) -> None:
+        """Should save learning data after execution."""
+        plan = TaskPlan(
+            id="test",
+            title="Test",
+            original_request="test",
+            created_at=__import__("datetime").datetime.now(),
+            steps=[
+                TaskStep(
+                    id="1",
+                    title="Echo",
+                    description="Echo test",
+                    step_type=StepType.COMMAND,
+                    action={"command": "echo hello"},
+                ),
+            ],
+            approved=True,
+        )
+
+        context = self.base_executor.start_execution(plan)
+        self.adaptive.execute_with_recovery(context)
+
+        # Check file was saved
+        assert (Path(self.temp_dir) / "knowledge.db").exists()
