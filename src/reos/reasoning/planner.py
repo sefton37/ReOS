@@ -439,8 +439,8 @@ class TaskPlanner:
             llm_steps = self.llm_planner(request, system_context or {})
             plan.steps = self._parse_llm_steps(llm_steps)
         else:
-            # Fallback: create a basic diagnostic plan
-            plan.steps = self._create_fallback_plan(request)
+            # Goal-oriented fallback: parse intent and create actionable plan
+            plan.steps = self._create_fallback_plan(request, system_context)
 
         # Assess risks for all steps
         self._assess_plan_risks(plan)
@@ -587,25 +587,336 @@ class TaskPlanner:
 
         return steps
 
-    def _create_fallback_plan(self, request: str) -> list[TaskStep]:
-        """Create a basic diagnostic plan when no template matches."""
+    def _create_fallback_plan(self, request: str, context: dict[str, Any] | None = None) -> list[TaskStep]:
+        """Create a goal-oriented plan based on intent parsing.
+
+        Instead of useless diagnostic steps, this parses the user's intent
+        and creates steps that actually accomplish the goal.
+        """
+        context = context or {}
+        intent = self._parse_intent(request)
+
+        if not intent:
+            # Truly ambiguous - need clarification
+            return [
+                TaskStep(
+                    id="clarify",
+                    title="Need clarification",
+                    description="I couldn't determine what action you want to take",
+                    step_type=StepType.USER_PROMPT,
+                    action={"prompt": f"Could you clarify what you'd like me to do? Request was: {request}"},
+                    explanation="I need more details to create an actionable plan",
+                ),
+            ]
+
+        action = intent["action"]
+        resource_type = intent["resource_type"]
+        filter_term = intent.get("filter")
+
+        # Generate plan based on intent
+        if resource_type == "container":
+            return self._plan_container_action(action, filter_term, context)
+        elif resource_type == "service":
+            return self._plan_service_action(action, filter_term, context)
+        elif resource_type == "package":
+            return self._plan_package_action(action, filter_term, context)
+        else:
+            # Generic command execution
+            return self._plan_generic_action(request, context)
+
+    def _parse_intent(self, request: str) -> dict[str, Any] | None:
+        """Parse user intent: action + resource type + optional filter.
+
+        Examples:
+            "remove all nextcloud containers" -> {action: "remove", resource_type: "container", filter: "nextcloud"}
+            "stop the redis service" -> {action: "stop", resource_type: "service", filter: "redis"}
+            "install nginx" -> {action: "install", resource_type: "package", filter: "nginx"}
+        """
+        import re
+        request_lower = request.lower()
+
+        # Container actions
+        container_match = re.search(
+            r"\b(stop|remove|delete|rm|kill|restart|start)\b.*?\b(all\s+)?(\w+)?\s*containers?\b",
+            request_lower,
+        )
+        if container_match:
+            action = container_match.group(1)
+            if action in ("delete", "rm"):
+                action = "remove"
+            filter_term = container_match.group(3)
+            return {"action": action, "resource_type": "container", "filter": filter_term}
+
+        # Also match "containers" before action: "nextcloud containers remove"
+        container_match2 = re.search(
+            r"\b(\w+)\s+containers?\s+(stop|remove|delete|rm|kill|restart|start)\b",
+            request_lower,
+        )
+        if container_match2:
+            filter_term = container_match2.group(1)
+            action = container_match2.group(2)
+            if action in ("delete", "rm"):
+                action = "remove"
+            return {"action": action, "resource_type": "container", "filter": filter_term}
+
+        # Service actions
+        service_match = re.search(
+            r"\b(stop|start|restart|enable|disable|status)\b.*?\b(\w+)?\s*services?\b",
+            request_lower,
+        )
+        if service_match:
+            return {
+                "action": service_match.group(1),
+                "resource_type": "service",
+                "filter": service_match.group(2),
+            }
+
+        # Also: "restart nginx" / "stop docker"
+        service_match2 = re.search(
+            r"\b(restart|stop|start|enable|disable)\s+(\w+)\b",
+            request_lower,
+        )
+        if service_match2:
+            action = service_match2.group(1)
+            target = service_match2.group(2)
+            # Heuristic: if target looks like a service name
+            if target not in ("all", "the", "my", "this"):
+                return {"action": action, "resource_type": "service", "filter": target}
+
+        # Package actions
+        package_match = re.search(
+            r"\b(install|remove|uninstall|update|upgrade)\s+(\w+)\b",
+            request_lower,
+        )
+        if package_match:
+            action = package_match.group(1)
+            if action == "uninstall":
+                action = "remove"
+            return {
+                "action": action,
+                "resource_type": "package",
+                "filter": package_match.group(2),
+            }
+
+        return None
+
+    def _plan_container_action(
+        self,
+        action: str,
+        filter_term: str | None,
+        context: dict[str, Any],
+    ) -> list[TaskStep]:
+        """Create plan for container operations."""
+        container_names = context.get("container_names", [])
+
+        # Find matching containers
+        if filter_term:
+            matching = [
+                name for name in container_names
+                if filter_term.lower() in name.lower()
+            ]
+        else:
+            matching = list(container_names)
+
+        if not matching and filter_term:
+            # No matches found
+            return [
+                TaskStep(
+                    id="no_match",
+                    title=f"No containers matching '{filter_term}'",
+                    description=f"Could not find any containers matching '{filter_term}'",
+                    step_type=StepType.USER_PROMPT,
+                    action={"prompt": f"No containers found matching '{filter_term}'. Available: {container_names}"},
+                    explanation=f"I couldn't find containers matching '{filter_term}'",
+                ),
+            ]
+
+        steps = []
+
+        # Create steps for each matching container
+        for i, container in enumerate(matching):
+            step_id = f"{action}_{i}"
+
+            if action == "stop":
+                steps.append(TaskStep(
+                    id=step_id,
+                    title=f"Stop {container}",
+                    description=f"Stop container: {container}",
+                    step_type=StepType.COMMAND,
+                    action={"tool": "linux_run_command", "args": {"command": f"docker stop {shlex.quote(container)}"}},
+                    rollback_command=f"docker start {shlex.quote(container)}",
+                    explanation=f"Stop the {container} container",
+                ))
+            elif action == "remove":
+                # Stop first, then remove
+                stop_id = f"stop_{i}"
+                steps.append(TaskStep(
+                    id=stop_id,
+                    title=f"Stop {container}",
+                    description=f"Stop container before removal: {container}",
+                    step_type=StepType.COMMAND,
+                    action={"tool": "linux_run_command", "args": {"command": f"docker stop {shlex.quote(container)} 2>/dev/null || true"}},
+                    explanation=f"Stop {container} before removing it",
+                ))
+                steps.append(TaskStep(
+                    id=step_id,
+                    title=f"Remove {container}",
+                    description=f"Remove container: {container}",
+                    step_type=StepType.COMMAND,
+                    action={"tool": "linux_run_command", "args": {"command": f"docker rm {shlex.quote(container)}"}},
+                    depends_on=[stop_id],
+                    explanation=f"Remove the {container} container",
+                ))
+            elif action == "restart":
+                steps.append(TaskStep(
+                    id=step_id,
+                    title=f"Restart {container}",
+                    description=f"Restart container: {container}",
+                    step_type=StepType.COMMAND,
+                    action={"tool": "linux_run_command", "args": {"command": f"docker restart {shlex.quote(container)}"}},
+                    explanation=f"Restart the {container} container",
+                ))
+            elif action == "start":
+                steps.append(TaskStep(
+                    id=step_id,
+                    title=f"Start {container}",
+                    description=f"Start container: {container}",
+                    step_type=StepType.COMMAND,
+                    action={"tool": "linux_run_command", "args": {"command": f"docker start {shlex.quote(container)}"}},
+                    explanation=f"Start the {container} container",
+                ))
+            elif action == "kill":
+                steps.append(TaskStep(
+                    id=step_id,
+                    title=f"Kill {container}",
+                    description=f"Force kill container: {container}",
+                    step_type=StepType.COMMAND,
+                    action={"tool": "linux_run_command", "args": {"command": f"docker kill {shlex.quote(container)}"}},
+                    rollback_command=f"docker start {shlex.quote(container)}",
+                    explanation=f"Force kill the {container} container",
+                ))
+
+        return steps
+
+    def _plan_service_action(
+        self,
+        action: str,
+        filter_term: str | None,
+        context: dict[str, Any],
+    ) -> list[TaskStep]:
+        """Create plan for service operations."""
+        service_names = context.get("service_names", [])
+
+        # Resolve service name
+        if filter_term:
+            resolved = self._resolve_service_name(filter_term, context)
+        else:
+            resolved = filter_term
+
+        steps = []
+
+        if action in ("stop", "start", "restart", "enable", "disable"):
+            steps.append(TaskStep(
+                id=f"{action}_service",
+                title=f"{action.capitalize()} {resolved}",
+                description=f"{action.capitalize()} the {resolved} service",
+                step_type=StepType.COMMAND,
+                action={"tool": "linux_run_command", "args": {"command": f"sudo systemctl {action} {shlex.quote(resolved)}"}},
+                explanation=f"{action.capitalize()} the {resolved} service using systemctl",
+            ))
+            # Add verification step
+            steps.append(TaskStep(
+                id="verify_service",
+                title=f"Verify {resolved} status",
+                description=f"Check the status of {resolved}",
+                step_type=StepType.VERIFICATION,
+                action={"tool": "linux_service_status", "args": {"service_name": resolved}},
+                depends_on=[f"{action}_service"],
+                explanation=f"Verify that {resolved} is in the expected state",
+            ))
+        elif action == "status":
+            steps.append(TaskStep(
+                id="check_status",
+                title=f"Check {resolved} status",
+                description=f"Get status of {resolved}",
+                step_type=StepType.DIAGNOSTIC,
+                action={"tool": "linux_service_status", "args": {"service_name": resolved}},
+                explanation=f"Check the current status of {resolved}",
+            ))
+
+        return steps
+
+    def _plan_package_action(
+        self,
+        action: str,
+        package: str | None,
+        context: dict[str, Any],
+    ) -> list[TaskStep]:
+        """Create plan for package operations."""
+        pkg_manager = context.get("package_manager") or self._detect_pkg_manager()
+
+        steps = []
+
+        if action == "install":
+            steps.append(TaskStep(
+                id="update_cache",
+                title="Update package cache",
+                description="Refresh package manager cache",
+                step_type=StepType.COMMAND,
+                action={"tool": "linux_run_command", "args": {"command": f"{pkg_manager} update"}},
+                explanation="Update package lists to get latest versions",
+            ))
+            steps.append(TaskStep(
+                id="install_package",
+                title=f"Install {package}",
+                description=f"Install the {package} package",
+                step_type=StepType.COMMAND,
+                action={"tool": "linux_run_command", "args": {"command": f"{pkg_manager} install -y {shlex.quote(package)}"}},
+                depends_on=["update_cache"],
+                explanation=f"Install {package} using {pkg_manager}",
+            ))
+        elif action == "remove":
+            steps.append(TaskStep(
+                id="remove_package",
+                title=f"Remove {package}",
+                description=f"Remove the {package} package",
+                step_type=StepType.COMMAND,
+                action={"tool": "linux_run_command", "args": {"command": f"{pkg_manager} remove -y {shlex.quote(package)}"}},
+                explanation=f"Remove {package} using {pkg_manager}",
+            ))
+        elif action in ("update", "upgrade"):
+            if package:
+                steps.append(TaskStep(
+                    id="upgrade_package",
+                    title=f"Upgrade {package}",
+                    description=f"Upgrade the {package} package",
+                    step_type=StepType.COMMAND,
+                    action={"tool": "linux_run_command", "args": {"command": f"{pkg_manager} install --only-upgrade -y {shlex.quote(package)}"}},
+                    explanation=f"Upgrade {package} to the latest version",
+                ))
+            else:
+                steps.append(TaskStep(
+                    id="upgrade_all",
+                    title="Upgrade all packages",
+                    description="Upgrade all installed packages",
+                    step_type=StepType.COMMAND,
+                    action={"tool": "linux_run_command", "args": {"command": f"{pkg_manager} upgrade -y"}},
+                    explanation="Upgrade all packages to their latest versions",
+                ))
+
+        return steps
+
+    def _plan_generic_action(self, request: str, context: dict[str, Any]) -> list[TaskStep]:
+        """Create a generic plan when intent is unclear but request is actionable."""
+        # For truly unknown requests, provide a helpful response
         return [
             TaskStep(
-                id="gather_info",
-                title="Gather system information",
-                description="Collect relevant system state",
-                step_type=StepType.DIAGNOSTIC,
-                action={"tool": "linux_system_info", "args": {}},
-                explanation="First, let's understand your current system state",
-            ),
-            TaskStep(
-                id="analyze",
-                title="Analyze request",
-                description="Determine specific actions needed",
+                id="clarify",
+                title="Need more details",
+                description=f"I understand you want to: {request}",
                 step_type=StepType.USER_PROMPT,
-                action={"prompt": f"Based on the system info, what specific steps are needed for: {request}"},
-                depends_on=["gather_info"],
-                explanation="I'll analyze what needs to be done based on your system",
+                action={"prompt": f"I'd like to help with: '{request}'. Could you be more specific about what action you'd like me to take?"},
+                explanation="I need a bit more detail to create an actionable plan",
             ),
         ]
 
