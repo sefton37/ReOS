@@ -100,10 +100,700 @@ def _handle_tools_call(db: Database, *, name: str, arguments: dict[str, Any] | N
         raise RpcError(code=code, message=exc.message, data=exc.data) from exc
 
 
-def _handle_chat_respond(db: Database, *, text: str) -> dict[str, Any]:
+def _handle_chat_respond(
+    db: Database,
+    *,
+    text: str,
+    conversation_id: str | None = None,
+) -> dict[str, Any]:
     agent = ChatAgent(db=db)
-    answer = agent.respond(text)
-    return {"answer": answer}
+
+    # Check for conversational intents (Phase 6)
+    if conversation_id:
+        intent = agent.detect_intent(text)
+
+        if intent:
+            # Handle approval/rejection of pending approvals
+            if intent.intent_type in ("approval", "rejection"):
+                pending = agent.get_pending_approval_for_conversation(conversation_id)
+                if pending:
+                    action = "approve" if intent.intent_type == "approval" else "reject"
+                    result = _handle_approval_respond(
+                        db,
+                        approval_id=str(pending["id"]),
+                        action=action,
+                    )
+                    # Return a synthetic response
+                    import uuid
+                    message_id = uuid.uuid4().hex[:12]
+                    if action == "approve":
+                        if result.get("status") == "executed":
+                            answer = f"Command executed. Return code: {result.get('result', {}).get('return_code', 'unknown')}"
+                        else:
+                            answer = f"Command execution failed: {result.get('result', {}).get('error', 'unknown error')}"
+                    else:
+                        answer = "Command rejected."
+
+                    # Store the response
+                    db.add_message(
+                        message_id=message_id,
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content=answer,
+                        message_type="text",
+                    )
+
+                    return {
+                        "answer": answer,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "message_type": "text",
+                        "tool_calls": [],
+                        "pending_approval_id": None,
+                        "intent_handled": intent.intent_type,
+                    }
+
+            # Handle reference resolution
+            if intent.intent_type == "reference" and intent.reference_term:
+                resolved = agent.resolve_reference(intent.reference_term, conversation_id)
+                if resolved:
+                    # Expand the text to include the resolved entity
+                    text = text.replace(
+                        intent.reference_term,
+                        f"{intent.reference_term} ({resolved.get('type', '')}: {resolved.get('name', resolved.get('id', ''))})"
+                    )
+
+    response = agent.respond(text, conversation_id=conversation_id)
+    return {
+        "answer": response.answer,
+        "conversation_id": response.conversation_id,
+        "message_id": response.message_id,
+        "message_type": response.message_type,
+        "tool_calls": response.tool_calls,
+        "pending_approval_id": response.pending_approval_id,
+    }
+
+
+def _handle_intent_detect(
+    db: Database,
+    *,
+    text: str,
+    conversation_id: str | None = None,
+) -> dict[str, Any]:
+    """Detect the intent of a user message."""
+    agent = ChatAgent(db=db)
+    intent = agent.detect_intent(text)
+
+    if not intent:
+        return {"detected": False}
+
+    result: dict[str, Any] = {
+        "detected": True,
+        "intent_type": intent.intent_type,
+        "confidence": intent.confidence,
+    }
+
+    if intent.choice_number is not None:
+        result["choice_number"] = intent.choice_number
+
+    if intent.reference_term:
+        result["reference_term"] = intent.reference_term
+
+        # Try to resolve the reference if we have a conversation
+        if conversation_id:
+            resolved = agent.resolve_reference(intent.reference_term, conversation_id)
+            if resolved:
+                result["resolved_entity"] = resolved
+
+    return result
+
+
+# -------------------------------------------------------------------------
+# Conversation management handlers
+# -------------------------------------------------------------------------
+
+
+def _handle_conversation_start(db: Database, *, title: str | None = None) -> dict[str, Any]:
+    import uuid
+
+    conversation_id = uuid.uuid4().hex[:12]
+    db.create_conversation(conversation_id=conversation_id, title=title)
+    return {"conversation_id": conversation_id}
+
+
+def _handle_conversation_list(db: Database, *, limit: int = 50) -> dict[str, Any]:
+    conversations = db.iter_conversations(limit=limit)
+    return {
+        "conversations": [
+            {
+                "id": str(c.get("id")),
+                "title": c.get("title"),
+                "started_at": c.get("started_at"),
+                "last_active_at": c.get("last_active_at"),
+            }
+            for c in conversations
+        ]
+    }
+
+
+def _handle_conversation_get_messages(
+    db: Database,
+    *,
+    conversation_id: str,
+    limit: int = 50,
+) -> dict[str, Any]:
+    messages = db.get_messages(conversation_id=conversation_id, limit=limit)
+    return {
+        "messages": [
+            {
+                "id": str(m.get("id")),
+                "role": m.get("role"),
+                "content": m.get("content"),
+                "message_type": m.get("message_type"),
+                "metadata": m.get("metadata"),
+                "created_at": m.get("created_at"),
+            }
+            for m in messages
+        ]
+    }
+
+
+# -------------------------------------------------------------------------
+# Approval workflow handlers
+# -------------------------------------------------------------------------
+
+
+def _handle_approval_pending(
+    db: Database,
+    *,
+    conversation_id: str | None = None,
+) -> dict[str, Any]:
+    """Get all pending approvals."""
+    approvals = db.get_pending_approvals(conversation_id=conversation_id)
+    return {
+        "approvals": [
+            {
+                "id": str(a.get("id")),
+                "conversation_id": a.get("conversation_id"),
+                "command": a.get("command"),
+                "explanation": a.get("explanation"),
+                "risk_level": a.get("risk_level"),
+                "affected_paths": json.loads(a.get("affected_paths") or "[]"),
+                "undo_command": a.get("undo_command"),
+                "plan_id": a.get("plan_id"),
+                "step_id": a.get("step_id"),
+                "created_at": a.get("created_at"),
+            }
+            for a in approvals
+        ]
+    }
+
+
+def _handle_approval_respond(
+    db: Database,
+    *,
+    approval_id: str,
+    action: str,  # 'approve', 'reject'
+    edited_command: str | None = None,
+) -> dict[str, Any]:
+    """Respond to an approval request."""
+    from .linux_tools import execute_command
+
+    approval = db.get_approval(approval_id=approval_id)
+    if approval is None:
+        raise RpcError(code=-32602, message=f"Approval not found: {approval_id}")
+
+    if approval.get("status") != "pending":
+        raise RpcError(code=-32602, message="Approval already resolved")
+
+    if action == "reject":
+        db.resolve_approval(approval_id=approval_id, status="rejected")
+        return {"status": "rejected", "result": None}
+
+    if action == "approve":
+        command = edited_command if edited_command else str(approval.get("command"))
+
+        # Execute the command
+        try:
+            result = execute_command(command)
+            db.resolve_approval(approval_id=approval_id, status="approved")
+            return {
+                "status": "executed",
+                "result": {
+                    "success": result.returncode == 0,
+                    "stdout": result.stdout[:10000] if result.stdout else "",
+                    "stderr": result.stderr[:10000] if result.stderr else "",
+                    "return_code": result.returncode,
+                    "command": command,
+                },
+            }
+        except Exception as exc:
+            db.resolve_approval(approval_id=approval_id, status="approved")
+            return {
+                "status": "error",
+                "result": {"error": str(exc), "command": command},
+            }
+
+    raise RpcError(code=-32602, message=f"Invalid action: {action}")
+
+
+def _handle_approval_explain(
+    db: Database,
+    *,
+    approval_id: str,
+) -> dict[str, Any]:
+    """Get detailed explanation for an approval."""
+    from .linux_tools import preview_command
+
+    approval = db.get_approval(approval_id=approval_id)
+    if approval is None:
+        raise RpcError(code=-32602, message=f"Approval not found: {approval_id}")
+
+    command = str(approval.get("command"))
+    preview = preview_command(command)
+
+    return {
+        "command": command,
+        "explanation": approval.get("explanation") or preview.description,
+        "detailed_explanation": (
+            f"Command: {command}\n\n"
+            f"Description: {preview.description}\n\n"
+            f"Affected paths: {', '.join(preview.affected_paths) if preview.affected_paths else 'None'}\n\n"
+            f"Warnings: {', '.join(preview.warnings) if preview.warnings else 'None'}\n\n"
+            f"Reversible: {'Yes' if preview.can_undo else 'No'}\n"
+            f"Undo command: {preview.undo_command or 'N/A'}"
+        ),
+        "is_destructive": preview.is_destructive,
+        "can_undo": preview.can_undo,
+        "undo_command": preview.undo_command,
+        "affected_paths": preview.affected_paths,
+        "warnings": preview.warnings,
+    }
+
+
+# -------------------------------------------------------------------------
+# Plan and Execution handlers (Phase 3 - Reasoning System)
+# -------------------------------------------------------------------------
+
+# Store active reasoning engines and executions per session
+_reasoning_engines: dict[str, Any] = {}
+_active_executions: dict[str, Any] = {}
+
+
+def _get_reasoning_engine(conversation_id: str, db: Database) -> Any:
+    """Get or create a reasoning engine for a conversation."""
+    from .reasoning.engine import ReasoningEngine
+
+    if conversation_id not in _reasoning_engines:
+        _reasoning_engines[conversation_id] = ReasoningEngine(db=db)
+    return _reasoning_engines[conversation_id]
+
+
+def _handle_plan_preview(
+    db: Database,
+    *,
+    request: str,
+    conversation_id: str,
+) -> dict[str, Any]:
+    """Preview a plan for a request without executing it."""
+    engine = _get_reasoning_engine(conversation_id, db)
+    result = engine.process(request)
+
+    if not result.plan:
+        return {
+            "has_plan": False,
+            "response": result.response,
+            "complexity": result.complexity.level.value if result.complexity else None,
+        }
+
+    # Format plan steps
+    steps = []
+    for i, step in enumerate(result.plan.steps):
+        risk_info = {}
+        if step.risk:
+            risk_info = {
+                "level": step.risk.level.value if hasattr(step.risk.level, 'value') else str(step.risk.level),
+                "requires_confirmation": step.risk.requires_confirmation,
+                "reversible": step.risk.reversible,
+            }
+
+        steps.append({
+            "number": i + 1,
+            "id": step.id,
+            "title": step.title,
+            "command": step.command,
+            "explanation": step.explanation,
+            "risk": risk_info,
+        })
+
+    return {
+        "has_plan": True,
+        "plan_id": result.plan.id,
+        "title": result.plan.title,
+        "steps": steps,
+        "needs_approval": result.needs_approval,
+        "response": result.response,
+        "complexity": result.complexity.level.value if result.complexity else None,
+    }
+
+
+def _handle_plan_approve(
+    db: Database,
+    *,
+    conversation_id: str,
+) -> dict[str, Any]:
+    """Approve and execute the pending plan."""
+    engine = _get_reasoning_engine(conversation_id, db)
+
+    if not engine.get_pending_plan():
+        raise RpcError(code=-32602, message="No pending plan to approve")
+
+    # Approve by sending "yes"
+    result = engine.process("yes")
+
+    # Track the execution context
+    if result.execution_context:
+        execution_id = result.plan.id if result.plan else conversation_id
+        _active_executions[execution_id] = result.execution_context
+
+    return {
+        "status": "executed" if result.execution_context else "no_execution",
+        "response": result.response,
+        "execution_id": result.plan.id if result.plan else None,
+    }
+
+
+def _handle_plan_cancel(
+    db: Database,
+    *,
+    conversation_id: str,
+) -> dict[str, Any]:
+    """Cancel the pending plan."""
+    engine = _get_reasoning_engine(conversation_id, db)
+    engine.cancel_pending()
+    return {"ok": True, "message": "Plan cancelled"}
+
+
+def _handle_execution_status(
+    db: Database,
+    *,
+    execution_id: str,
+) -> dict[str, Any]:
+    """Get the status of an execution."""
+    context = _active_executions.get(execution_id)
+
+    if not context:
+        raise RpcError(code=-32602, message=f"Execution not found: {execution_id}")
+
+    completed_steps = []
+    for step_id, result in context.step_results.items():
+        completed_steps.append({
+            "step_id": step_id,
+            "success": result.success,
+            "output_preview": result.output[:200] if result.output else "",
+        })
+
+    return {
+        "execution_id": execution_id,
+        "state": context.state.value if hasattr(context.state, 'value') else str(context.state),
+        "current_step": context.plan.current_step_index if context.plan else 0,
+        "total_steps": len(context.plan.steps) if context.plan else 0,
+        "completed_steps": completed_steps,
+    }
+
+
+def _handle_execution_pause(
+    db: Database,
+    *,
+    execution_id: str,
+) -> dict[str, Any]:
+    """Pause an execution (for future implementation with async execution)."""
+    # Note: Current executor is synchronous, so pause is limited
+    return {"ok": True, "message": "Pause requested (takes effect at next step boundary)"}
+
+
+def _handle_execution_abort(
+    db: Database,
+    *,
+    execution_id: str,
+    rollback: bool = True,
+) -> dict[str, Any]:
+    """Abort an execution and optionally rollback."""
+    context = _active_executions.get(execution_id)
+
+    if not context:
+        raise RpcError(code=-32602, message=f"Execution not found: {execution_id}")
+
+    # Clean up
+    if execution_id in _active_executions:
+        del _active_executions[execution_id]
+
+    return {"ok": True, "message": "Execution aborted"}
+
+
+def _handle_execution_rollback(
+    db: Database,
+    *,
+    conversation_id: str,
+) -> dict[str, Any]:
+    """Rollback the last operation."""
+    engine = _get_reasoning_engine(conversation_id, db)
+    result = engine.process("undo")
+    return {"response": result.response}
+
+
+# -------------------------------------------------------------------------
+# Streaming execution handlers (Phase 4)
+# -------------------------------------------------------------------------
+
+
+def _handle_execution_start(
+    db: Database,
+    *,
+    command: str,
+    execution_id: str,
+    cwd: str | None = None,
+    timeout: int = 300,
+) -> dict[str, Any]:
+    """Start a streaming command execution."""
+    from .streaming_executor import get_streaming_executor
+
+    executor = get_streaming_executor()
+    executor.start(
+        command,
+        execution_id=execution_id,
+        cwd=cwd,
+        timeout=timeout,
+    )
+
+    return {
+        "execution_id": execution_id,
+        "status": "started",
+    }
+
+
+def _handle_execution_output(
+    db: Database,
+    *,
+    execution_id: str,
+    since_line: int = 0,
+) -> dict[str, Any]:
+    """Get streaming output from an execution."""
+    from .streaming_executor import get_streaming_executor
+
+    executor = get_streaming_executor()
+    lines, is_complete = executor.get_output(execution_id, since_line=since_line)
+
+    result: dict[str, Any] = {
+        "lines": lines,
+        "is_complete": is_complete,
+        "next_line": since_line + len(lines),
+    }
+
+    if is_complete:
+        final_result = executor.get_result(execution_id)
+        if final_result:
+            result["return_code"] = final_result["return_code"]
+            result["success"] = final_result["success"]
+            result["error"] = final_result["error"]
+            result["duration_seconds"] = final_result["duration_seconds"]
+
+    return result
+
+
+def _handle_execution_kill(
+    db: Database,
+    *,
+    execution_id: str,
+) -> dict[str, Any]:
+    """Kill a running execution."""
+    from .streaming_executor import get_streaming_executor
+
+    executor = get_streaming_executor()
+    killed = executor.kill(execution_id)
+
+    return {"ok": killed, "message": "Execution killed" if killed else "Execution not found or already complete"}
+
+
+# -------------------------------------------------------------------------
+# System Dashboard handlers (Phase 5)
+# -------------------------------------------------------------------------
+
+
+def _handle_system_live_state(db: Database) -> dict[str, Any]:
+    """Get comprehensive system state for dashboard."""
+    from . import linux_tools
+
+    result: dict[str, Any] = {
+        "cpu_percent": 0.0,
+        "memory": {"used_mb": 0, "total_mb": 0, "percent": 0.0},
+        "disks": [],
+        "load_avg": [0.0, 0.0, 0.0],
+        "services": [],
+        "containers": [],
+        "network": [],
+    }
+
+    # Get system info
+    try:
+        info = linux_tools.get_system_info()
+        result["cpu_percent"] = info.get("cpu_percent", 0.0)
+        result["memory"] = {
+            "used_mb": info.get("memory_used_mb", 0),
+            "total_mb": info.get("memory_total_mb", 0),
+            "percent": info.get("memory_percent", 0.0),
+        }
+        result["disks"] = [
+            {
+                "mount": "/",
+                "used_gb": info.get("disk_used_gb", 0),
+                "total_gb": info.get("disk_total_gb", 0),
+                "percent": info.get("disk_percent", 0.0),
+            }
+        ]
+        result["load_avg"] = info.get("load_avg", [0.0, 0.0, 0.0])
+    except Exception:
+        pass
+
+    # Get services (top 10 most relevant)
+    try:
+        services = linux_tools.list_services(limit=10)
+        result["services"] = [
+            {
+                "name": s.get("name", ""),
+                "status": s.get("status", "unknown"),
+                "active": s.get("active", False),
+            }
+            for s in services
+        ]
+    except Exception:
+        pass
+
+    # Get containers if Docker is available
+    try:
+        containers = linux_tools.list_docker_containers()
+        result["containers"] = [
+            {
+                "id": c.get("id", "")[:12],
+                "name": c.get("name", ""),
+                "image": c.get("image", ""),
+                "status": c.get("status", "unknown"),
+                "ports": c.get("ports", ""),
+            }
+            for c in containers[:10]
+        ]
+    except Exception:
+        pass
+
+    # Get network interfaces
+    try:
+        network = linux_tools.get_network_info()
+        if "interfaces" in network:
+            result["network"] = [
+                {
+                    "interface": iface.get("name", ""),
+                    "ip": iface.get("ipv4", ""),
+                    "state": iface.get("state", "unknown"),
+                }
+                for iface in network["interfaces"][:5]
+            ]
+    except Exception:
+        pass
+
+    return result
+
+
+def _handle_service_action(
+    db: Database,
+    *,
+    name: str,
+    action: str,
+) -> dict[str, Any]:
+    """Perform an action on a systemd service."""
+    from . import linux_tools
+
+    valid_actions = {"start", "stop", "restart", "status", "logs"}
+    if action not in valid_actions:
+        raise RpcError(code=-32602, message=f"Invalid action: {action}. Must be one of: {', '.join(valid_actions)}")
+
+    # For logs, return recent journal entries
+    if action == "logs":
+        try:
+            result = linux_tools.execute_command(f"journalctl -u {name} -n 50 --no-pager")
+            return {
+                "ok": result.returncode == 0,
+                "logs": result.stdout if result.stdout else result.stderr,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # For status, just check the service
+    if action == "status":
+        try:
+            result = linux_tools.execute_command(f"systemctl status {name} --no-pager")
+            return {
+                "ok": True,
+                "status": result.stdout if result.stdout else result.stderr,
+                "active": result.returncode == 0,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # For start/stop/restart, create an approval request
+    import uuid
+    approval_id = uuid.uuid4().hex[:12]
+    command = f"sudo systemctl {action} {name}"
+
+    db.create_approval(
+        approval_id=approval_id,
+        conversation_id="system",
+        command=command,
+        explanation=f"{action.capitalize()} the {name} service",
+        risk_level="medium",
+    )
+
+    return {
+        "requires_approval": True,
+        "approval_id": approval_id,
+        "command": command,
+        "message": f"Service {action} requires approval",
+    }
+
+
+def _handle_container_action(
+    db: Database,
+    *,
+    container_id: str,
+    action: str,
+) -> dict[str, Any]:
+    """Perform an action on a Docker container."""
+    from . import linux_tools
+
+    valid_actions = {"start", "stop", "restart", "logs"}
+    if action not in valid_actions:
+        raise RpcError(code=-32602, message=f"Invalid action: {action}. Must be one of: {', '.join(valid_actions)}")
+
+    # For logs, return recent container logs
+    if action == "logs":
+        try:
+            result = linux_tools.execute_command(f"docker logs --tail 50 {container_id}")
+            return {
+                "ok": result.returncode == 0,
+                "logs": result.stdout if result.stdout else result.stderr,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # For start/stop/restart
+    try:
+        result = linux_tools.execute_command(f"docker {action} {container_id}")
+        return {
+            "ok": result.returncode == 0,
+            "message": result.stdout if result.stdout else f"Container {action} completed",
+            "error": result.stderr if result.returncode != 0 else None,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def _handle_state_get(db: Database, *, key: str) -> dict[str, Any]:
@@ -520,10 +1210,260 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             if not isinstance(params, dict):
                 raise RpcError(code=-32602, message="params must be an object")
             text = params.get("text")
+            conversation_id = params.get("conversation_id")
             if not isinstance(text, str) or not text.strip():
                 raise RpcError(code=-32602, message="text is required")
-            result = _handle_chat_respond(db, text=text)
+            if conversation_id is not None and not isinstance(conversation_id, str):
+                raise RpcError(code=-32602, message="conversation_id must be a string or null")
+            result = _handle_chat_respond(db, text=text, conversation_id=conversation_id)
             return _jsonrpc_result(req_id=req_id, result=result)
+
+        if method == "intent/detect":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            text = params.get("text")
+            conversation_id = params.get("conversation_id")
+            if not isinstance(text, str) or not text.strip():
+                raise RpcError(code=-32602, message="text is required")
+            if conversation_id is not None and not isinstance(conversation_id, str):
+                raise RpcError(code=-32602, message="conversation_id must be a string or null")
+            result = _handle_intent_detect(db, text=text, conversation_id=conversation_id)
+            return _jsonrpc_result(req_id=req_id, result=result)
+
+        if method == "conversation/start":
+            title = None
+            if isinstance(params, dict):
+                title = params.get("title")
+                if title is not None and not isinstance(title, str):
+                    raise RpcError(code=-32602, message="title must be a string or null")
+            return _jsonrpc_result(req_id=req_id, result=_handle_conversation_start(db, title=title))
+
+        if method == "conversation/list":
+            limit = 50
+            if isinstance(params, dict):
+                limit_param = params.get("limit")
+                if limit_param is not None:
+                    if not isinstance(limit_param, int) or limit_param < 1:
+                        raise RpcError(code=-32602, message="limit must be a positive integer")
+                    limit = limit_param
+            return _jsonrpc_result(req_id=req_id, result=_handle_conversation_list(db, limit=limit))
+
+        if method == "conversation/get_messages":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            conversation_id = params.get("conversation_id")
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise RpcError(code=-32602, message="conversation_id is required")
+            limit = params.get("limit", 50)
+            if not isinstance(limit, int) or limit < 1:
+                raise RpcError(code=-32602, message="limit must be a positive integer")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_conversation_get_messages(db, conversation_id=conversation_id, limit=limit),
+            )
+
+        if method == "approval/pending":
+            conversation_id = None
+            if isinstance(params, dict):
+                conversation_id = params.get("conversation_id")
+                if conversation_id is not None and not isinstance(conversation_id, str):
+                    raise RpcError(code=-32602, message="conversation_id must be a string or null")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_approval_pending(db, conversation_id=conversation_id),
+            )
+
+        if method == "approval/respond":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            approval_id = params.get("approval_id")
+            action = params.get("action")
+            edited_command = params.get("edited_command")
+            if not isinstance(approval_id, str) or not approval_id:
+                raise RpcError(code=-32602, message="approval_id is required")
+            if not isinstance(action, str) or action not in ("approve", "reject"):
+                raise RpcError(code=-32602, message="action must be 'approve' or 'reject'")
+            if edited_command is not None and not isinstance(edited_command, str):
+                raise RpcError(code=-32602, message="edited_command must be a string or null")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_approval_respond(
+                    db, approval_id=approval_id, action=action, edited_command=edited_command
+                ),
+            )
+
+        if method == "approval/explain":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            approval_id = params.get("approval_id")
+            if not isinstance(approval_id, str) or not approval_id:
+                raise RpcError(code=-32602, message="approval_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_approval_explain(db, approval_id=approval_id),
+            )
+
+        # Plan and Execution methods (Phase 3)
+        if method == "plan/preview":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            request = params.get("request")
+            conversation_id = params.get("conversation_id")
+            if not isinstance(request, str) or not request.strip():
+                raise RpcError(code=-32602, message="request is required")
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise RpcError(code=-32602, message="conversation_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_plan_preview(db, request=request, conversation_id=conversation_id),
+            )
+
+        if method == "plan/approve":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            conversation_id = params.get("conversation_id")
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise RpcError(code=-32602, message="conversation_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_plan_approve(db, conversation_id=conversation_id),
+            )
+
+        if method == "plan/cancel":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            conversation_id = params.get("conversation_id")
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise RpcError(code=-32602, message="conversation_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_plan_cancel(db, conversation_id=conversation_id),
+            )
+
+        if method == "execution/status":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            execution_id = params.get("execution_id")
+            if not isinstance(execution_id, str) or not execution_id:
+                raise RpcError(code=-32602, message="execution_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_execution_status(db, execution_id=execution_id),
+            )
+
+        if method == "execution/pause":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            execution_id = params.get("execution_id")
+            if not isinstance(execution_id, str) or not execution_id:
+                raise RpcError(code=-32602, message="execution_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_execution_pause(db, execution_id=execution_id),
+            )
+
+        if method == "execution/abort":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            execution_id = params.get("execution_id")
+            rollback = params.get("rollback", True)
+            if not isinstance(execution_id, str) or not execution_id:
+                raise RpcError(code=-32602, message="execution_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_execution_abort(db, execution_id=execution_id, rollback=bool(rollback)),
+            )
+
+        if method == "execution/rollback":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            conversation_id = params.get("conversation_id")
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise RpcError(code=-32602, message="conversation_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_execution_rollback(db, conversation_id=conversation_id),
+            )
+
+        # Streaming execution methods (Phase 4)
+        if method == "execution/start":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            command = params.get("command")
+            execution_id = params.get("execution_id")
+            cwd = params.get("cwd")
+            timeout = params.get("timeout", 300)
+            if not isinstance(command, str) or not command.strip():
+                raise RpcError(code=-32602, message="command is required")
+            if not isinstance(execution_id, str) or not execution_id:
+                raise RpcError(code=-32602, message="execution_id is required")
+            if cwd is not None and not isinstance(cwd, str):
+                raise RpcError(code=-32602, message="cwd must be a string or null")
+            if not isinstance(timeout, int) or timeout < 1:
+                timeout = 300
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_execution_start(
+                    db, command=command, execution_id=execution_id, cwd=cwd, timeout=timeout
+                ),
+            )
+
+        if method == "execution/output":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            execution_id = params.get("execution_id")
+            since_line = params.get("since_line", 0)
+            if not isinstance(execution_id, str) or not execution_id:
+                raise RpcError(code=-32602, message="execution_id is required")
+            if not isinstance(since_line, int) or since_line < 0:
+                since_line = 0
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_execution_output(db, execution_id=execution_id, since_line=since_line),
+            )
+
+        if method == "execution/kill":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            execution_id = params.get("execution_id")
+            if not isinstance(execution_id, str) or not execution_id:
+                raise RpcError(code=-32602, message="execution_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_execution_kill(db, execution_id=execution_id),
+            )
+
+        # System Dashboard methods (Phase 5)
+        if method == "system/live_state":
+            return _jsonrpc_result(req_id=req_id, result=_handle_system_live_state(db))
+
+        if method == "service/action":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            name = params.get("name")
+            action = params.get("action")
+            if not isinstance(name, str) or not name:
+                raise RpcError(code=-32602, message="name is required")
+            if not isinstance(action, str) or not action:
+                raise RpcError(code=-32602, message="action is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_service_action(db, name=name, action=action),
+            )
+
+        if method == "container/action":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            container_id = params.get("container_id")
+            action = params.get("action")
+            if not isinstance(container_id, str) or not container_id:
+                raise RpcError(code=-32602, message="container_id is required")
+            if not isinstance(action, str) or not action:
+                raise RpcError(code=-32602, message="action is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_container_action(db, container_id=container_id, action=action),
+            )
 
         if method == "state/get":
             if not isinstance(params, dict):

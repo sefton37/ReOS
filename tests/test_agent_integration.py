@@ -61,7 +61,9 @@ class TestChatAgentRespond:
         agent = ChatAgent(db=get_db(), ollama=ollama)
         result = agent.respond("What is Linux?")
 
-        assert result == "No tools needed for this response."
+        assert result.answer == "No tools needed for this response."
+        assert result.conversation_id is not None
+        assert result.message_id is not None
         assert len(ollama.chat_json_calls) == 1
         assert len(ollama.chat_text_calls) == 1
 
@@ -95,7 +97,8 @@ class TestChatAgentRespond:
 
         assert len(calls) == 1
         assert calls[0]["name"] == "linux_system_info"
-        assert result == "System info retrieved."
+        assert result.answer == "System info retrieved."
+        assert len(result.tool_calls) == 1
 
     def test_respond_with_tool_error(
         self,
@@ -124,7 +127,9 @@ class TestChatAgentRespond:
         result = agent.respond("Run a test command")
 
         # Should still get a response even with tool error
-        assert result == "Sorry, there was an error."
+        assert result.answer == "Sorry, there was an error."
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0]["ok"] is False
 
     def test_respond_with_malformed_tool_response(
         self,
@@ -152,7 +157,8 @@ class TestChatAgentRespond:
 
         # Should not crash, no tools called
         assert len(calls) == 0
-        assert result == "Handled gracefully."
+        assert result.answer == "Handled gracefully."
+        assert result.tool_calls == []
 
     def test_respond_with_invalid_json_from_llm(
         self,
@@ -349,6 +355,103 @@ class TestChatAgentToolCall:
 
         with pytest.raises(AttributeError):
             call.name = "changed"  # type: ignore
+
+
+class TestChatAgentIntentDetection:
+    """Tests for intent detection (Phase 6)."""
+
+    def test_detects_approval_intents(
+        self,
+        isolated_db_singleton,  # noqa: ANN001
+    ) -> None:
+        """Agent should detect approval intents."""
+        agent = ChatAgent(db=get_db())
+
+        approval_phrases = ["yes", "y", "ok", "okay", "sure", "go", "yep", "do it", "YES", "Go ahead"]
+        for phrase in approval_phrases:
+            intent = agent.detect_intent(phrase)
+            assert intent is not None, f"Should detect approval for: {phrase}"
+            assert intent.intent_type == "approval", f"Wrong type for: {phrase}"
+
+    def test_detects_rejection_intents(
+        self,
+        isolated_db_singleton,  # noqa: ANN001
+    ) -> None:
+        """Agent should detect rejection intents."""
+        agent = ChatAgent(db=get_db())
+
+        rejection_phrases = ["no", "n", "nope", "cancel", "stop", "abort", "NO", "Never mind"]
+        for phrase in rejection_phrases:
+            intent = agent.detect_intent(phrase)
+            assert intent is not None, f"Should detect rejection for: {phrase}"
+            assert intent.intent_type == "rejection", f"Wrong type for: {phrase}"
+
+    def test_detects_numeric_choices(
+        self,
+        isolated_db_singleton,  # noqa: ANN001
+    ) -> None:
+        """Agent should detect numeric choices 1-9."""
+        agent = ChatAgent(db=get_db())
+
+        for i in range(1, 10):
+            intent = agent.detect_intent(str(i))
+            assert intent is not None, f"Should detect choice for: {i}"
+            assert intent.intent_type == "choice"
+            assert intent.choice_number == i
+
+    def test_detects_ordinal_choices(
+        self,
+        isolated_db_singleton,  # noqa: ANN001
+    ) -> None:
+        """Agent should detect ordinal choices (first, second, etc.)."""
+        agent = ChatAgent(db=get_db())
+
+        ordinals = [
+            ("first", 1), ("second", 2), ("third", 3),
+            ("1st", 1), ("2nd", 2), ("3rd", 3),
+            ("First one", 1), ("SECOND", 2),
+        ]
+        for phrase, expected_num in ordinals:
+            intent = agent.detect_intent(phrase)
+            assert intent is not None, f"Should detect choice for: {phrase}"
+            assert intent.intent_type == "choice", f"Wrong type for: {phrase}"
+            assert intent.choice_number == expected_num, f"Wrong number for: {phrase}"
+
+    def test_detects_references(
+        self,
+        isolated_db_singleton,  # noqa: ANN001
+    ) -> None:
+        """Agent should detect reference terms in short messages."""
+        agent = ChatAgent(db=get_db())
+
+        reference_phrases = [
+            ("restart it", "it"),
+            ("show me that", "that"),
+            ("check the service", "the service"),
+            ("stop the container", "the container"),
+        ]
+        for phrase, expected_term in reference_phrases:
+            intent = agent.detect_intent(phrase)
+            assert intent is not None, f"Should detect reference for: {phrase}"
+            assert intent.intent_type == "reference", f"Wrong type for: {phrase}"
+            assert intent.reference_term == expected_term, f"Wrong term for: {phrase}"
+
+    def test_no_intent_for_normal_questions(
+        self,
+        isolated_db_singleton,  # noqa: ANN001
+    ) -> None:
+        """Agent should return None for normal questions."""
+        agent = ChatAgent(db=get_db())
+
+        normal_phrases = [
+            "What is the current CPU usage?",
+            "How do I install nginx?",
+            "Show me the logs for sshd",
+            "List all running containers",
+        ]
+        for phrase in normal_phrases:
+            intent = agent.detect_intent(phrase)
+            assert intent is None, f"Should not detect intent for: {phrase}"
 
 
 class TestChatAgentAnswerGeneration:

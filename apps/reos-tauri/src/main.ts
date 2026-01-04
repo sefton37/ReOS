@@ -22,7 +22,10 @@ import type {
   PlayKbListResult,
   PlayKbReadResult,
   PlayKbWritePreviewResult,
-  PlayKbWriteApplyResult
+  PlayKbWriteApplyResult,
+  ApprovalPendingResult,
+  ApprovalRespondResult,
+  ApprovalExplainResult
 } from './types';
 
 function buildUi() {
@@ -867,6 +870,195 @@ function buildUi() {
   }
 
 
+  // Track current conversation for context continuity
+  let currentConversationId: string | null = null;
+
+  // Helper to render command preview with approve/reject buttons
+  function appendCommandPreview(
+    approval: ApprovalPendingResult['approvals'][0],
+    container: HTMLElement
+  ) {
+    const previewBox = el('div');
+    previewBox.className = 'command-preview';
+    previewBox.style.margin = '8px 0';
+    previewBox.style.padding = '12px';
+    previewBox.style.background = 'rgba(0, 0, 0, 0.03)';
+    previewBox.style.border = '1px solid #e5e7eb';
+    previewBox.style.borderRadius = '8px';
+
+    // Risk level indicator
+    const riskColors: Record<string, string> = {
+      safe: '#22c55e',
+      low: '#84cc16',
+      medium: '#f59e0b',
+      high: '#ef4444',
+      critical: '#dc2626'
+    };
+    const riskColor = riskColors[approval.risk_level] ?? '#6b7280';
+
+    const header = el('div');
+    header.style.display = 'flex';
+    header.style.alignItems = 'center';
+    header.style.gap = '8px';
+    header.style.marginBottom = '8px';
+
+    const riskBadge = el('span');
+    riskBadge.textContent = approval.risk_level.toUpperCase();
+    riskBadge.style.padding = '2px 8px';
+    riskBadge.style.background = riskColor;
+    riskBadge.style.color = 'white';
+    riskBadge.style.borderRadius = '4px';
+    riskBadge.style.fontSize = '11px';
+    riskBadge.style.fontWeight = '600';
+
+    const title = el('span');
+    title.textContent = 'Command Preview';
+    title.style.fontWeight = '600';
+    title.style.fontSize = '13px';
+
+    header.appendChild(riskBadge);
+    header.appendChild(title);
+
+    // Command display
+    const commandBox = el('div');
+    commandBox.style.fontFamily = 'monospace';
+    commandBox.style.background = '#1e1e1e';
+    commandBox.style.color = '#d4d4d4';
+    commandBox.style.padding = '8px';
+    commandBox.style.borderRadius = '4px';
+    commandBox.style.marginBottom = '8px';
+    commandBox.style.fontSize = '13px';
+    commandBox.style.overflow = 'auto';
+    commandBox.textContent = approval.command;
+
+    // Explanation
+    const explanation = el('div');
+    explanation.style.fontSize = '12px';
+    explanation.style.opacity = '0.8';
+    explanation.style.marginBottom = '12px';
+    explanation.textContent = approval.explanation ?? 'No explanation available.';
+
+    // Buttons row
+    const buttons = el('div');
+    buttons.style.display = 'flex';
+    buttons.style.gap = '8px';
+
+    const approveBtn = smallButton('Approve');
+    approveBtn.style.background = '#22c55e';
+    approveBtn.style.color = 'white';
+    approveBtn.style.border = 'none';
+
+    const rejectBtn = smallButton('Reject');
+    rejectBtn.style.background = '#ef4444';
+    rejectBtn.style.color = 'white';
+    rejectBtn.style.border = 'none';
+
+    const explainBtn = smallButton('Explain More');
+
+    // Handle approve
+    approveBtn.addEventListener('click', async () => {
+      approveBtn.disabled = true;
+      rejectBtn.disabled = true;
+      explainBtn.disabled = true;
+      approveBtn.textContent = 'Executing...';
+
+      try {
+        const result = await kernelRequest('approval/respond', {
+          approval_id: approval.id,
+          action: 'approve'
+        }) as ApprovalRespondResult;
+
+        previewBox.innerHTML = '';
+        const resultBox = el('div');
+        resultBox.style.padding = '8px';
+
+        if (result.status === 'executed' && result.result?.success) {
+          resultBox.style.background = 'rgba(34, 197, 94, 0.1)';
+          resultBox.style.borderLeft = '3px solid #22c55e';
+          resultBox.innerHTML = `<strong>✓ Command executed successfully</strong>`;
+          if (result.result?.stdout) {
+            const output = el('pre');
+            output.style.margin = '8px 0 0';
+            output.style.fontSize = '12px';
+            output.style.maxHeight = '200px';
+            output.style.overflow = 'auto';
+            output.textContent = result.result.stdout;
+            resultBox.appendChild(output);
+          }
+        } else {
+          resultBox.style.background = 'rgba(239, 68, 68, 0.1)';
+          resultBox.style.borderLeft = '3px solid #ef4444';
+          resultBox.innerHTML = `<strong>✗ Command failed</strong>`;
+          if (result.result?.stderr || result.result?.error) {
+            const output = el('pre');
+            output.style.margin = '8px 0 0';
+            output.style.fontSize = '12px';
+            output.style.color = '#ef4444';
+            output.textContent = result.result.stderr ?? result.result.error ?? '';
+            resultBox.appendChild(output);
+          }
+        }
+        previewBox.appendChild(resultBox);
+      } catch (e) {
+        approveBtn.textContent = 'Error';
+        console.error('Approval error:', e);
+      }
+    });
+
+    // Handle reject
+    rejectBtn.addEventListener('click', async () => {
+      try {
+        await kernelRequest('approval/respond', {
+          approval_id: approval.id,
+          action: 'reject'
+        });
+        previewBox.innerHTML = '';
+        const rejectedBox = el('div');
+        rejectedBox.style.padding = '8px';
+        rejectedBox.style.opacity = '0.6';
+        rejectedBox.textContent = 'Command rejected.';
+        previewBox.appendChild(rejectedBox);
+      } catch (e) {
+        console.error('Rejection error:', e);
+      }
+    });
+
+    // Handle explain
+    explainBtn.addEventListener('click', async () => {
+      try {
+        const result = await kernelRequest('approval/explain', {
+          approval_id: approval.id
+        }) as ApprovalExplainResult;
+
+        const existingExplain = previewBox.querySelector('.explain-box');
+        if (existingExplain) existingExplain.remove();
+
+        const explainBox = el('div');
+        explainBox.className = 'explain-box';
+        explainBox.style.marginTop = '12px';
+        explainBox.style.padding = '8px';
+        explainBox.style.background = 'rgba(59, 130, 246, 0.1)';
+        explainBox.style.borderRadius = '4px';
+        explainBox.style.fontSize = '12px';
+        explainBox.innerHTML = `<pre style="margin: 0; white-space: pre-wrap;">${result.detailed_explanation}</pre>`;
+        previewBox.appendChild(explainBox);
+      } catch (e) {
+        console.error('Explain error:', e);
+      }
+    });
+
+    buttons.appendChild(approveBtn);
+    buttons.appendChild(rejectBtn);
+    buttons.appendChild(explainBtn);
+
+    previewBox.appendChild(header);
+    previewBox.appendChild(commandBox);
+    previewBox.appendChild(explanation);
+    previewBox.appendChild(buttons);
+
+    container.appendChild(previewBox);
+  }
+
   async function onSend() {
     const text = input.value.trim();
     if (!text) return;
@@ -883,9 +1075,28 @@ function buildUi() {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     try {
-      const res = (await kernelRequest('chat/respond', { text })) as ChatRespondResult;
+      const res = (await kernelRequest('chat/respond', {
+        text,
+        conversation_id: currentConversationId
+      })) as ChatRespondResult;
+
+      // Update conversation ID for context continuity
+      currentConversationId = res.conversation_id;
+
       pending.bubble.classList.remove('thinking');
       pending.bubble.textContent = res.answer ?? '(no answer)';
+
+      // Check if there are pending approvals to display
+      if (res.pending_approval_id) {
+        // Fetch and display the pending approval
+        const approvalsRes = await kernelRequest('approval/pending', {
+          conversation_id: currentConversationId
+        }) as ApprovalPendingResult;
+
+        for (const approval of approvalsRes.approvals) {
+          appendCommandPreview(approval, pending.row);
+        }
+      }
     } catch (e) {
       pending.bubble.classList.remove('thinking');
       pending.bubble.textContent = `Error: ${String(e)}`;

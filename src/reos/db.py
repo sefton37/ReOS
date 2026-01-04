@@ -156,6 +156,59 @@ class Database:
             """
         )
 
+        # Conversations: chat sessions with context continuity.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                started_at TEXT NOT NULL,
+                last_active_at TEXT NOT NULL,
+                context_summary TEXT
+            )
+            """
+        )
+
+        # Messages: individual chat messages within conversations.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                message_type TEXT NOT NULL,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)"
+        )
+
+        # Pending approvals: commands awaiting user confirmation.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pending_approvals (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                plan_id TEXT,
+                step_id TEXT,
+                command TEXT NOT NULL,
+                explanation TEXT,
+                risk_level TEXT NOT NULL,
+                affected_paths TEXT,
+                undo_command TEXT,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                resolved_at TEXT,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+            )
+            """
+        )
+
         conn.commit()
 
     def set_active_persona_id(self, *, persona_id: str | None) -> None:
@@ -376,6 +429,232 @@ class Database:
             (session_id,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    # -------------------------------------------------------------------------
+    # Conversation methods
+    # -------------------------------------------------------------------------
+
+    def create_conversation(self, *, conversation_id: str, title: str | None = None) -> str:
+        """Create a new conversation and return its ID."""
+        now = datetime.now(UTC).isoformat()
+        self._execute(
+            """
+            INSERT INTO conversations (id, title, started_at, last_active_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (conversation_id, title, now, now),
+        )
+        self.connect().commit()
+        return conversation_id
+
+    def get_conversation(self, *, conversation_id: str) -> dict[str, object] | None:
+        """Get a conversation by ID."""
+        row = self._execute(
+            "SELECT * FROM conversations WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def update_conversation_activity(self, *, conversation_id: str) -> None:
+        """Update the last_active_at timestamp for a conversation."""
+        now = datetime.now(UTC).isoformat()
+        self._execute(
+            "UPDATE conversations SET last_active_at = ? WHERE id = ?",
+            (now, conversation_id),
+        )
+        self.connect().commit()
+
+    def update_conversation_title(self, *, conversation_id: str, title: str) -> None:
+        """Update the title of a conversation."""
+        self._execute(
+            "UPDATE conversations SET title = ? WHERE id = ?",
+            (title, conversation_id),
+        )
+        self.connect().commit()
+
+    def iter_conversations(self, limit: int = 50) -> list[dict[str, object]]:
+        """List recent conversations (most recent first)."""
+        rows = self._execute(
+            "SELECT * FROM conversations ORDER BY last_active_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    # -------------------------------------------------------------------------
+    # Message methods
+    # -------------------------------------------------------------------------
+
+    def add_message(
+        self,
+        *,
+        message_id: str,
+        conversation_id: str,
+        role: str,
+        content: str,
+        message_type: str = "text",
+        metadata: str | None = None,
+    ) -> str:
+        """Add a message to a conversation."""
+        now = datetime.now(UTC).isoformat()
+        self._execute(
+            """
+            INSERT INTO messages (id, conversation_id, role, content, message_type, metadata, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (message_id, conversation_id, role, content, message_type, metadata, now),
+        )
+        # Update conversation activity
+        self._execute(
+            "UPDATE conversations SET last_active_at = ? WHERE id = ?",
+            (now, conversation_id),
+        )
+        self.connect().commit()
+        return message_id
+
+    def get_messages(
+        self,
+        *,
+        conversation_id: str,
+        limit: int = 50,
+        before_id: str | None = None,
+    ) -> list[dict[str, object]]:
+        """Get messages for a conversation (oldest first for context building)."""
+        if before_id:
+            rows = self._execute(
+                """
+                SELECT * FROM messages
+                WHERE conversation_id = ? AND created_at < (
+                    SELECT created_at FROM messages WHERE id = ?
+                )
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (conversation_id, before_id, limit),
+            ).fetchall()
+        else:
+            rows = self._execute(
+                """
+                SELECT * FROM messages
+                WHERE conversation_id = ?
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (conversation_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_recent_messages(
+        self,
+        *,
+        conversation_id: str,
+        limit: int = 20,
+    ) -> list[dict[str, object]]:
+        """Get the most recent messages for LLM context (returns in chronological order)."""
+        rows = self._execute(
+            """
+            SELECT * FROM (
+                SELECT * FROM messages
+                WHERE conversation_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            ) ORDER BY created_at ASC
+            """,
+            (conversation_id, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    # -------------------------------------------------------------------------
+    # Approval methods
+    # -------------------------------------------------------------------------
+
+    def create_approval(
+        self,
+        *,
+        approval_id: str,
+        conversation_id: str,
+        command: str,
+        explanation: str | None = None,
+        risk_level: str = "medium",
+        affected_paths: str | None = None,
+        undo_command: str | None = None,
+        plan_id: str | None = None,
+        step_id: str | None = None,
+    ) -> str:
+        """Create a pending approval request."""
+        now = datetime.now(UTC).isoformat()
+        self._execute(
+            """
+            INSERT INTO pending_approvals
+            (id, conversation_id, plan_id, step_id, command, explanation,
+             risk_level, affected_paths, undo_command, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (
+                approval_id,
+                conversation_id,
+                plan_id,
+                step_id,
+                command,
+                explanation,
+                risk_level,
+                affected_paths,
+                undo_command,
+                now,
+            ),
+        )
+        self.connect().commit()
+        return approval_id
+
+    def get_approval(self, *, approval_id: str) -> dict[str, object] | None:
+        """Get an approval by ID."""
+        row = self._execute(
+            "SELECT * FROM pending_approvals WHERE id = ?",
+            (approval_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def get_pending_approvals(
+        self,
+        *,
+        conversation_id: str | None = None,
+    ) -> list[dict[str, object]]:
+        """Get all pending approvals, optionally filtered by conversation."""
+        if conversation_id:
+            rows = self._execute(
+                """
+                SELECT * FROM pending_approvals
+                WHERE status = 'pending' AND conversation_id = ?
+                ORDER BY created_at ASC
+                """,
+                (conversation_id,),
+            ).fetchall()
+        else:
+            rows = self._execute(
+                """
+                SELECT * FROM pending_approvals
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def resolve_approval(
+        self,
+        *,
+        approval_id: str,
+        status: str,  # 'approved', 'rejected', 'expired'
+    ) -> None:
+        """Resolve an approval request."""
+        now = datetime.now(UTC).isoformat()
+        self._execute(
+            """
+            UPDATE pending_approvals
+            SET status = ?, resolved_at = ?
+            WHERE id = ?
+            """,
+            (status, now, approval_id),
+        )
+        self.connect().commit()
 
 
 _db_instance: Database | None = None

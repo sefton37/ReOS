@@ -18,6 +18,196 @@ export const JsonRpcResponseSchema = z.object({
 
 export type ChatRespondResult = {
   answer: string;
+  conversation_id: string;
+  message_id: string;
+  message_type: string;
+  tool_calls: Array<{
+    name: string;
+    arguments: Record<string, unknown>;
+    ok: boolean;
+    result?: unknown;
+    error?: { code: string; message: string; data?: unknown };
+  }>;
+  pending_approval_id: string | null;
+  intent_handled?: 'approval' | 'rejection';  // Phase 6: Set when a conversational intent was handled
+};
+
+// Conversation types
+export type ConversationStartResult = {
+  conversation_id: string;
+};
+
+export type ConversationListResult = {
+  conversations: Array<{
+    id: string;
+    title: string | null;
+    started_at: string;
+    last_active_at: string;
+  }>;
+};
+
+export type ConversationMessagesResult = {
+  messages: Array<{
+    id: string;
+    role: string;
+    content: string;
+    message_type: string;
+    metadata: string | null;
+    created_at: string;
+  }>;
+};
+
+// Approval types
+export type ApprovalPendingResult = {
+  approvals: Array<{
+    id: string;
+    conversation_id: string;
+    command: string;
+    explanation: string | null;
+    risk_level: 'safe' | 'low' | 'medium' | 'high' | 'critical';
+    affected_paths: string[];
+    undo_command: string | null;
+    plan_id: string | null;
+    step_id: string | null;
+    created_at: string;
+  }>;
+};
+
+export type ApprovalRespondResult = {
+  status: 'executed' | 'rejected' | 'error';
+  result: {
+    success?: boolean;
+    stdout?: string;
+    stderr?: string;
+    return_code?: number;
+    command?: string;
+    error?: string;
+  } | null;
+};
+
+export type ApprovalExplainResult = {
+  command: string;
+  explanation: string;
+  detailed_explanation: string;
+  is_destructive: boolean;
+  can_undo: boolean;
+  undo_command: string | null;
+  affected_paths: string[];
+  warnings: string[];
+};
+
+// Plan types (Phase 3)
+export type PlanPreviewResult = {
+  has_plan: boolean;
+  plan_id?: string;
+  title?: string;
+  steps?: Array<{
+    number: number;
+    id: string;
+    title: string;
+    command: string | null;
+    explanation: string | null;
+    risk: {
+      level?: string;
+      requires_confirmation?: boolean;
+      reversible?: boolean;
+    };
+  }>;
+  needs_approval?: boolean;
+  response: string;
+  complexity?: string;
+};
+
+export type PlanApproveResult = {
+  status: 'executed' | 'no_execution';
+  response: string;
+  execution_id: string | null;
+};
+
+export type ExecutionStatusResult = {
+  execution_id: string;
+  state: string;
+  current_step: number;
+  total_steps: number;
+  completed_steps: Array<{
+    step_id: string;
+    success: boolean;
+    output_preview: string;
+  }>;
+};
+
+// Streaming execution types (Phase 4)
+export type ExecutionStartResult = {
+  execution_id: string;
+  status: 'started';
+};
+
+export type ExecutionOutputResult = {
+  lines: string[];
+  is_complete: boolean;
+  next_line: number;
+  return_code?: number;
+  success?: boolean;
+  error?: string | null;
+  duration_seconds?: number;
+};
+
+export type ExecutionKillResult = {
+  ok: boolean;
+  message: string;
+};
+
+// System Dashboard types (Phase 5)
+export type SystemLiveStateResult = {
+  cpu_percent: number;
+  memory: {
+    used_mb: number;
+    total_mb: number;
+    percent: number;
+  };
+  disks: Array<{
+    mount: string;
+    used_gb: number;
+    total_gb: number;
+    percent: number;
+  }>;
+  load_avg: [number, number, number];
+  services: Array<{
+    name: string;
+    status: string;
+    active: boolean;
+  }>;
+  containers: Array<{
+    id: string;
+    name: string;
+    image: string;
+    status: string;
+    ports: string;
+  }>;
+  network: Array<{
+    interface: string;
+    ip: string;
+    state: string;
+  }>;
+};
+
+export type ServiceActionResult = {
+  ok?: boolean;
+  requires_approval?: boolean;
+  approval_id?: string;
+  command?: string;
+  message?: string;
+  logs?: string;
+  status?: string;
+  active?: boolean;
+  error?: string;
+};
+
+export type ContainerActionResult = {
+  ok: boolean;
+  logs?: string;
+  message?: string;
+  error?: string | null;
 };
 
 export type SystemInfoResult = {
@@ -99,4 +289,19 @@ export type PlayKbWritePreviewResult = {
 export type PlayKbWriteApplyResult = {
   ok: boolean;
   sha256_current: string;
+};
+
+// Intent detection types (Phase 6 - Conversational Troubleshooting)
+export type IntentDetectResult = {
+  detected: boolean;
+  intent_type?: 'approval' | 'rejection' | 'choice' | 'reference';
+  confidence?: number;
+  choice_number?: number;
+  reference_term?: string;
+  resolved_entity?: {
+    type: string;
+    name?: string;
+    id?: string;
+    path?: string;
+  };
 };

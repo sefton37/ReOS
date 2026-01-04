@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import re
+import uuid
+from dataclasses import dataclass, field
 from typing import Any
 
 from .db import Database
@@ -11,11 +13,66 @@ from .play_fs import list_acts as play_list_acts
 from .play_fs import read_me_markdown as play_read_me_markdown
 from .system_index import get_or_refresh_context as get_system_context
 
+# Intent detection patterns for conversational troubleshooting
+_APPROVAL_PATTERN = re.compile(
+    r"^(yes|y|ok|okay|sure|go|yep|do it|proceed|go ahead|approve|approved|run it|execute)$",
+    re.IGNORECASE,
+)
+_REJECTION_PATTERN = re.compile(
+    r"^(no|n|nope|cancel|stop|don't|abort|nevermind|never mind|reject|denied)$",
+    re.IGNORECASE,
+)
+_NUMERIC_CHOICE_PATTERN = re.compile(r"^([1-9])$")
+_ORDINAL_PATTERN = re.compile(
+    r"^(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)(\s+one)?$",
+    re.IGNORECASE,
+)
+_REFERENCE_PATTERN = re.compile(
+    r"\b(it|that|this|the service|the container|the package|the error|the file|the command)\b",
+    re.IGNORECASE,
+)
+
+# Map ordinals to numbers
+_ORDINAL_MAP = {
+    "first": 1, "1st": 1,
+    "second": 2, "2nd": 2,
+    "third": 3, "3rd": 3,
+    "fourth": 4, "4th": 4,
+    "fifth": 5, "5th": 5,
+}
+
+
+@dataclass(frozen=True)
+class DetectedIntent:
+    """Result of intent detection on user input."""
+
+    intent_type: str  # "approval", "rejection", "choice", "reference", "question"
+    choice_number: int | None = None  # For numeric/ordinal choices
+    reference_term: str | None = None  # The pronoun/reference detected
+    confidence: float = 1.0
+
+
+def _generate_id() -> str:
+    """Generate a short unique ID."""
+    return uuid.uuid4().hex[:12]
+
 
 @dataclass(frozen=True)
 class ToolCall:
     name: str
     arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ChatResponse:
+    """Structured response from ChatAgent.respond()."""
+
+    answer: str
+    conversation_id: str
+    message_id: str
+    message_type: str = "text"
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    pending_approval_id: str | None = None
 
 
 class ChatAgent:
@@ -73,7 +130,42 @@ class ChatAgent:
             model=model if isinstance(model, str) and model else None,
         )
 
-    def respond(self, user_text: str) -> str:
+    def respond(
+        self,
+        user_text: str,
+        *,
+        conversation_id: str | None = None,
+    ) -> ChatResponse:
+        """Respond to user message with conversation context.
+
+        Args:
+            user_text: The user's message
+            conversation_id: Optional conversation ID for context continuity.
+                           If None, creates a new conversation.
+
+        Returns:
+            ChatResponse with answer and metadata
+        """
+        # Get or create conversation
+        if conversation_id is None:
+            conversation_id = _generate_id()
+            self._db.create_conversation(conversation_id=conversation_id)
+        else:
+            # Verify conversation exists, create if not
+            conv = self._db.get_conversation(conversation_id=conversation_id)
+            if conv is None:
+                self._db.create_conversation(conversation_id=conversation_id)
+
+        # Store user message
+        user_message_id = _generate_id()
+        self._db.add_message(
+            message_id=user_message_id,
+            conversation_id=conversation_id,
+            role="user",
+            content=user_text,
+            message_type="text",
+        )
+
         tools = list_tools()
 
         persona = self._get_persona()
@@ -96,6 +188,11 @@ class ChatAgent:
         system_context = self._get_system_context()
         if system_context:
             persona_prefix = persona_prefix + "\n\n" + system_context
+
+        # Add conversation history context
+        conversation_context = self._build_conversation_context(conversation_id)
+        if conversation_context:
+            persona_prefix = persona_prefix + "\n\n" + conversation_context
 
         ollama = self._get_ollama_client()
 
@@ -148,7 +245,60 @@ class ChatAgent:
             temperature=temperature,
             top_p=top_p,
         )
-        return answer
+
+        # Store assistant response
+        assistant_message_id = _generate_id()
+        self._db.add_message(
+            message_id=assistant_message_id,
+            conversation_id=conversation_id,
+            role="assistant",
+            content=answer,
+            message_type="text",
+            metadata=json.dumps({"tool_calls": tool_results}) if tool_results else None,
+        )
+
+        # Generate title for new conversations (first message)
+        messages = self._db.get_messages(conversation_id=conversation_id, limit=3)
+        if len(messages) <= 2:  # Just the user message and assistant response
+            title = user_text[:50] + ("..." if len(user_text) > 50 else "")
+            self._db.update_conversation_title(conversation_id=conversation_id, title=title)
+
+        return ChatResponse(
+            answer=answer,
+            conversation_id=conversation_id,
+            message_id=assistant_message_id,
+            message_type="text",
+            tool_calls=tool_results,
+        )
+
+    def respond_text(self, user_text: str) -> str:
+        """Simple text-only response (backwards compatibility)."""
+        response = self.respond(user_text)
+        return response.answer
+
+    def _build_conversation_context(self, conversation_id: str) -> str:
+        """Build conversation history context for LLM."""
+        # Get recent messages (excluding current - it will be added separately)
+        messages = self._db.get_recent_messages(conversation_id=conversation_id, limit=10)
+
+        if len(messages) <= 1:  # Only current message or empty
+            return ""
+
+        # Format as conversation history (exclude last message which is the current user message)
+        history_messages = messages[:-1]
+        if not history_messages:
+            return ""
+
+        lines = ["CONVERSATION HISTORY:"]
+        for msg in history_messages:
+            role = str(msg.get("role", "")).upper()
+            content = str(msg.get("content", ""))
+            # Truncate long messages
+            if len(content) > 500:
+                content = content[:500] + "..."
+            lines.append(f"{role}: {content}")
+
+        return "\n".join(lines)
 
     def _get_system_context(self) -> str:
         """Get daily system state context for RAG."""
@@ -202,6 +352,131 @@ class ChatAgent:
                 "unified diff",
             ]
         )
+
+    def detect_intent(self, user_text: str) -> DetectedIntent | None:
+        """Detect conversational intent from short user responses.
+
+        Returns:
+            DetectedIntent if a special intent is detected, None for normal questions.
+        """
+        text = user_text.strip()
+
+        # Check for approval
+        if _APPROVAL_PATTERN.match(text):
+            return DetectedIntent(intent_type="approval")
+
+        # Check for rejection
+        if _REJECTION_PATTERN.match(text):
+            return DetectedIntent(intent_type="rejection")
+
+        # Check for numeric choice (1-9)
+        numeric_match = _NUMERIC_CHOICE_PATTERN.match(text)
+        if numeric_match:
+            return DetectedIntent(
+                intent_type="choice",
+                choice_number=int(numeric_match.group(1)),
+            )
+
+        # Check for ordinal choice (first, second, etc.)
+        ordinal_match = _ORDINAL_PATTERN.match(text)
+        if ordinal_match:
+            ordinal = ordinal_match.group(1).lower()
+            return DetectedIntent(
+                intent_type="choice",
+                choice_number=_ORDINAL_MAP.get(ordinal, 1),
+            )
+
+        # Check for references (it, that, the service, etc.)
+        reference_match = _REFERENCE_PATTERN.search(text)
+        if reference_match and len(text) < 100:  # Short messages with references
+            return DetectedIntent(
+                intent_type="reference",
+                reference_term=reference_match.group(1).lower(),
+            )
+
+        return None
+
+    def resolve_reference(
+        self,
+        reference_term: str,
+        conversation_id: str,
+    ) -> dict[str, Any] | None:
+        """Resolve a reference term (it, that, etc.) from conversation context.
+
+        Returns:
+            Dict with resolved entity info, or None if cannot resolve.
+        """
+        # Get recent messages to find what "it" refers to
+        messages = self._db.get_recent_messages(conversation_id=conversation_id, limit=5)
+
+        if not messages:
+            return None
+
+        # Look for entities in recent assistant messages
+        for msg in reversed(messages):
+            if msg.get("role") != "assistant":
+                continue
+
+            content = str(msg.get("content", ""))
+            metadata_str = msg.get("metadata")
+
+            # Check tool calls in metadata for services/containers
+            if metadata_str:
+                try:
+                    metadata = json.loads(metadata_str)
+                    tool_calls = metadata.get("tool_calls", [])
+                    for tc in tool_calls:
+                        if not tc.get("ok"):
+                            continue
+                        result = tc.get("result", {})
+
+                        # Service mentioned
+                        if "service" in reference_term or "service" in str(tc.get("name", "")):
+                            if isinstance(result, dict) and "name" in result:
+                                return {"type": "service", "name": result["name"]}
+
+                        # Container mentioned
+                        if "container" in reference_term or "container" in str(tc.get("name", "")):
+                            if isinstance(result, dict) and ("id" in result or "name" in result):
+                                return {
+                                    "type": "container",
+                                    "id": result.get("id"),
+                                    "name": result.get("name"),
+                                }
+
+                        # File mentioned
+                        if "file" in reference_term:
+                            if isinstance(result, dict) and "path" in result:
+                                return {"type": "file", "path": result["path"]}
+
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Simple text matching for common patterns
+            patterns = [
+                (r"service[:\s]+([a-zA-Z0-9_-]+)", "service"),
+                (r"container[:\s]+([a-zA-Z0-9_-]+)", "container"),
+                (r"`([^`]+\.service)`", "service"),
+                (r"package[:\s]+([a-zA-Z0-9_-]+)", "package"),
+            ]
+
+            for pattern, entity_type in patterns:
+                match = re.search(pattern, content, re.IGNORECASE)
+                if match:
+                    return {"type": entity_type, "name": match.group(1)}
+
+        return None
+
+    def get_pending_approval_for_conversation(
+        self,
+        conversation_id: str,
+    ) -> dict[str, Any] | None:
+        """Get the most recent pending approval for a conversation."""
+        approvals = self._db.get_pending_approvals()
+        for approval in approvals:
+            if approval.get("conversation_id") == conversation_id:
+                return approval
+        return None
 
     def _select_tools(
         self,
