@@ -371,29 +371,31 @@ Return the step-by-step plan as JSON array:"""
     ) -> dict[str, list[str]]:
         """Match intent targets against actual system resources.
 
-        The LLM should already return matched targets when it has system context.
-        This method validates and enhances the matching as needed.
+        Only returns containers/services that ACTUALLY EXIST on the system.
+        Filters out any hallucinated names from the LLM.
         """
         matched = {}
 
         if intent.resource_type == "container":
+            # Get actual containers from system
             containers = context.get("container_names", [])
-            # Also check containers dict for full info
             all_containers = context.get("containers", {}).get("all", [])
             if all_containers:
                 containers = [c.get("name", c.get("id", "")) for c in all_containers]
 
-            matched_containers = []
+            matched_containers = set()
             for target in intent.targets:
-                # Check if target is an exact match (LLM returned actual name)
+                # Check exact match first
                 if target in containers:
-                    matched_containers.append(target)
+                    matched_containers.add(target)
                 else:
-                    # Try fuzzy matching (filter term)
+                    # Fuzzy match: find containers containing the target term
                     for container in containers:
                         if target.lower() in container.lower():
-                            matched_containers.append(container)
-            matched["containers"] = list(set(matched_containers))
+                            matched_containers.add(container)
+
+            # IMPORTANT: Only include containers that actually exist
+            matched["containers"] = [c for c in matched_containers if c in containers]
 
         elif intent.resource_type == "service":
             services = context.get("service_names", [])
@@ -435,6 +437,12 @@ def create_llm_planner_callback(ollama: OllamaClient | None = None):
     """Create a callback function for TaskPlanner.llm_planner.
 
     This bridges the LLMPlanner to the existing TaskPlanner interface.
+
+    HYBRID APPROACH:
+    - LLM parses intent (action, resource_type, targets) - intelligent understanding
+    - Code generates steps deterministically - reliable execution
+
+    This avoids LLM unreliability in generating correct step arrays.
     """
     planner = LLMPlanner(ollama)
 
@@ -442,9 +450,9 @@ def create_llm_planner_callback(ollama: OllamaClient | None = None):
         """Generate plan steps for a request.
 
         Returns empty list for queries (no plan needed).
-        Returns steps for actions (plan needed).
+        Returns deterministic steps for actions (plan needed).
         """
-        # Parse intent
+        # Parse intent using LLM
         intent = planner.parse_intent(request, context)
 
         if intent.confidence < 0.3:
@@ -460,24 +468,222 @@ def create_llm_planner_callback(ollama: OllamaClient | None = None):
         logger.info("Action intent: %s on %s targets=%s",
                     intent.action, intent.resource_type, intent.targets)
 
-        # Generate plan
-        steps = planner.generate_plan(intent, context)
+        # Match targets against actual system resources
+        matched_resources = planner._match_targets(intent, context)
 
-        # Convert to dict format expected by TaskPlanner
-        return [
-            {
-                "id": f"llm_step_{i}",
-                "title": step.title,
-                "description": step.description,
-                "type": "command",
-                "action": {
-                    "tool": step.tool,
-                    "args": step.tool_args,
-                },
-                "rollback": step.rollback_command,
-                "explanation": step.description,
-            }
-            for i, step in enumerate(steps)
-        ]
+        # DETERMINISTIC STEP GENERATION
+        # Instead of asking LLM to generate steps (unreliable), we generate them in code
+        steps = _generate_steps_from_intent(intent, matched_resources, context)
+
+        logger.info("Generated %d steps for action %s", len(steps), intent.action)
+        return steps
 
     return llm_plan_callback
+
+
+def _generate_steps_from_intent(
+    intent: ParsedIntent,
+    matched_resources: dict[str, list[str]],
+    context: dict[str, Any],
+) -> list[dict]:
+    """Generate deterministic plan steps from parsed intent.
+
+    This replaces unreliable LLM step generation with reliable code.
+
+    Args:
+        intent: Parsed intent with action, resource_type, targets
+        matched_resources: Actual system resources that matched
+        context: System context
+
+    Returns:
+        List of step dicts ready for TaskPlanner
+    """
+    steps = []
+
+    if intent.resource_type == "container":
+        containers = matched_resources.get("containers", [])
+        steps = _generate_container_steps(intent.action, containers)
+
+    elif intent.resource_type == "service":
+        services = matched_resources.get("services", [])
+        steps = _generate_service_steps(intent.action, services)
+
+    elif intent.resource_type == "package":
+        packages = matched_resources.get("packages", intent.targets)
+        steps = _generate_package_steps(intent.action, packages, context)
+
+    return steps
+
+
+def _generate_container_steps(action: str, containers: list[str]) -> list[dict]:
+    """Generate steps for container operations.
+
+    Creates proper steps for each container and each action.
+    """
+    import shlex
+    steps = []
+
+    for i, container in enumerate(containers):
+        safe_name = shlex.quote(container)
+
+        if action == "stop":
+            steps.append({
+                "id": f"stop_{i}",
+                "title": f"Stop {container}",
+                "description": f"Stop container: {container}",
+                "type": "command",
+                "action": {"command": f"docker stop {safe_name}"},
+                "rollback": f"docker start {safe_name}",
+                "explanation": f"Stop the {container} container",
+            })
+
+        elif action == "remove":
+            # Stop first, then remove
+            steps.append({
+                "id": f"stop_{i}",
+                "title": f"Stop {container}",
+                "description": f"Stop container before removal: {container}",
+                "type": "command",
+                "action": {"command": f"docker stop {safe_name} 2>/dev/null || true"},
+                "explanation": f"Stop {container} before removing it",
+            })
+            steps.append({
+                "id": f"remove_{i}",
+                "title": f"Remove {container}",
+                "description": f"Remove container: {container}",
+                "type": "command",
+                "action": {"command": f"docker rm {safe_name}"},
+                "depends_on": [f"stop_{i}"],
+                "explanation": f"Remove the {container} container",
+            })
+
+        elif action == "stop_and_remove":
+            # Explicit stop and remove
+            steps.append({
+                "id": f"stop_{i}",
+                "title": f"Stop {container}",
+                "description": f"Stop container: {container}",
+                "type": "command",
+                "action": {"command": f"docker stop {safe_name}"},
+                "rollback": f"docker start {safe_name}",
+                "explanation": f"Stop the {container} container",
+            })
+            steps.append({
+                "id": f"remove_{i}",
+                "title": f"Remove {container}",
+                "description": f"Remove container: {container}",
+                "type": "command",
+                "action": {"command": f"docker rm {safe_name}"},
+                "depends_on": [f"stop_{i}"],
+                "explanation": f"Remove the {container} container",
+            })
+
+        elif action == "restart":
+            steps.append({
+                "id": f"restart_{i}",
+                "title": f"Restart {container}",
+                "description": f"Restart container: {container}",
+                "type": "command",
+                "action": {"command": f"docker restart {safe_name}"},
+                "explanation": f"Restart the {container} container",
+            })
+
+        elif action == "start":
+            steps.append({
+                "id": f"start_{i}",
+                "title": f"Start {container}",
+                "description": f"Start container: {container}",
+                "type": "command",
+                "action": {"command": f"docker start {safe_name}"},
+                "explanation": f"Start the {container} container",
+            })
+
+        elif action == "kill":
+            steps.append({
+                "id": f"kill_{i}",
+                "title": f"Kill {container}",
+                "description": f"Force kill container: {container}",
+                "type": "command",
+                "action": {"command": f"docker kill {safe_name}"},
+                "rollback": f"docker start {safe_name}",
+                "explanation": f"Force kill the {container} container",
+            })
+
+    return steps
+
+
+def _generate_service_steps(action: str, services: list[str]) -> list[dict]:
+    """Generate steps for service operations."""
+    import shlex
+    steps = []
+
+    for i, service in enumerate(services):
+        safe_name = shlex.quote(service)
+
+        if action in ("stop", "start", "restart", "enable", "disable"):
+            steps.append({
+                "id": f"{action}_{i}",
+                "title": f"{action.capitalize()} {service}",
+                "description": f"{action.capitalize()} the {service} service",
+                "type": "command",
+                "action": {"command": f"sudo systemctl {action} {safe_name}"},
+                "explanation": f"{action.capitalize()} the {service} service",
+            })
+            # Add verification
+            steps.append({
+                "id": f"verify_{i}",
+                "title": f"Verify {service}",
+                "description": f"Check status of {service}",
+                "type": "verify",
+                "action": {"tool": "linux_service_status", "args": {"service_name": service}},
+                "depends_on": [f"{action}_{i}"],
+                "explanation": f"Verify {service} is in expected state",
+            })
+
+    return steps
+
+
+def _generate_package_steps(action: str, packages: list[str], context: dict[str, Any]) -> list[dict]:
+    """Generate steps for package operations."""
+    import shlex
+
+    # Detect package manager
+    pkg_manager = context.get("package_manager", "sudo apt")
+
+    steps = []
+
+    if action == "install":
+        # Update cache first
+        steps.append({
+            "id": "update_cache",
+            "title": "Update package cache",
+            "description": "Refresh package manager cache",
+            "type": "command",
+            "action": {"command": f"{pkg_manager} update"},
+            "explanation": "Update package lists to get latest versions",
+        })
+        for i, package in enumerate(packages):
+            safe_pkg = shlex.quote(package)
+            steps.append({
+                "id": f"install_{i}",
+                "title": f"Install {package}",
+                "description": f"Install the {package} package",
+                "type": "command",
+                "action": {"command": f"{pkg_manager} install -y {safe_pkg}"},
+                "depends_on": ["update_cache"],
+                "explanation": f"Install {package}",
+            })
+
+    elif action == "remove":
+        for i, package in enumerate(packages):
+            safe_pkg = shlex.quote(package)
+            steps.append({
+                "id": f"remove_{i}",
+                "title": f"Remove {package}",
+                "description": f"Remove the {package} package",
+                "type": "command",
+                "action": {"command": f"{pkg_manager} remove -y {safe_pkg}"},
+                "explanation": f"Remove {package}",
+            })
+
+    return steps
