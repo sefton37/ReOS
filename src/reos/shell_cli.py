@@ -42,13 +42,13 @@ def colorize(text: str, color: str) -> str:
 
 def print_header() -> None:
     """Print a minimal ReOS header."""
-    header = colorize("ReOS", "cyan") + colorize(" (natural language mode)", "dim")
+    header = colorize("🐧 ReOS", "cyan") + colorize(" (natural language mode)", "dim")
     print(header, file=sys.stderr)
 
 
 def print_thinking() -> None:
     """Show thinking indicator."""
-    print(colorize("  ⠿ Thinking...", "dim"), end="\r", file=sys.stderr)
+    print(colorize("  🤔 Thinking...", "dim"), end="\r", file=sys.stderr)
 
 
 def clear_thinking() -> None:
@@ -71,17 +71,39 @@ def print_processing_summary(response: ChatResponse, *, quiet: bool = False) -> 
     if response.tool_calls:
         if not has_output:
             print(colorize("─" * 50, "dim"), file=sys.stderr)
-        print(colorize("⚙ Actions taken:", "dim"), file=sys.stderr)
+        print(colorize("🔧 Actions taken:", "cyan"), file=sys.stderr)
 
         for tc in response.tool_calls:
             name = tc.get("name", "unknown")
             ok = tc.get("ok", False)
 
-            # Format tool name nicely
+            # Format tool name nicely with category emoji
             display_name = name.replace("linux_", "").replace("reos_", "").replace("_", " ")
 
+            # Pick emoji based on tool category
+            if "docker" in name or "container" in name:
+                tool_emoji = "🐳"
+            elif "service" in name:
+                tool_emoji = "🔄"
+            elif "package" in name:
+                tool_emoji = "📦"
+            elif "system_info" in name:
+                tool_emoji = "📊"
+            elif "run_command" in name:
+                tool_emoji = "⚡"
+            elif "git" in name:
+                tool_emoji = "📂"
+            elif "file" in name or "log" in name:
+                tool_emoji = "📄"
+            elif "network" in name:
+                tool_emoji = "🌐"
+            elif "process" in name:
+                tool_emoji = "⚙️"
+            else:
+                tool_emoji = "🔹"
+
             if ok:
-                status = colorize("✓", "green")
+                status = colorize("✅", "green")
                 # Show brief result preview for some tools
                 result = tc.get("result", {})
                 preview = ""
@@ -94,11 +116,11 @@ def print_processing_summary(response: ChatResponse, *, quiet: bool = False) -> 
                     elif "status" in result:
                         preview = f" → {result.get('status', '')}"
             else:
-                status = colorize("✗", "red")
+                status = colorize("❌", "red")
                 error = tc.get("error", {})
                 preview = f" → {error.get('message', 'failed')}" if error else ""
 
-            print(f"    {status} {colorize(display_name, 'cyan')}{colorize(preview, 'dim')}", file=sys.stderr)
+            print(f"    {status} {tool_emoji} {colorize(display_name, 'cyan')}{colorize(preview, 'dim')}", file=sys.stderr)
 
         has_output = True
 
@@ -215,7 +237,7 @@ def main() -> NoReturn:
 
         # Print the actual response
         if not args.quiet:
-            print(colorize("ReOS:", "cyan"), file=sys.stderr)
+            print(colorize("💬 ReOS:", "cyan"), file=sys.stderr)
             print(file=sys.stderr)
 
         print(result.answer)
