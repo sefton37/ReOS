@@ -353,6 +353,10 @@ class ReasoningEngine:
         """Get the currently pending plan awaiting approval."""
         return self._pending_plan
 
+    def set_pending_plan(self, plan: TaskPlan) -> None:
+        """Set a pending plan (used for restoring state across invocations)."""
+        self._pending_plan = plan
+
     def cancel_pending(self) -> None:
         """Cancel any pending plan."""
         self._pending_plan = None

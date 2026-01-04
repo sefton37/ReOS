@@ -11,7 +11,7 @@ from .mcp_tools import Tool, ToolError, call_tool, list_tools, render_tool_resul
 from .ollama import OllamaClient
 from .play_fs import list_acts as play_list_acts
 from .play_fs import read_me_markdown as play_read_me_markdown
-from .reasoning import ReasoningEngine, ReasoningConfig, ComplexityLevel
+from .reasoning import ReasoningEngine, ReasoningConfig, ComplexityLevel, TaskPlan
 from .system_index import get_or_refresh_context as get_system_context
 
 # Intent detection patterns for conversational troubleshooting
@@ -112,25 +112,35 @@ class ChatAgent:
             return {"error": e.message, "code": e.code}
 
     def _restore_pending_plan(self) -> None:
-        """Restore pending plan info from database state.
+        """Restore pending plan from database state.
 
-        Note: Full plan restoration requires plan serialization.
-        For now, we just track if there's a pending plan.
+        Loads the full serialized plan so approval flow works across CLI invocations.
         """
-        # TODO: Implement full plan persistence when TaskPlan gets to_dict/from_dict
-        pass
+        plan_json = self._db.get_state(key="pending_plan_json")
+        if plan_json and isinstance(plan_json, str) and plan_json.strip():
+            try:
+                plan_data = json.loads(plan_json)
+                plan = TaskPlan.from_dict(plan_data)
+                # Restore plan to reasoning engine
+                self._reasoning_engine.set_pending_plan(plan)
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                # Invalid plan data, clear it
+                import logging
+                logging.getLogger(__name__).debug("Failed to restore plan: %s", e)
+                self._clear_pending_plan()
 
-    def _save_pending_plan(self, plan) -> None:
-        """Save pending plan info to database for persistence."""
+    def _save_pending_plan(self, plan: TaskPlan) -> None:
+        """Save pending plan to database for persistence across invocations."""
         if plan:
-            # Store plan ID so we know one is pending
+            # Store full serialized plan
+            plan_json = json.dumps(plan.to_dict())
+            self._db.set_state(key="pending_plan_json", value=plan_json)
             self._db.set_state(key="pending_plan_id", value=plan.id)
-            self._db.set_state(key="pending_plan_request", value=plan.original_request)
 
     def _clear_pending_plan(self) -> None:
         """Clear pending plan from database."""
+        self._db.set_state(key="pending_plan_json", value="")
         self._db.set_state(key="pending_plan_id", value="")
-        self._db.set_state(key="pending_plan_request", value="")
 
     def _try_reasoning(
         self,
@@ -141,16 +151,8 @@ class ChatAgent:
 
         Returns ChatResponse if reasoning handled it, None to continue normal flow.
         """
-        # Get system context for reasoning
-        system_context = {}
-        try:
-            import psutil
-            system_context = {
-                "cpu_count": psutil.cpu_count(),
-                "memory_gb": psutil.virtual_memory().total / (1024**3),
-            }
-        except ImportError:
-            pass
+        # Get full system context for reasoning - containers, services, etc.
+        system_context = self._get_system_snapshot_for_reasoning()
 
         # Process through reasoning engine
         result = self._reasoning_engine.process(user_text, system_context)
@@ -435,6 +437,67 @@ class ChatAgent:
             return get_system_context(self._db)
         except Exception:  # noqa: BLE001
             return ""
+
+    def _get_system_snapshot_for_reasoning(self) -> dict[str, Any]:
+        """Get system snapshot as structured data for the reasoning engine.
+
+        Returns a dict with containers, services, and other system state
+        that the planner can use to resolve references like "the redis container".
+        """
+        from .system_index import SystemIndexer
+
+        try:
+            indexer = SystemIndexer(self._db)
+
+            # Get or create today's snapshot
+            if indexer.needs_refresh():
+                snapshot = indexer.capture_snapshot()
+            else:
+                snapshot = indexer.get_latest_snapshot()
+
+            if snapshot is None:
+                return {}
+
+            # Extract structured data for reasoning
+            context: dict[str, Any] = {
+                "hostname": snapshot.hostname,
+                "os": snapshot.os_info,
+                "hardware": snapshot.hardware,
+            }
+
+            # Containers - key for Docker operations
+            if snapshot.containers:
+                context["containers"] = {
+                    "runtime": snapshot.containers.get("runtime"),
+                    "running": snapshot.containers.get("running_containers", []),
+                    "all": snapshot.containers.get("all_containers", []),
+                    "images": snapshot.containers.get("images", []),
+                }
+                # Build name lookup for easy resolution
+                context["container_names"] = [
+                    c.get("name", c.get("id", ""))
+                    for c in snapshot.containers.get("all_containers", [])
+                ]
+
+            # Services - key for systemd operations
+            if snapshot.services:
+                context["services"] = snapshot.services
+                context["service_names"] = [s.get("name", "") for s in snapshot.services]
+
+            # Packages
+            if snapshot.packages:
+                context["package_manager"] = snapshot.packages.get("manager")
+                context["installed_packages"] = snapshot.packages.get("installed", [])
+
+            # Storage
+            if snapshot.storage:
+                context["storage"] = snapshot.storage
+
+            return context
+
+        except Exception as e:
+            logging.getLogger(__name__).debug("Could not get system snapshot: %s", e)
+            return {}
 
     def _get_play_context(self) -> str:
         try:

@@ -27,7 +27,9 @@ def test_mcp_tools_list_returns_tools(isolated_db_singleton) -> None:  # noqa: A
     assert resp is not None
     tools = resp["result"]["tools"]
     assert isinstance(tools, list)
-    assert any(t["name"] == "reos_git_summary" for t in tools)
+    # Check for core Linux tools
+    assert any(t["name"] == "linux_system_info" for t in tools)
+    assert any(t["name"] == "linux_run_command" for t in tools)
 
 
 def test_mcp_tools_call_validates_params_object(isolated_db_singleton) -> None:  # noqa: ANN001

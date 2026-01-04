@@ -90,7 +90,7 @@ def clear_thinking() -> None:
     print(" " * 30, end="\r", file=sys.stderr)
 
 
-def print_processing_summary(response: ChatResponse, *, quiet: bool = False) -> None:
+def print_processing_summary(response: ChatResponse, *, quiet: bool = False, show_approval_hint: bool = True) -> None:
     """Print a summary of what ReOS did during processing.
 
     This shows tool calls, pending approvals, and other metadata
@@ -158,13 +158,11 @@ def print_processing_summary(response: ChatResponse, *, quiet: bool = False) -> 
 
         has_output = True
 
-    # Show pending approval
-    if response.pending_approval_id:
+    # Show pending approval (hint only - actual prompt is handled by interactive loop)
+    if response.pending_approval_id and show_approval_hint:
         if not has_output:
             print(colorize("─" * 50, "dim"), file=sys.stderr)
-        print(colorize("⚠ Pending approval:", "yellow"), file=sys.stderr)
-        print(f"    ID: {response.pending_approval_id}", file=sys.stderr)
-        print(colorize("    Use 'yes' to approve or 'no' to reject", "dim"), file=sys.stderr)
+        print(colorize("⚠️  Plan requires approval", "yellow"), file=sys.stderr)
         has_output = True
 
     # Show conversation tracking
@@ -185,6 +183,7 @@ def handle_prompt(
     *,
     verbose: bool = False,
     conversation_id: str | None = None,
+    agent: ChatAgent | None = None,
 ) -> ChatResponse:
     """Process a natural language prompt through ReOS.
 
@@ -192,12 +191,14 @@ def handle_prompt(
         prompt: The natural language query from the user.
         verbose: If True, show detailed progress.
         conversation_id: Optional conversation ID to continue.
+        agent: Optional ChatAgent instance to reuse.
 
     Returns:
         ChatResponse with answer and metadata.
     """
-    db = get_db()
-    agent = ChatAgent(db=db)
+    if agent is None:
+        db = get_db()
+        agent = ChatAgent(db=db)
 
     if verbose:
         print_thinking()
@@ -209,6 +210,125 @@ def handle_prompt(
             clear_thinking()
 
     return response
+
+
+def prompt_for_approval() -> str | None:
+    """Prompt user for approval inline.
+
+    Returns:
+        'yes', 'no', or None if interrupted/EOF
+    """
+    print(file=sys.stderr)
+    print(colorize("─" * 50, "dim"), file=sys.stderr)
+    print(
+        colorize("🔐 ", "yellow") +
+        colorize("Proceed with this plan? ", "bold") +
+        colorize("[y/n/q]: ", "dim"),
+        end="",
+        file=sys.stderr,
+    )
+    sys.stderr.flush()
+
+    try:
+        response = input().strip().lower()
+        if response in ("y", "yes", "ok", "proceed", "go", "do it"):
+            return "yes"
+        elif response in ("n", "no", "cancel", "abort", "stop"):
+            return "no"
+        elif response in ("q", "quit", "exit"):
+            return None
+        else:
+            # Treat unknown as rejection for safety
+            print(colorize("  ℹ️  Unknown response, treating as 'no'", "dim"), file=sys.stderr)
+            return "no"
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
+def run_interactive_session(
+    initial_prompt: str,
+    *,
+    verbose: bool = False,
+    quiet: bool = False,
+    conversation_id: str | None = None,
+) -> int:
+    """Run an interactive session with approval loop.
+
+    Handles the full flow:
+    1. Send initial prompt
+    2. If plan needs approval, prompt user inline
+    3. On approval, execute and show results
+    4. Loop until no more pending approvals
+
+    Args:
+        initial_prompt: The user's initial request
+        verbose: Show detailed progress
+        quiet: Suppress headers
+        conversation_id: Optional conversation to continue
+
+    Returns:
+        Exit code (0 for success)
+    """
+    db = get_db()
+    agent = ChatAgent(db=db)
+
+    prompt = initial_prompt
+    current_conversation_id = conversation_id
+
+    while True:
+        # Process the prompt
+        result = handle_prompt(
+            prompt,
+            verbose=verbose,
+            conversation_id=current_conversation_id,
+            agent=agent,
+        )
+
+        # Update conversation ID
+        current_conversation_id = result.conversation_id
+        save_conversation_id(current_conversation_id)
+
+        # Show processing summary (without approval hint since we handle it below)
+        print_processing_summary(result, quiet=quiet, show_approval_hint=False)
+
+        # Print the response
+        if not quiet:
+            print(colorize("💬 ReOS:", "cyan"), file=sys.stderr)
+            print(file=sys.stderr)
+        print(result.answer)
+
+        # Check if we need approval
+        if result.pending_approval_id:
+            approval = prompt_for_approval()
+
+            if approval is None:
+                # User quit
+                print(colorize("\n  ℹ️  Session ended. Plan not executed.", "dim"), file=sys.stderr)
+                return 0
+            elif approval == "yes":
+                # Continue the conversation with approval
+                prompt = "yes"
+                if not quiet:
+                    print(file=sys.stderr)
+                    print(colorize("  ⏳ Executing plan...", "cyan"), file=sys.stderr)
+                continue
+            else:
+                # Rejected
+                prompt = "no"
+                if not quiet:
+                    print(file=sys.stderr)
+                    print(colorize("  ℹ️  Plan cancelled.", "dim"), file=sys.stderr)
+                # Send rejection to agent so it clears state
+                result = handle_prompt(
+                    prompt,
+                    verbose=False,
+                    conversation_id=current_conversation_id,
+                    agent=agent,
+                )
+                return 0
+        else:
+            # No pending approval, we're done
+            return 0
 
 
 def main() -> NoReturn:
@@ -282,25 +402,14 @@ def main() -> NoReturn:
         # Get conversation ID for context continuity
         conversation_id = get_conversation_id()
 
-        result = handle_prompt(
+        # Run interactive session with approval loop
+        exit_code = run_interactive_session(
             prompt,
             verbose=not args.quiet,
+            quiet=args.quiet,
             conversation_id=conversation_id,
         )
-
-        # Save conversation ID for next invocation
-        save_conversation_id(result.conversation_id)
-
-        # Show processing summary (tools called, pending approvals, etc.)
-        print_processing_summary(result, quiet=args.quiet and not args.verbose)
-
-        # Print the actual response
-        if not args.quiet:
-            print(colorize("💬 ReOS:", "cyan"), file=sys.stderr)
-            print(file=sys.stderr)
-
-        print(result.answer)
-        sys.exit(0)
+        sys.exit(exit_code)
 
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)

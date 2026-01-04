@@ -40,10 +40,11 @@ SIMPLE_PATTERNS = [
     # Single command operations
     (r"\b(open|launch|start|run)\s+\w+\b", "application launch"),
     (r"\b(show|display|what('s| is)|tell me)\s+(my\s+)?(ip|disk|memory|cpu|ram)\b", "info query"),
-    (r"\b(list|show)\s+(running\s+)?(processes|services|packages)\b", "listing"),
+    (r"\b(list|show)\s+(running\s+)?(processes|services|packages|containers|images)\b", "listing"),
     (r"\binstall\s+\w+\b", "single package install"),
     (r"\b(is|check if)\s+\w+\s+(running|installed|active)\b", "status check"),
     (r"\bhow much\s+(ram|memory|disk|space)\b", "resource query"),
+    (r"\bhow many\s+\w+", "count query"),  # "how many containers", "how many processes"
     (r"\bwhat time\b", "simple query"),
     (r"\bwho am i\b", "identity query"),
     (r"\bwhat's my (username|hostname)\b", "identity query"),
@@ -55,6 +56,11 @@ SIMPLE_PATTERNS = [
     (r"\btop\b", "process monitor"),
     (r"\buptime\b", "uptime query"),
     (r"\bdate\b", "date query"),
+    # Docker/container queries
+    (r"\b(docker|container|image)\s+(ps|ls|list|status)\b", "docker listing"),
+    (r"\b(list|show|get)\s+(my\s+)?(docker\s+)?(containers|images)\b", "docker listing"),
+    (r"\bcontainers?\s+(running|active|stopped)\b", "container status"),
+    (r"\bwhat\s+(docker\s+)?(containers|images)\b", "docker query"),
 ]
 
 # Complex request patterns - needs planning
@@ -109,6 +115,11 @@ RISKY_PATTERNS = [
     (r"\breinstall\b.*\b(os|system)\b", "system reinstall"),
     (r"\bpurge\b", "package purge"),
     (r"\b(downgrade|rollback)\b", "version rollback"),
+    # Docker/container operations that modify state
+    (r"\b(stop|kill|remove|delete|rm)\b.*\bcontainer", "container modification"),
+    (r"\bcontainer\b.*\b(stop|kill|remove|delete|rm)\b", "container modification"),
+    (r"\bdocker\s+(stop|kill|rm|remove)\b", "docker modification"),
+    (r"\b(stop|remove|delete)\b.*\b(service|daemon)\b", "service modification"),
 ]
 
 
@@ -239,8 +250,19 @@ class ComplexityAssessor:
                 keywords_matched=list(action_words & set(words)),
             )
 
-        # Questions about "how" often need planning
-        if request.lower().startswith("how"):
+        # "How do I" / "How can I" questions need planning, but "how many/much" are simple
+        lower_request = request.lower()
+        if lower_request.startswith("how"):
+            # "how many" and "how much" are simple count/quantity queries
+            if lower_request.startswith(("how many", "how much")):
+                return ComplexityResult(
+                    level=ComplexityLevel.SIMPLE,
+                    confidence=0.8,
+                    reason="Count/quantity query",
+                    suggested_approach="Execute and report count",
+                    keywords_matched=["how many"] if "many" in lower_request else ["how much"],
+                )
+            # "how do I" / "how can I" / "how to" need steps
             return ComplexityResult(
                 level=ComplexityLevel.COMPLEX,
                 confidence=0.6,

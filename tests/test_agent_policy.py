@@ -41,6 +41,12 @@ def test_agent_strips_include_diff_when_not_opted_in(
     isolated_db_singleton,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Test that include_diff is stripped when user doesn't opt in.
+
+    NOTE: This test uses linux_system_info since git tools were removed.
+    The test now verifies that arbitrary extra arguments are passed through,
+    since include_diff policy doesn't apply to non-git tools.
+    """
     _set_persona_tool_limit(3)
 
     calls: list[dict[str, Any]] = []
@@ -56,22 +62,25 @@ def test_agent_strips_include_diff_when_not_opted_in(
 
     tool_plan = {
         "tool_calls": [
-            {"name": "reos_git_summary", "arguments": {"include_diff": True}},
+            {"name": "linux_system_info", "arguments": {}},
         ]
     }
 
     agent = ChatAgent(db=get_db(), ollama=FakeOllama(tool_plan_json=json.dumps(tool_plan)))
-    _answer = agent.respond("How does the repo look?")
+    # Disable reasoning engine for this test - we're testing tool policy, not reasoning
+    monkeypatch.setattr(agent, "_try_reasoning", lambda *args, **kwargs: None)
+    _answer = agent.respond("How is my system?")
 
-    assert any(c["name"] == "reos_git_summary" for c in calls)
-    git_call = next(c for c in calls if c["name"] == "reos_git_summary")
-    assert "include_diff" not in git_call["arguments"]
+    assert any(c["name"] == "linux_system_info" for c in calls)
+    info_call = next(c for c in calls if c["name"] == "linux_system_info")
+    assert info_call["arguments"] == {}
 
 
-def test_agent_allows_include_diff_when_user_opts_in(
+def test_agent_passes_arguments_to_tools(
     isolated_db_singleton,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Test that tool arguments are passed through correctly."""
     _set_persona_tool_limit(3)
 
     calls: list[dict[str, Any]] = []
@@ -86,15 +95,17 @@ def test_agent_allows_include_diff_when_user_opts_in(
 
     tool_plan = {
         "tool_calls": [
-            {"name": "reos_git_summary", "arguments": {"include_diff": True}},
+            {"name": "linux_disk_usage", "arguments": {"path": "/home"}},
         ]
     }
 
     agent = ChatAgent(db=get_db(), ollama=FakeOllama(tool_plan_json=json.dumps(tool_plan)))
-    _answer = agent.respond("Please include diff in the git summary")
+    # Disable reasoning engine for this test - we're testing tool policy, not reasoning
+    monkeypatch.setattr(agent, "_try_reasoning", lambda *args, **kwargs: None)
+    _answer = agent.respond("Check disk usage for /home")
 
-    git_call = next(c for c in calls if c["name"] == "reos_git_summary")
-    assert git_call["arguments"].get("include_diff") is True
+    disk_call = next(c for c in calls if c["name"] == "linux_disk_usage")
+    assert disk_call["arguments"].get("path") == "/home"
 
 
 def test_agent_respects_tool_call_limit(
@@ -115,12 +126,14 @@ def test_agent_respects_tool_call_limit(
 
     tool_plan = {
         "tool_calls": [
-            {"name": "reos_git_summary", "arguments": {}},
-            {"name": "reos_repo_list_files", "arguments": {"glob": "**/*.py"}},
+            {"name": "linux_system_info", "arguments": {}},
+            {"name": "linux_disk_usage", "arguments": {"path": "/"}},
         ]
     }
 
     agent = ChatAgent(db=get_db(), ollama=FakeOllama(tool_plan_json=json.dumps(tool_plan)))
+    # Disable reasoning engine for this test - we're testing tool policy, not reasoning
+    monkeypatch.setattr(agent, "_try_reasoning", lambda *args, **kwargs: None)
     _answer = agent.respond("What tools do you need?")
 
     assert len(calls) == 1
@@ -143,7 +156,9 @@ def test_agent_falls_back_on_invalid_json_tool_plan(
     monkeypatch.setattr(agent_mod, "call_tool", fake_call_tool)
 
     agent = ChatAgent(db=get_db(), ollama=FakeOllama(tool_plan_json="not json"))
+    # Disable reasoning engine for this test - we're testing tool policy, not reasoning
+    monkeypatch.setattr(agent, "_try_reasoning", lambda *args, **kwargs: None)
     _answer = agent.respond("Hello")
 
-    # Fallback should attempt a minimal metadata-first call.
-    assert calls[:1] == ["reos_git_summary"]
+    # Fallback should attempt linux_system_info (Linux-focused default)
+    assert calls[:1] == ["linux_system_info"]

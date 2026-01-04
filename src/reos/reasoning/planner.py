@@ -88,6 +88,49 @@ class TaskStep:
         # All dependencies must be completed
         return all(dep in completed_steps for dep in self.depends_on)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dictionary for persistence."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "description": self.description,
+            "step_type": self.step_type.value,
+            "action": self.action,
+            "depends_on": list(self.depends_on),
+            "risk": self.risk.to_dict() if self.risk else None,
+            "rollback_command": self.rollback_command,
+            "backup_paths": list(self.backup_paths),
+            "status": self.status.value,
+            "result": self.result,
+            "error": self.error,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "alternatives": list(self.alternatives),
+            "explanation": self.explanation,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TaskStep":
+        """Deserialize from dictionary."""
+        return cls(
+            id=data["id"],
+            title=data["title"],
+            description=data["description"],
+            step_type=StepType(data["step_type"]),
+            action=data["action"],
+            depends_on=data.get("depends_on", []),
+            risk=RiskAssessment.from_dict(data["risk"]) if data.get("risk") else None,
+            rollback_command=data.get("rollback_command"),
+            backup_paths=data.get("backup_paths", []),
+            status=StepStatus(data.get("status", "pending")),
+            result=data.get("result"),
+            error=data.get("error"),
+            started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
+            completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+            alternatives=data.get("alternatives", []),
+            explanation=data.get("explanation", ""),
+        )
+
 
 @dataclass
 class TaskPlan:
@@ -150,6 +193,44 @@ class TaskPlan:
         )
         return completed, len(self.steps)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dictionary for persistence."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "original_request": self.original_request,
+            "created_at": self.created_at.isoformat(),
+            "steps": [step.to_dict() for step in self.steps],
+            "total_estimated_duration": self.total_estimated_duration,
+            "requires_reboot": self.requires_reboot,
+            "highest_risk": self.highest_risk.value,
+            "approved": self.approved,
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "current_step_index": self.current_step_index,
+            "completed_steps": list(self.completed_steps),
+            "failed_steps": list(self.failed_steps),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TaskPlan":
+        """Deserialize from dictionary."""
+        plan = cls(
+            id=data["id"],
+            title=data["title"],
+            original_request=data["original_request"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            steps=[TaskStep.from_dict(s) for s in data.get("steps", [])],
+            total_estimated_duration=data.get("total_estimated_duration", 0),
+            requires_reboot=data.get("requires_reboot", False),
+            highest_risk=RiskLevel(data.get("highest_risk", "safe")),
+            approved=data.get("approved", False),
+            approved_at=datetime.fromisoformat(data["approved_at"]) if data.get("approved_at") else None,
+            current_step_index=data.get("current_step_index", 0),
+            completed_steps=set(data.get("completed_steps", [])),
+            failed_steps=set(data.get("failed_steps", [])),
+        )
+        return plan
+
 
 # Common task templates for caching
 TASK_TEMPLATES = {
@@ -210,6 +291,90 @@ TASK_TEMPLATES = {
                 "step_type": StepType.VERIFICATION,
                 "action": {"tool": "linux_service_status", "args": {"service_name": "{service}"}},
                 "depends_on": ["restart"],
+            },
+        ],
+    },
+    # Docker container operations
+    "container_stop": {
+        "pattern": r"stop\s+(?:the\s+)?(\S+)\s*container",
+        "steps": [
+            {
+                "id": "list_containers",
+                "title": "List running containers",
+                "description": "Find the container to stop",
+                "step_type": StepType.DIAGNOSTIC,
+                "action": {"tool": "linux_containers", "args": {}},
+            },
+            {
+                "id": "stop_container",
+                "title": "Stop container",
+                "description": "Stop the container: {container}",
+                "step_type": StepType.COMMAND,
+                "action": {"tool": "linux_run_command", "args": {"command": "docker stop {container}"}},
+                "depends_on": ["list_containers"],
+                "rollback_command": "docker start {container}",
+                "risk_level": RiskLevel.MEDIUM,
+            },
+        ],
+    },
+    "container_remove": {
+        "pattern": r"(?:remove|delete|rm)\s+(?:the\s+)?(\S+)\s*container",
+        "steps": [
+            {
+                "id": "list_containers",
+                "title": "List containers",
+                "description": "Find the container to remove",
+                "step_type": StepType.DIAGNOSTIC,
+                "action": {"tool": "linux_containers", "args": {}},
+            },
+            {
+                "id": "stop_container",
+                "title": "Stop container (if running)",
+                "description": "Stop the container before removing: {container}",
+                "step_type": StepType.COMMAND,
+                "action": {"tool": "linux_run_command", "args": {"command": "docker stop {container} 2>/dev/null || true"}},
+                "depends_on": ["list_containers"],
+                "risk_level": RiskLevel.MEDIUM,
+            },
+            {
+                "id": "remove_container",
+                "title": "Remove container",
+                "description": "Remove the container: {container}",
+                "step_type": StepType.COMMAND,
+                "action": {"tool": "linux_run_command", "args": {"command": "docker rm {container}"}},
+                "depends_on": ["stop_container"],
+                "risk_level": RiskLevel.HIGH,
+            },
+        ],
+    },
+    "container_stop_remove": {
+        "pattern": r"stop\s+(?:and\s+)?(?:remove|delete)\s+(?:the\s+)?(\S+)\s*container",
+        "steps": [
+            {
+                "id": "list_containers",
+                "title": "List running containers",
+                "description": "Find the container",
+                "step_type": StepType.DIAGNOSTIC,
+                "action": {"tool": "linux_containers", "args": {}},
+            },
+            {
+                "id": "stop_container",
+                "title": "Stop container",
+                "description": "Stop the container: {container}",
+                "step_type": StepType.COMMAND,
+                "action": {"tool": "linux_run_command", "args": {"command": "docker stop {container}"}},
+                "depends_on": ["list_containers"],
+                "rollback_command": "docker start {container}",
+                "risk_level": RiskLevel.MEDIUM,
+            },
+            {
+                "id": "remove_container",
+                "title": "Remove container",
+                "description": "Remove the container: {container}",
+                "step_type": StepType.COMMAND,
+                "action": {"tool": "linux_run_command", "args": {"command": "docker rm {container}"}},
+                "depends_on": ["stop_container"],
+                "risk_level": RiskLevel.HIGH,
             },
         ],
     },
@@ -318,27 +483,35 @@ class TaskPlanner:
         # Build substitution context
         subs = dict(context)
 
-        # Add captured groups
-        if "package" not in subs and captures:
-            subs["package"] = captures[0]
-        if "service" not in subs and captures:
-            subs["service"] = captures[0]
+        # Add captured groups - use first capture for common variable names
+        if captures:
+            first_capture = captures[0]
+            if "package" not in subs:
+                subs["package"] = first_capture
+            if "service" not in subs:
+                # Try to resolve service name from system context
+                subs["service"] = self._resolve_service_name(first_capture, context)
+            if "container" not in subs:
+                # Try to resolve container name from system context
+                subs["container"] = self._resolve_container_name(first_capture, context)
 
         # Detect package manager if needed
         if "pkg_manager" not in subs:
-            subs["pkg_manager"] = self._detect_pkg_manager()
+            # Use package manager from context if available
+            subs["pkg_manager"] = context.get("package_manager") or self._detect_pkg_manager()
 
         steps = []
         for step_def in template["steps"]:
+            description = self._substitute(step_def["description"], subs)
             step = TaskStep(
                 id=step_def.get("id", self._next_step_id()),
                 title=self._substitute(step_def["title"], subs),
-                description=self._substitute(step_def["description"], subs),
+                description=description,
                 step_type=step_def["step_type"],
                 action=self._substitute_dict(step_def["action"], subs),
                 depends_on=step_def.get("depends_on", []),
                 rollback_command=self._substitute(step_def.get("rollback_command", ""), subs) or None,
-                explanation=f"This step will {step_def['description'].lower()}",
+                explanation=f"This step will {description.lower()}",
             )
             steps.append(step)
 
@@ -519,3 +692,103 @@ class TaskPlanner:
                 for i, s in enumerate(plan.steps)
             ],
         }
+
+    def _resolve_container_name(self, user_ref: str, context: dict[str, Any]) -> str:
+        """Resolve a user's container reference to an actual container name.
+
+        Matches user input like "redis" to actual container names like "nextcloud-redis".
+        Uses fuzzy matching: substring, prefix, suffix.
+
+        Args:
+            user_ref: User's reference (e.g., "redis", "nextcloud")
+            context: System context with container_names list
+
+        Returns:
+            Resolved container name, or original reference if no match
+        """
+        container_names = context.get("container_names", [])
+        if not container_names:
+            return user_ref
+
+        user_ref_lower = user_ref.lower()
+
+        # Exact match first
+        for name in container_names:
+            if name.lower() == user_ref_lower:
+                return name
+
+        # Substring match (e.g., "redis" matches "nextcloud-redis")
+        matches = [name for name in container_names if user_ref_lower in name.lower()]
+        if len(matches) == 1:
+            logger.debug("Resolved container '%s' -> '%s'", user_ref, matches[0])
+            return matches[0]
+        elif len(matches) > 1:
+            # Multiple matches - log and return first
+            logger.debug(
+                "Multiple containers match '%s': %s, using first",
+                user_ref,
+                matches,
+            )
+            return matches[0]
+
+        # Prefix match (e.g., "next" matches "nextcloud")
+        prefix_matches = [name for name in container_names if name.lower().startswith(user_ref_lower)]
+        if prefix_matches:
+            return prefix_matches[0]
+
+        # No match found
+        logger.debug("No container match for '%s' in %s", user_ref, container_names)
+        return user_ref
+
+    def _resolve_service_name(self, user_ref: str, context: dict[str, Any]) -> str:
+        """Resolve a user's service reference to an actual service name.
+
+        Matches user input like "nginx" to actual service names like "nginx.service".
+
+        Args:
+            user_ref: User's reference (e.g., "nginx", "docker")
+            context: System context with service_names list
+
+        Returns:
+            Resolved service name, or original reference if no match
+        """
+        service_names = context.get("service_names", [])
+        if not service_names:
+            return user_ref
+
+        user_ref_lower = user_ref.lower()
+
+        # Exact match first
+        for name in service_names:
+            if name.lower() == user_ref_lower:
+                return name
+
+        # Strip .service suffix for matching
+        normalized_services = {
+            name.replace(".service", "").lower(): name
+            for name in service_names
+        }
+
+        # Check against normalized names
+        if user_ref_lower in normalized_services:
+            return normalized_services[user_ref_lower]
+
+        # Substring match
+        matches = [
+            name for name in service_names
+            if user_ref_lower in name.lower().replace(".service", "")
+        ]
+        if len(matches) == 1:
+            logger.debug("Resolved service '%s' -> '%s'", user_ref, matches[0])
+            return matches[0]
+        elif len(matches) > 1:
+            logger.debug(
+                "Multiple services match '%s': %s, using first",
+                user_ref,
+                matches,
+            )
+            return matches[0]
+
+        # No match found
+        logger.debug("No service match for '%s' in %s", user_ref, service_names)
+        return user_ref

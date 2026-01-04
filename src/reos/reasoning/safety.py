@@ -62,6 +62,35 @@ class RiskAssessment:
     data_loss_possible: bool
     reversible: bool
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dictionary for persistence."""
+        return {
+            "level": self.level.value,
+            "reasons": list(self.reasons),
+            "requires_confirmation": self.requires_confirmation,
+            "requires_backup": self.requires_backup,
+            "requires_reboot": self.requires_reboot,
+            "estimated_duration_seconds": self.estimated_duration_seconds,
+            "affected_components": list(self.affected_components),
+            "data_loss_possible": self.data_loss_possible,
+            "reversible": self.reversible,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RiskAssessment":
+        """Deserialize from dictionary."""
+        return cls(
+            level=RiskLevel(data["level"]),
+            reasons=data["reasons"],
+            requires_confirmation=data["requires_confirmation"],
+            requires_backup=data["requires_backup"],
+            requires_reboot=data["requires_reboot"],
+            estimated_duration_seconds=data["estimated_duration_seconds"],
+            affected_components=data["affected_components"],
+            data_loss_possible=data["data_loss_possible"],
+            reversible=data["reversible"],
+        )
+
 
 @dataclass
 class RollbackAction:

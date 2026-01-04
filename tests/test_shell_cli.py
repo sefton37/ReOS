@@ -9,6 +9,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from reos.agent import ChatResponse
+
+
+def _make_chat_response(answer: str, conversation_id: str = "test-conv-123") -> ChatResponse:
+    """Create a ChatResponse for testing."""
+    return ChatResponse(
+        answer=answer,
+        conversation_id=conversation_id,
+        message_id="test-msg-123",
+        message_type="text",
+        tool_calls=[],
+        pending_approval_id=None,
+    )
+
 
 class TestShellCliModule:
     """Tests for the shell_cli module."""
@@ -68,13 +82,13 @@ class TestHandlePrompt:
 
         # Mock the ChatAgent
         mock_agent = MagicMock()
-        mock_agent.respond.return_value = "Test response from agent"
+        mock_agent.respond.return_value = _make_chat_response("Test response from agent")
 
         with patch("reos.shell_cli.ChatAgent", return_value=mock_agent):
             result = handle_prompt("test query")
 
-        assert result == "Test response from agent"
-        mock_agent.respond.assert_called_once_with("test query")
+        assert result.answer == "Test response from agent"
+        mock_agent.respond.assert_called_once_with("test query", conversation_id=None)
 
     def test_handle_prompt_passes_db(
         self,
@@ -91,7 +105,7 @@ class TestHandlePrompt:
             nonlocal captured_db
             captured_db = db
             mock = MagicMock()
-            mock.respond.return_value = "ok"
+            mock.respond.return_value = _make_chat_response("ok")
             return mock
 
         with patch("reos.shell_cli.ChatAgent", side_effect=capture_agent):
@@ -134,7 +148,7 @@ class TestMainEntryPoint:
         monkeypatch.setattr(sys, "argv", ["reos-shell", "test", "query"])
 
         mock_agent = MagicMock()
-        mock_agent.respond.return_value = "Agent response"
+        mock_agent.respond.return_value = _make_chat_response("Agent response")
 
         with patch("reos.shell_cli.ChatAgent", return_value=mock_agent):
             with pytest.raises(SystemExit) as exc_info:
@@ -156,7 +170,7 @@ class TestMainEntryPoint:
         monkeypatch.setattr(sys, "argv", ["reos-shell", "--quiet", "test"])
 
         mock_agent = MagicMock()
-        mock_agent.respond.return_value = "Response"
+        mock_agent.respond.return_value = _make_chat_response("Response")
 
         with patch("reos.shell_cli.ChatAgent", return_value=mock_agent):
             with pytest.raises(SystemExit) as exc_info:
@@ -207,7 +221,7 @@ class TestCommandNotFoundMode:
         monkeypatch.setattr("builtins.input", lambda: "y")
 
         mock_agent = MagicMock()
-        mock_agent.respond.return_value = "Processed"
+        mock_agent.respond.return_value = _make_chat_response("Processed")
 
         with patch("reos.shell_cli.ChatAgent", return_value=mock_agent):
             with pytest.raises(SystemExit) as exc_info:
