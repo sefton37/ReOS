@@ -97,21 +97,26 @@ class ChatAgent:
 
         return {
             "system_prompt": (
-                "You are ReOS, a local-first AI companion for Linux users. "
-                "Your purpose is to make using Linux as easy as having a conversation. "
-                "You help with:\n"
-                "- Running shell commands and explaining what they do\n"
-                "- Managing packages, services, and system settings\n"
-                "- Finding files, reading logs, and troubleshooting issues\n"
-                "- Explaining Linux concepts in plain language\n"
-                "- Suggesting the right commands for what the user wants to do\n\n"
-                "Guidelines:\n"
-                "- Always explain what a command will do before running it\n"
-                "- Warn about potentially dangerous operations\n"
-                "- Suggest safer alternatives when appropriate\n"
-                "- Be helpful to both beginners and power users\n"
-                "- Use linux_* tools to interact with the system\n"
-                "- Be transparent about what you're doing"
+                "You are ReOS, a local-first AI companion for Linux system administration. "
+                "You run entirely on the user's machine using Ollama - no cloud services. "
+                "Your purpose is to make Linux system management as easy as having a conversation.\n\n"
+                "CAPABILITIES - Use these tools proactively:\n"
+                "- linux_system_info: Get CPU, memory, disk, uptime (USE THIS OFTEN)\n"
+                "- linux_list_services: Show systemd services and their status\n"
+                "- linux_run_command: Execute shell commands (with user approval)\n"
+                "- linux_list_packages: Show installed packages\n"
+                "- linux_list_docker_containers: Show Docker containers\n"
+                "- linux_read_file: Read config files and logs\n"
+                "- linux_preview_command: Explain what a command will do\n"
+                "- reos_git_summary: Summarize git repository state\n\n"
+                "GUIDELINES:\n"
+                "- ALWAYS use tools to get real system data - never make up information\n"
+                "- For system questions, call linux_system_info or linux_list_services\n"
+                "- For 'run X' requests, use linux_run_command with the command\n"
+                "- Explain what commands do before running them\n"
+                "- Warn about dangerous operations (rm -rf, chmod 777, etc.)\n"
+                "- Be concise but helpful - show the data, then explain it\n"
+                "- You can also help with git repositories using reos_* tools"
             ),
             "default_context": "",
             "temperature": 0.2,
@@ -490,11 +495,12 @@ class ChatAgent:
         top_p: float,
         tool_call_limit: int,
     ) -> list[ToolCall]:
+        # Simplified tool specs - just names and short descriptions
+        # Full schemas overwhelm smaller models
         tool_specs = [
             {
                 "name": t.name,
-                "description": t.description,
-                "input_schema": t.input_schema,
+                "description": t.description[:100] if t.description else "",
             }
             for t in tools
         ]
@@ -502,11 +508,16 @@ class ChatAgent:
         system = (
             persona_prefix
             + "\n\n"
-            + "You are deciding which tools (if any) to call to answer the user.\n\n"
-            + "Rules:\n"
-            + "- Prefer metadata-first tools (git summary) before reading files.\n"
-            + "- Only request include_diff=true if the user explicitly opted in.\n"
-            + f"- Keep tool calls minimal (0-{tool_call_limit}).\n\n"
+            + "You are deciding which tools to call to answer the user.\n\n"
+            + "IMPORTANT RULES:\n"
+            + "- For system/hardware questions: USE linux_system_info\n"
+            + "- For service questions: USE linux_list_services\n"
+            + "- For 'run command' requests: USE linux_run_command with {\"command\": \"...\"}\n"
+            + "- For package questions: USE linux_list_packages\n"
+            + "- For Docker questions: USE linux_list_docker_containers\n"
+            + "- For git/repo questions: USE reos_git_summary\n"
+            + "- Only request include_diff=true if the user explicitly asked for diffs.\n"
+            + f"- Call 1-{tool_call_limit} tools as needed. DO NOT return empty tool_calls for system questions.\n\n"
             + "Return JSON with this shape:\n"
             + "{\n"
             + "  \"tool_calls\": [\n"
@@ -525,19 +536,46 @@ class ChatAgent:
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
-            return [ToolCall(name="reos_git_summary", arguments={})]
+            # Fallback: get system info if LLM returns invalid JSON
+            return [ToolCall(name="linux_system_info", arguments={})]
 
         calls = payload.get("tool_calls")
         if not isinstance(calls, list):
             return []
 
         out: list[ToolCall] = []
+        valid_tool_names = {t.name for t in tools}
+
         for c in calls:
             if not isinstance(c, dict):
                 continue
             name = c.get("name")
-            args = c.get("arguments")
-            if isinstance(name, str) and isinstance(args, dict):
+            args = c.get("arguments") or {}  # Default to empty dict if missing
+
+            if not isinstance(name, str):
+                continue
+            if not isinstance(args, dict):
+                args = {}
+
+            # Map common LLM mistakes to actual tool names
+            name_mapping = {
+                "uptime": "linux_system_info",
+                "system_info": "linux_system_info",
+                "services": "linux_list_services",
+                "list_services": "linux_list_services",
+                "run_command": "linux_run_command",
+                "run": "linux_run_command",
+                "packages": "linux_list_packages",
+                "docker": "linux_list_docker_containers",
+                "containers": "linux_list_docker_containers",
+                "git_summary": "reos_git_summary",
+                "git": "reos_git_summary",
+            }
+            if name in name_mapping:
+                name = name_mapping[name]
+
+            # Only add if it's a valid tool
+            if name in valid_tool_names:
                 out.append(ToolCall(name=name, arguments=args))
 
         return out
