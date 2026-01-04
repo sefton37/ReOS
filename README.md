@@ -7,7 +7,8 @@ ReOS is a local-first AI companion that lets you control your entire Linux syste
 ## What Makes ReOS Different
 
 - **Truly Local**: Runs entirely on your machine using Ollama. No cloud, no latency, no privacy concerns.
-- **Deep System Understanding**: ReOS knows YOUR system - your distro, your packages, your services, your processes.
+- **LLM-First Reasoning**: Every request goes through intelligent intent parsing. The LLM understands what you want and plans accordingly.
+- **Deep System Understanding**: ReOS knows YOUR system - your containers, services, packages, and processes by name.
 - **Transparent Actions**: Every command is previewed before execution. You always see what's happening.
 - **Recoverable Mistakes**: Destructive operations show undo commands. It's conversational - you can say "wait, undo that."
 - **Safety First**: Dangerous commands are blocked. Risky operations require confirmation.
@@ -15,21 +16,50 @@ ReOS is a local-first AI companion that lets you control your entire Linux syste
 
 ## Examples
 
-```
-You: Show me what's using the most memory
-ReOS: [Lists top processes by memory usage]
+```bash
+# Simple queries - answered directly
+$ reos "what containers are running"
+You have 4 containers running: nextcloud-app, nextcloud-redis, portainer, n8n
 
+# Actions - planned and previewed
+$ reos "stop all nextcloud containers"
+
+This involves system changes. Here's the plan:
+  1. Stop nextcloud-app
+  2. Stop nextcloud-redis
+  3. Stop nextcloud-db
+
+Proceed? [y/n]: y
+✓ Stopped nextcloud-app
+✓ Stopped nextcloud-redis
+✓ Stopped nextcloud-db
+
+# Conversational context
+$ reos "now remove them"
+# ReOS remembers the context from previous command
+
+Plan:
+  1. Remove nextcloud-app
+  2. Remove nextcloud-redis
+  3. Remove nextcloud-db
+
+Proceed? [y/n]: y
+Done! All 3 containers removed.
+```
+
+More examples:
+```
 You: My disk is almost full, help me clean up
-ReOS: [Analyzes disk usage, suggests safe cleanup options]
+ReOS: [Analyzes disk usage, creates cleanup plan, asks approval]
 
 You: Install docker and set it up for my user
-ReOS: [Previews commands, installs Docker, adds you to group]
+ReOS: [Creates multi-step plan: install, start service, add to group]
 
 You: What services are failing?
-ReOS: [Lists failed systemd services with details]
+ReOS: [Lists failed systemd services - query, no approval needed]
 
-You: The nginx config has a typo, help me fix it
-ReOS: [Reads config, identifies issue, shows diff before applying]
+You: Restart the failed ones
+ReOS: [Creates plan to restart each failed service, asks approval]
 ```
 
 ## Quick Start
@@ -118,12 +148,27 @@ These limits are enforced in code, not by the AI's "judgment." The AI literally 
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Tauri Desktop App                     │
-│  ┌──────────────┐  ┌─────────────┐  ┌───────────────┐  │
-│  │ Chat Window  │  │System Panel │  │  Inspector    │  │
-│  └──────────────┘  └─────────────┘  └───────────────┘  │
+│          Natural Language Interface                      │
+│     Shell CLI  │  Tauri Desktop App  │  HTTP API        │
 └─────────────────────────────────────────────────────────┘
-                           │ JSON-RPC (stdio)
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│              LLM-First Reasoning Engine                  │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ Intent Parser: Query vs Action detection         │   │
+│  │ Plan Generator: Step-by-step with rollback       │   │
+│  │ System Context: Containers, Services, Packages   │   │
+│  └─────────────────────────────────────────────────┘   │
+│                         │                               │
+│            ┌────────────┴────────────┐                 │
+│            ▼                         ▼                 │
+│     ┌─────────────┐          ┌─────────────┐          │
+│     │   Queries   │          │   Actions   │          │
+│     │  (answer)   │          │ (plan+exec) │          │
+│     └─────────────┘          └─────────────┘          │
+└─────────────────────────────────────────────────────────┘
+                           │
                            ▼
 ┌─────────────────────────────────────────────────────────┐
 │                    Python Kernel                         │
@@ -138,6 +183,15 @@ These limits are enforced in code, not by the AI's "judgment." The AI literally 
 │    systemd │ apt/dnf/pacman │ docker │ files │ ...     │
 └─────────────────────────────────────────────────────────┘
 ```
+
+### How It Works
+
+1. **You speak naturally**: "stop all nextcloud containers"
+2. **LLM parses intent**: Understands this is an ACTION on containers matching "nextcloud"
+3. **System context**: Looks up actual containers: `nextcloud-app`, `nextcloud-redis`, `nextcloud-db`
+4. **Plan generation**: Creates steps: stop each container, then remove if requested
+5. **Preview & approval**: Shows exactly what will happen, waits for your OK
+6. **Execution**: Runs commands with rollback capability
 
 ## Principles
 
@@ -174,16 +228,19 @@ REOS_LOG_LEVEL=DEBUG npm run tauri:dev
 
 ## Roadmap
 
-**Current Focus (M2): Conversational Flows**
-- [ ] Command preview UI (approve/reject with explanations)
-- [ ] Live system state dashboard (CPU, RAM, services, containers)
-- [ ] Multi-step workflow progress tracking
-- [ ] Inspector pane (see reasoning trail for any response)
+**Completed (M2): Conversational Flows**
+- [x] LLM-first intent parsing (query vs action detection)
+- [x] System context awareness (containers, services, packages)
+- [x] Multi-step plan generation with approval workflow
+- [x] Conversation persistence across shell invocations
+- [x] Command preview with approval (approve/reject)
+- [x] Live output streaming for command execution
 
-**Next (M3): Intelligence & Learning**
+**Current Focus (M3): Intelligence & Learning**
 - [ ] Personal runbooks (remember past solutions)
 - [ ] Proactive monitoring (alert on service failures)
 - [ ] Pattern learning (auto-approve safe patterns)
+- [ ] Live system state dashboard UI
 
 **Future (M4+): Advanced Capabilities**
 - [ ] Configuration file editing with diffs

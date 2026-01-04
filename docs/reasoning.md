@@ -4,24 +4,27 @@ The reasoning system provides intelligent planning for complex Linux operations 
 
 ## Overview
 
-When you ask ReOS to do something, it first assesses the complexity:
+ReOS uses an **LLM-first approach** to understand your requests. Instead of rigid pattern matching, it uses the LLM to:
 
-- **Simple requests** (like "show disk space") execute immediately
-- **Complex requests** (like "speed up boot time") get planned first
-- **Risky requests** (like "delete all temp files") require explicit approval
+1. **Parse your intent**: Is this a question (query) or a request to change something (action)?
+2. **Match against your system**: What containers, services, or packages are you referring to?
+3. **Generate actionable plans**: Create step-by-step execution plans with rollback capability
+
+This means natural language like "stop the nextcloud containers" works without needing to know exact container names.
 
 ## How It Works
 
-### 1. Complexity Assessment
+### 1. LLM Intent Parsing
 
-Every request is classified into one of four categories:
+Every request goes through the LLM to understand what you want:
 
-| Level | Examples | Behavior |
-|-------|----------|----------|
-| **Simple** | "install htop", "show memory" | Execute directly |
-| **Complex** | "set up development environment" | Create plan, show steps |
-| **Diagnostic** | "why is my laptop hot" | Investigate first, then suggest |
-| **Risky** | "delete all logs" | Warn, show impact, require approval |
+| Intent Type | Examples | Behavior |
+|-------------|----------|----------|
+| **Query** | "what containers are running?", "show memory" | Answer directly, no approval |
+| **Action** | "stop the nginx service", "install htop" | Create plan, require approval |
+| **Combined** | "is nextcloud running? if so stop it" | Prioritize action, create plan |
+
+The LLM has access to your **system context** - it knows your actual container names, running services, and installed packages. So "stop the redis container" matches against `nextcloud-redis` on your system.
 
 ### 2. Task Planning
 
@@ -138,22 +141,29 @@ ReOS: Okay, keeping it short.
 │                      ReasoningEngine                              │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                   │
-│  ┌──────────────┐     ┌──────────────┐     ┌─────────────────┐  │
-│  │ Complexity   │────▶│ TaskPlanner  │────▶│ AdaptiveExecutor│  │
-│  │ Assessor     │     │              │     │                 │  │
-│  └──────────────┘     └──────────────┘     └────────┬────────┘  │
-│         │                    │                      │            │
-│         │                    │           ┌──────────┴─────────┐ │
-│         │                    │           │  ErrorClassifier   │ │
-│         │                    │           │  AdaptiveReplanner │ │
-│         │                    │           │  ExecutionLearner  │ │
-│         │                    │           └────────────────────┘ │
-│         ▼                    ▼                    │              │
 │  ┌────────────────────────────────────────────────────────────┐ │
-│  │                ConversationManager                          │ │
-│  │           (natural language formatting)                     │ │
+│  │                    LLMPlanner (Primary)                     │ │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌──────────────────┐   │ │
+│  │  │ Intent      │──│ Target      │──│ Plan             │   │ │
+│  │  │ Parser      │  │ Matcher     │  │ Generator        │   │ │
+│  │  └─────────────┘  └─────────────┘  └──────────────────┘   │ │
+│  │        │                │                   │               │ │
+│  │        │    System Context (containers, services, pkgs)    │ │
 │  └────────────────────────────────────────────────────────────┘ │
 │                              │                                   │
+│            ┌─────────────────┴─────────────────┐                │
+│            ▼                                   ▼                │
+│     ┌─────────────┐                    ┌─────────────────┐     │
+│     │   Queries   │                    │ TaskPlanner     │     │
+│     │ (no plan)   │                    │ + AdaptiveExec  │     │
+│     └─────────────┘                    └────────┬────────┘     │
+│                                                 │               │
+│                                      ┌──────────┴─────────┐    │
+│                                      │  ErrorClassifier   │    │
+│                                      │  AdaptiveReplanner │    │
+│                                      │  ExecutionLearner  │    │
+│                                      └────────────────────┘    │
+│                                                                   │
 │  ┌────────────────────────────────────────────────────────────┐ │
 │  │                     SafetyManager                           │ │
 │  │      (backups, rollback stack, risk assessment)             │ │
@@ -166,44 +176,65 @@ ReOS: Okay, keeping it short.
 
 | Component | Purpose |
 |-----------|---------|
-| **ComplexityAssessor** | Fast classification using pattern matching |
+| **LLMPlanner** | Primary intent parsing and plan generation using LLM |
+| **Intent Parser** | Distinguishes queries from actions using LLM |
+| **Target Matcher** | Resolves natural language to actual system resources |
 | **TaskPlanner** | Breaks requests into steps with dependencies |
 | **AdaptiveExecutor** | Runs steps with automatic error recovery |
 | **ErrorClassifier** | Diagnoses failures (missing deps, permissions, etc.) |
 | **AdaptiveReplanner** | Dynamically revises plans on failure |
 | **ExecutionLearner** | Learns what works on this specific system |
-| **ConversationManager** | Formats output naturally |
 | **SafetyManager** | Risk analysis, backups, rollback capability |
 
 ## Examples
 
-### Simple Request (Direct Execution)
+### Query Request (No Plan Needed)
 
 ```
-User: "show me disk space"
-ReOS: [Complexity: simple, confidence: 0.9]
-      [Executes: df -h]
-      "You've got 120GB free on your main drive, 45GB on /home"
+User: "what containers are running"
+ReOS: [Intent: query, resource: containers]
+      [Executes: docker ps]
+      "You have 4 containers running:
+       - nextcloud-app (Up 2 hours)
+       - nextcloud-redis (Up 2 hours)
+       - portainer (Up 2 hours)
+       - n8n (Up 2 hours)"
 ```
 
-### Complex Request (Planning)
+### Action Request (Plan Generated)
 
 ```
-User: "my laptop's getting hot and the fan is loud"
-ReOS: [Complexity: diagnostic]
-      "Let me check what's using your CPU..."
+User: "stop the nextcloud containers"
+ReOS: [Intent: action=stop, resource: containers]
+      [Matched targets: nextcloud-app, nextcloud-redis]
 
-      [Runs: top, sensors, systemd analysis]
+      "This will stop 2 containers:
+       1. Stop nextcloud-app
+       2. Stop nextcloud-redis
 
-      "Found it - Chrome has 8 processes using 340% CPU total.
-       Also your CPU is at 87°C which is pretty hot.
+       Proceed? [y/n]"
 
-       I can:
-       1. Close Chrome tabs using the most CPU (saves the rest)
-       2. Check if your fan vents are clear (I'll walk you through it)
-       3. Set up better CPU thermal management
+User: "y"
+ReOS: [Executing plan...]
+      ✓ Stopped nextcloud-app
+      ✓ Stopped nextcloud-redis
+      "Done! Both containers stopped."
+```
 
-       What sounds good?"
+### Combined Request (Action Takes Priority)
+
+```
+User: "is nextcloud running? if so remove it"
+ReOS: [Intent: action=remove, resource: containers, condition: if_running]
+      [System lookup: nextcloud-app (running), nextcloud-redis (running)]
+
+      "Nextcloud is running (2 containers). Here's the removal plan:
+       1. Stop nextcloud-app
+       2. Remove nextcloud-app
+       3. Stop nextcloud-redis
+       4. Remove nextcloud-redis
+
+       This cannot be undone. Proceed? [y/n]"
 ```
 
 ### Risky Request (Approval Required)
