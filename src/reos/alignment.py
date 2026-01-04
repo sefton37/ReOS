@@ -1,8 +1,20 @@
 """Alignment analysis: relate code changes to roadmap and charter.
 
-This module is intentionally local-first and metadata-first.
-Default behavior avoids capturing file contents; it only inspects git metadata
-(file paths, diffstat). Optionally, callers can opt-in to include diffs.
+⚠️  OPTIONAL M5 ROADMAP FEATURE - GIT INTEGRATION ⚠️
+
+This module is DISABLED BY DEFAULT. ReOS core functionality (natural language
+Linux control) does NOT depend on git integration.
+
+REQUIRES: settings.git_integration_enabled = True
+Enable via: REOS_GIT_INTEGRATION_ENABLED=true
+
+This module provides git repository analysis for developer workflows:
+- Analyze code changes vs project roadmap/charter
+- Track alignment with project goals
+- Metadata-first: only inspects git metadata (file paths, diffstat) by default
+- Opt-in for diffs: callers can request full diff content
+
+Local-first and privacy-focused: no cloud calls, user data stays local.
 """
 
 from __future__ import annotations

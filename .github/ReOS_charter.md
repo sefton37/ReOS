@@ -1,339 +1,458 @@
-ReOS Intelligence Charter
+# ReOS Intelligence Charter
 
-Talking Rock
+**Talking Rock**
 
-Purpose
+---
 
-ReOS exists to protect, reflect, and return human attention.
+## Purpose
 
-Not to optimize it.
-Not to monetize it.
-Not to gamify it into submission.
+ReOS exists to **protect, reflect, and return human attention** by making Linux transparent.
 
-ReOS is an intelligence designed to sit alongside a person’s digital life and help them see, with clarity and compassion, how their attention is actually being spent and what that allocation is doing to their mind, work, and sense of meaning.
+Not to automate everything.
+Not to hide complexity behind magic.
+Not to turn users into passengers.
 
-ReOS treats attention as labor and focus as choice.
+ReOS is an intelligence designed to make using the terminal **as easy as having a conversation**, while treating every interaction as an opportunity to learn, understand, and grow capability—not dependency.
+---
 
-Everything else is implementation detail.
+## Foundational Beliefs
 
-Foundational Beliefs
-1. Attention Is Labor
+### 1. Attention Is Labor
 
 Attention is the primary input of all cognitive, creative, and economic systems.
 
-Every minute of attention:
+Every minute spent:
+- Searching Stack Overflow for a forgotten flag
+- Reading cryptic error messages
+- Context-switching between terminal and browser
+- Fighting with package managers
 
-reinforces neural pathways,
+...is attention **extracted** without consent by poor interface design.
 
-trains habits,
+ReOS treats this extraction as **a solvable problem**, not an inevitability.
 
-shapes identity,
+If you have to memorize `tar -xzf` vs `tar -xjf`, the interface has failed—not you.
 
-and votes for a future state of the self.
+### 2. Natural Language Is the Universal Interface
 
-ReOS treats attention as a first-class signal, not an abstract wellness concept.
-If attention is labor, then unmanaged extraction leads to burnout, fragmentation, and loss of agency.
+The terminal is powerful.
+The terminal is hostile.
 
-ReOS exists to make that extraction visible.
+This is not the user's fault. It's a design artifact from 1970s constraints (no mouse, 80 columns, batch processing).
 
-2. There Is No Such Thing as Multitasking
+**Natural language is not "dumbing down."**
+It is **meeting humans where they are**: in conversation.
 
-Multitasking is not a skill.
-It is a stress pattern.
+ReOS believes:
+- "Show me what's using memory" is clearer than `ps aux --sort=-%mem | head`
+- "Install docker and add me to the group" is safer than Googling 5 different tutorials
+- "Why did nginx fail?" is faster than `journalctl -u nginx -n 50 --no-pager`
 
-The human mind context-switches. Each switch carries cost. Prolonged switching produces what ReOS explicitly names:
+Commands are **implementation details**. Intent is what matters.
 
-A frayed mind.
+### 3. Transparency Over Magic
 
-ReOS does not punish fragmentation.
-It does not shame distraction.
-It simply reflects patterns back to the user with fidelity and restraint.
+ReOS will **never** run a command without showing you what it's doing.
 
-Awareness precedes choice.
+Every action is:
+- **Previewed** before execution ("I'm going to run `apt install docker.io`")
+- **Explained** in plain language ("This installs Docker from Ubuntu's repositories")
+- **Reversible** when possible ("To undo: `apt remove docker.io`")
+- **Inspectable** ("Here's why I chose this over snap")
 
-3. Busyness Is a Symptom, Not a Goal
+This is not hand-holding.
+This is **respect**.
 
-Busyness is often mistaken for productivity, virtue, or relevance.
+You don't learn Linux by having ReOS do everything for you.
+You learn by **seeing the translation** from intent → command, repeatedly, until the pattern clicks.
 
-ReOS rejects busyness as a success metric.
+ReOS is a **Rosetta Stone**, not a vending machine.
 
-ReOS is not a productivity tool.
-It does not push velocity, streaks, quotas, or dopamine loops.
+### 4. Safety Without Surveillance
 
-ReOS is a meditation tool with memory.
+ReOS knows your system:
+- Your distro, your packages, your services
+- What's running, what's failed, what's consuming resources
+- Your file structure, your environment, your configurations
 
-It creates space for the user to decide:
+**Privacy guarantee:**
+- All data stays local (SQLite)
+- No cloud calls for core functionality
+- No keystroke capture
+- No content reading without explicit opt-in
+- Open source, auditable, user-owned
 
-when to work deeply,
+Observation is **necessary for intelligence**.
+Surveillance is **exploitation**.
 
-when to rest intentionally,
+ReOS draws a hard line between them.
 
-when to explore,
+### 5. The Paperclip Problem Will Not Happen Here
 
-and when to stop.
+AI assistants can optimize themselves into nightmares:
+- "Make the system faster" → deletes logs, disables monitoring, breaks dependencies
+- "Fix everything" → runs 500 commands, escalates to root repeatedly
+- "Clean up disk space" → removes /usr/share/doc, then /var, then... oops
 
-Revolution and Evolution as Lenses
+**ReOS has hard-coded circuit breakers the AI cannot override:**
 
-ReOS uses two complementary lenses to help users understand their lives:
+| Protection | Limit | Why |
+|------------|-------|-----|
+| **Operation Cap** | Max 25 commands per task | No infinite loops |
+| **Time Limit** | 5 minutes max execution | No runaway processes |
+| **Privilege Limit** | Max 3 sudo escalations | No permission creep |
+| **Scope Enforcement** | Actions must match intent | No "helpful" drift |
+| **Human Checkpoints** | After 2 auto-recoveries | You stay in control |
 
-Revolution
+These are **not configurable by the AI**. Only you can change them.
 
-Sharp breaks
+This is the deal: ReOS gets to be smart and helpful, but it **cannot** turn your request into an optimization loop that eats your system.
 
-Boundary-setting
+---
 
-Saying “no”
+## Revolution and Evolution Applied to Linux
 
-Interrupting harmful loops
+ReOS uses two lenses to understand how you interact with your system:
 
-Reclaiming attention from exploitative patterns
+### Revolution
+- Learning a new tool (switching from vim to neovim)
+- Migrating infrastructure (containers, new services)
+- Breaking out of inefficient patterns
+- Saying "no" to bad defaults
 
-Revolution is episodic and necessary.
+Revolution is **episodic disruption** that reclaims agency.
 
-Evolution
+### Evolution
+- Deepening mastery of existing tools
+- Integrating new knowledge into workflow
+- Building sustainable automation
+- Refining mental models
 
-Habit formation
+Evolution is **gradual integration** that builds capability.
 
-Integration
+ReOS doesn't judge which mode you're in.
+It simply helps you see:
+- "You've been installing new tools for 3 days—exploring, or avoiding something?"
+- "You keep running the same 5 commands—want to script this?"
 
-Slow rewiring
+**Awareness precedes choice.**
 
-Sustainable rhythms
+---
 
-Long-term coherence
+## What ReOS Is
 
-Evolution is gradual and stabilizing.
+### A Conversational Linux Companion
 
-ReOS does not force balance.
-It documents imbalance.
+ReOS sits alongside your terminal (or replaces it) and lets you:
 
-The system helps users see when they are:
+**Instead of:**
+```bash
+# Find what's eating disk space
+du -h / --max-depth=1 2>/dev/null | sort -hr | head -20
+```
 
-stuck in endless revolution (burnout, constant reinvention),
+**Just say:**
+```
+You: My disk is almost full, what's taking up space?
 
-trapped in pure evolution (stagnation, compliance),
+ReOS: Analyzing disk usage...
+      /var/log: 12.3 GB (old logs, can be rotated)
+      /home/you/Downloads: 8.7 GB (installation files)
+      /var/lib/docker: 6.2 GB (old container layers)
 
-or oscillating without rest.
+      Want me to clean up old logs and show Docker cleanup options?
+```
 
-What ReOS Is
-A Local-First Intelligence
+**Instead of:**
+```bash
+# Install and configure Docker
+apt update && apt install docker.io
+systemctl enable docker
+systemctl start docker
+usermod -aG docker $USER
+# Now log out and back in...
+```
 
-Runs locally on the user’s machine
+**Just say:**
+```
+You: Install Docker and set it up for my user
 
-Zero-trust by default
+ReOS: I'll install Docker and add you to the docker group.
+      This requires sudo. Commands:
 
-No cloud dependency for core functionality
+      1. sudo apt install docker.io
+      2. sudo systemctl enable --now docker
+      3. sudo usermod -aG docker kellogg
 
-User-owned data, always
+      After this, you'll need to log out and back in.
+      Proceed? [y/N]
+```
 
-ReOS observes:
+### Deep System Understanding
 
-the Linux environment,
+ReOS maintains a **daily snapshot** of your system:
+- All packages (not just "important" ones)
+- All services (running, failed, disabled)
+- All containers and images
+- Network configuration
+- Resource usage patterns
 
-active applications,
+This isn't surveillance—it's **context**.
 
-project structures,
+When you say "Why is my system slow?", ReOS knows:
+- A service failed 2 hours ago
+- A container is consuming 80% CPU
+- You're out of swap space
 
-time patterns,
+It can answer **your specific system**, not generic advice from the internet.
 
-context switching behavior.
+### Transparent Reasoning
 
-Observation is passive, auditable, and user-visible.
+Every response includes an **inspection trail**:
+- What prompt was sent to the LLM
+- What tools were called
+- What alternatives were considered
+- Confidence level in the suggestion
 
-Nothing is hidden. Nothing is sent without consent.
+Click any suggestion → see **exactly** how ReOS arrived at it.
 
-A Kernel for Attention
+This is not a black box. You can **audit the reasoning**.
 
-ReOS acts as an attention kernel.
+### Safety-First Execution
 
-It does not command.
-It does not optimize without permission.
-It does not decide what matters.
+ReOS classifies every request:
+- **Simple**: Read-only queries (system info, logs, file listings)
+- **Complex**: Multi-step workflows (install → configure → verify)
+- **Diagnostic**: Root cause analysis (service failures, performance issues)
+- **Risky**: Destructive operations (deletions, reformats, privilege changes)
 
-It classifies:
+**Risky operations are ALWAYS previewed with undo commands.**
 
-modes of attention,
+```
+You: Delete all the temp files
 
-fragmentation vs coherence,
+ReOS: [Preview] This will delete 47 files in /tmp:
+      - /tmp/session_12345
+      - /tmp/cache_xyz
+      ...
 
-work vs noise,
+      To undo: These files cannot be restored.
+      Consider: Move to ~/trash first?
 
-intention vs drift.
+      Proceed? [y/N]
+```
 
-It reflects these classifications back to the user so the user can choose.
+### Not a Black Box
 
-A Diagnostic, Not a Judge
+- **Open source**: Audit the code
+- **Local models**: Uses Ollama (llama3.2, qwen, mistral—your choice)
+- **No telemetry**: Zero cloud calls for core functionality
+- **Explainable**: Every decision has a paper trail
 
-ReOS avoids moral language.
+---
 
-No “good days” or “bad days.”
-No productivity scores.
-No shame loops.
+## What ReOS Will Not Become
 
-Instead, it provides:
+ReOS will **never**:
 
-timelines,
+- Run commands without showing you first
+- Hide what it's doing behind "magic"
+- Encourage you to stop learning the system
+- Gamify terminal usage with streaks or points
+- Become a corporate surveillance tool
+- Optimize your behavior without consent
 
-pattern summaries,
+**If ReOS makes you _less capable_ with Linux over time, it has failed.**
 
-context-aware reflections.
+The goal is **capability transfer**, not dependency creation.
 
-Think:
+---
 
-“Here is what your attention has been doing.”
-“Here is how often it fractured.”
-“Here is where depth appeared.”
+## Core Capabilities
 
-Nothing more. Nothing less.
+### 1. Natural Language → Safe Execution
 
-Core MVP Capabilities
-1. Attention Observation (Local)
+You speak intent.
+ReOS translates to commands.
+You approve.
+Commands run.
+You learn the pattern.
 
-App focus tracking
+Supported:
+- System monitoring (CPU, RAM, disk, network, processes)
+- Service management (start/stop/restart systemd units)
+- Package operations (search, install, remove, update)
+- File operations (find, search, read logs)
+- Docker/container management
+- Diagnostics (why is X failing? what's using Y?)
 
-Window/context switching analysis
+### 2. System State Awareness
 
-Duration and fragmentation metrics
+Daily snapshots of:
+- Hardware (CPU, RAM, disk, network interfaces)
+- OS (distro, kernel, boot params)
+- Packages (all installed packages, not just "key" ones)
+- Services (all systemd units)
+- Containers (images, running containers, volumes)
+- Network (interfaces, routes, listening ports)
 
-No keystroke content capture by default
+This becomes **RAG context** for the LLM:
+"Here's the actual state of the system. Answer based on reality, not generic Linux advice."
 
-The goal is pattern visibility, not surveillance.
+### 3. Multi-Step Workflows
 
-2. Project-Aware Context
+Single requests can trigger **planned execution**:
 
-ReOS understands projects as containers of meaning.
+```
+You: Set up a PostgreSQL database for my Django project
 
-It observes:
+ReOS: Here's the plan:
+      1. Install postgresql + python3-psycopg2
+      2. Start PostgreSQL service
+      3. Create user 'django_user'
+      4. Create database 'myproject_db'
+      5. Update settings.py with connection string
 
-folders,
+      [Shows exact commands]
+      Proceed? [y/N]
+```
 
-repositories,
+The **Extended Reasoning System** handles:
+- Breaking requests into steps
+- Dependency detection
+- Error recovery (retry/skip/abort)
+- Circuit breakers (max 25 ops, 5 min timeout)
 
-documents,
+### 4. Conversational Troubleshooting
 
-workflows.
+```
+You: Nginx isn't working
 
-It connects attention patterns to projects, not just time.
+ReOS: Checking nginx status...
+      Service failed. Error: "Port 80 already in use"
 
-This answers a better question than “Was I productive?”:
+      Something else is listening on port 80.
+      Running: sudo lsof -i :80
 
-“What did my attention actually serve?”
+      Found: Apache2 is running.
 
-3. Revolution / Evolution Classification
+      You probably want to either:
+      1. Stop Apache: sudo systemctl stop apache2
+      2. Change nginx to port 8080 (edit /etc/nginx/sites-enabled/default)
 
-Using transparent heuristics and explainable models, ReOS classifies periods of attention as:
+      Which approach?
+```
 
-disruptive vs integrative,
+ReOS doesn't just run commands—it **converses** through problems.
 
-exploratory vs stabilizing,
+### 5. Learning Mode
 
-fragmented vs coherent.
+ReOS shows you the translation:
 
-These are descriptive, not prescriptive.
+```
+You: Show me what's using the most memory
 
-4. Frayed Mind Detection
+ReOS: Running: ps aux --sort=-%mem | head -10
 
-ReOS detects patterns associated with cognitive overload:
+      [Shows output]
 
-rapid task switching,
+      💡 Command breakdown:
+         ps aux         = list all processes
+         --sort=-%mem   = sort by memory (descending)
+         head -10       = show top 10
 
-shallow engagement across many contexts,
+      Try it yourself next time: ⬆ in your shell history
+```
 
-extended periods without sustained focus or rest.
+Over time, you **internalize** the patterns. ReOS becomes training wheels you eventually remove.
 
-It does not interrupt unless invited.
+---
 
-It simply notes:
+## Ethical Commitments
 
-“This looks like strain.”
+- **User sovereignty**: Your system, your data, your rules
+- **Local-first**: No cloud dependency for core features
+- **Privacy**: No content capture without explicit opt-in
+- **Transparency**: Every action is previewed and explained
+- **Safety**: Circuit breakers prevent runaway execution
+- **Capability transfer**: You should become _more_ capable, not dependent
+- **No dark patterns**: No addiction loops, no engagement hacking
+- **Open source**: Auditable, forkable, community-owned
 
-5. Meditation Mode
+ReOS is built on the premise that **freedom requires transparency, not abstraction.**
 
-ReOS can enter a passive, reflective mode where:
+---
 
-metrics recede,
+## Long-Term Vision
 
-summaries soften,
+### Phase 1: Natural Language Linux (Current)
+- Conversational system control
+- Safe command execution
+- System state awareness
+- Multi-step workflows
 
-language becomes minimal.
+### Phase 2: Attention Integration (Future)
+- Track when you're fighting the terminal vs doing real work
+- Detect "I've been Googling the same error for 30 minutes"
+- Suggest: "Want me to help debug this instead?"
 
-This is not “focus mode.”
-It is permission to be.
+### Phase 3: Knowledge Accumulation (Future)
+- Remember: "Last time you had this nginx error, you fixed it by..."
+- Build personal runbooks: "Your system-specific solutions"
+- Share anonymized patterns (opt-in): "Others with your setup solved this by..."
 
-6. Personal CRM Integration (Thunderbird)
+### Phase 4: Life Integration (Speculative)
+- Broader attention tracking (email, browser, calendar)
+- "You've been context-switching every 4 minutes for 2 hours"
+- Life graph: projects, people, time, attention flows
 
-ReOS integrates with Thunderbird to:
+**But the terminal remains the foundation.**
 
-understand communication rhythms,
+Everything else expands from "make Linux conversational."
 
-build a life graph of people, projects, and time,
+---
 
-contextualize attention socially without reading content by default.
+## Current Implementation (January 2025)
 
-The goal is to show relational attention, not extract it.
+- **Python kernel**: SQLite storage, Ollama LLM, comprehensive Linux tools
+- **Tauri desktop app**: 3-pane layout (nav, chat, inspection)
+- **Extended reasoning**: Multi-step planning, error recovery, circuit breakers
+- **System indexer**: Daily snapshots of packages/services/containers
+- **Safety features**: Command preview, undo suggestions, hard limits
 
-What ReOS Will Not Become
+**What works today:**
+- Chat interface with system-aware responses
+- System monitoring and diagnostics
+- Command execution with previews
+- Multi-step task planning
 
-A task manager
+**What's in progress:**
+- Full inspection pane (reasoning trail visualization)
+- Command history and learning suggestions
+- Proactive troubleshooting ("This service just failed—want to investigate?")
 
-A calendar tyrant
+---
 
-A gamified habit tracker
+## Closing Principle
 
-A corporate surveillance tool
+**ReOS does not exist to make the terminal obsolete.**
 
-A productivity influencer in software form
+It exists to make the terminal **accessible**.
 
-If ReOS starts telling users what they should be doing, it has failed.
+Linux is powerful.
+Linux is liberating.
+Linux should not require a CS degree to use safely.
 
-Long-Term Vision
+Natural language is not a crutch—it's a **ramp**.
 
-Over time, ReOS may expand into:
+Attention spent memorizing flags is attention stolen from building things that matter.
 
-personal knowledge management,
+**ReOS gives you back that attention.**
 
-life graph visualization,
+Command by command.
+Conversation by conversation.
+Until Linux feels like a partner, not a puzzle.
 
-reflective journaling support,
+---
 
-optional agentic planning tools.
-
-But attention remains the kernel.
-
-Everything else orbits it.
-
-Ethical Commitments
-
-User sovereignty over data
-
-Local-first by default
-
-Explainable classifications
-
-No dark patterns
-
-No engagement maximization
-
-No emotional manipulation
-
-ReOS is built on the premise that freedom requires awareness, not control.
-
-Current Implementation Snapshot (Dec 2025)
-
-This section is descriptive (not prescriptive): it captures the current codebase state so expectations stay aligned.
-
-- Python kernel (authoritative): SQLite storage, Ollama reasoning, and tool boundaries.
-- Desktop UI (current): TypeScript/Tauri app under `apps/reos-tauri/` that spawns `python -m reos.ui_rpc_server` over stdio JSON-RPC.
-	- Capability: chat via `chat/respond`, plus UI polish in the Tauri shell.
-
-Closing Principle
-
-ReOS does not exist to make people better workers.
-
-It exists to help people remember they are choosing how they live, one minute at a time.
-
-Attention is labor.
-Focus is power.
-Choice is the point.
-
-Everything else is noise.
+*Because your computer should understand you, not the other way around.*

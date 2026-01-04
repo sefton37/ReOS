@@ -1,18 +1,20 @@
 """Shared tool implementations for ReOS MCP + internal agent.
 
-These tools are repo-scoped AND system-scoped for Linux.
+ReOS provides two categories of tools:
 
-Repo selection is repo-first:
-- If `REOS_REPO_PATH` is set, tools run against that repo.
-- Otherwise, tools fall back to the workspace root if it is a git repo.
+1. **Linux System Tools** (always available):
+   - Shell command execution (with safety guardrails)
+   - System monitoring (CPU, RAM, disk, network)
+   - Package management (apt/dnf/pacman)
+   - Service management (systemd)
+   - Process and file management
+   - Docker/container management
 
-Linux tools provide system-level access:
-- Shell command execution (with safety guardrails)
-- System monitoring (CPU, RAM, disk, network)
-- Package management (apt/dnf/pacman)
-- Service management (systemd)
-- Process and file management
-- Docker/container management
+2. **Git Integration Tools** (optional - M5 roadmap feature):
+   - Disabled by default (set REOS_GIT_INTEGRATION_ENABLED=true to enable)
+   - Repository discovery and analysis
+   - Change tracking vs roadmap/charter
+   - Commit review and suggestions
 
 The MCP server wraps these results into MCP's `content` envelope.
 """
@@ -51,56 +53,73 @@ class Tool:
 
 
 def list_tools() -> list[Tool]:
-    return [
-        # --- Git/Repo Tools ---
-        Tool(
-            name="reos_repo_discover",
-            description="Discover git repos on disk (bounded scan) and store them in SQLite.",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="reos_git_summary",
-            description=(
-                "Return git summary for the current repo. Metadata-only by default; "
-                "include_diff must be explicitly set true."
+    """List all available tools based on settings.
+
+    Linux system tools are always available.
+    Git integration tools require settings.git_integration_enabled = True.
+    """
+    tools: list[Tool] = []
+
+    # =========================================================================
+    # Git/Repo Tools (Optional - M5 Roadmap Feature)
+    # Only included if git_integration_enabled = True
+    # =========================================================================
+    if settings.git_integration_enabled:
+        tools.extend([
+            Tool(
+                name="reos_repo_discover",
+                description="Discover git repos on disk (bounded scan) and store them in SQLite.",
+                input_schema={"type": "object", "properties": {}},
             ),
-            input_schema={"type": "object", "properties": {"include_diff": {"type": "boolean"}}},
-        ),
-        Tool(
-            name="reos_repo_grep",
-            description="Search text within the current repo (bounded).",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "include_glob": {"type": "string", "description": "Glob like src/**/*.py"},
-                    "max_results": {"type": "number"},
+            Tool(
+                name="reos_git_summary",
+                description=(
+                    "Return git summary for the current repo. Metadata-only by default; "
+                    "include_diff must be explicitly set true."
+                ),
+                input_schema={"type": "object", "properties": {"include_diff": {"type": "boolean"}}},
+            ),
+            Tool(
+                name="reos_repo_grep",
+                description="Search text within the current repo (bounded).",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "include_glob": {"type": "string", "description": "Glob like src/**/*.py"},
+                        "max_results": {"type": "number"},
+                    },
+                    "required": ["query"],
                 },
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="reos_repo_read_file",
-            description="Read a file within the current repo (bounded) by line range.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "start_line": {"type": "number"},
-                    "end_line": {"type": "number"},
+            ),
+            Tool(
+                name="reos_repo_read_file",
+                description="Read a file within the current repo (bounded) by line range.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "start_line": {"type": "number"},
+                        "end_line": {"type": "number"},
+                    },
+                    "required": ["path", "start_line", "end_line"],
                 },
-                "required": ["path", "start_line", "end_line"],
-            },
-        ),
-        Tool(
-            name="reos_repo_list_files",
-            description="List files within the current repo using a glob.",
-            input_schema={
-                "type": "object",
-                "properties": {"glob": {"type": "string"}},
-                "required": ["glob"],
-            },
-        ),
+            ),
+            Tool(
+                name="reos_repo_list_files",
+                description="List files within the current repo using a glob.",
+                input_schema={
+                    "type": "object",
+                    "properties": {"glob": {"type": "string"}},
+                    "required": ["glob"],
+                },
+            ),
+        ])
+
+    # =========================================================================
+    # Linux System Tools (Always Available - Core ReOS Functionality)
+    # =========================================================================
+    tools.extend([
         # --- Linux System Tools ---
         Tool(
             name="linux_run_command",
@@ -567,7 +586,9 @@ def list_tools() -> list[Tool]:
                 "required": ["username", "group"],
             },
         ),
-    ]
+    ])
+
+    return tools
 
 
 def _repo_root(db: Database) -> Path:

@@ -1,3 +1,17 @@
+"""Commit review using local LLM (OPTIONAL - M5 Roadmap Feature).
+
+⚠️  GIT INTEGRATION FEATURE - DISABLED BY DEFAULT ⚠️
+
+REQUIRES: settings.git_integration_enabled = True
+Enable via: REOS_GIT_INTEGRATION_ENABLED=true
+
+Provides Ollama-powered code review for git commits.
+Reads commit patches and provides analysis/suggestions.
+
+Core ReOS functionality (natural language Linux control) does NOT require this.
+This is an optional developer workflow feature for M5 roadmap.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -143,13 +143,16 @@ These limits are enforced in code, not by the AI's "judgment." The AI literally 
 
 From the [ReOS Charter](.github/ReOS_charter.md):
 
-> ReOS exists to protect, reflect, and return human attention.
+> ReOS exists to protect, reflect, and return human attention by making Linux transparent.
 
-Applied to system administration:
-- **Transparent**: You see every command before it runs
-- **Explainable**: ReOS explains why it suggests what it does
-- **Recoverable**: Mistakes can be undone through conversation
-- **Sovereign**: Your system, your data, your choice
+Applied to terminal usage:
+- **Attention is labor**: Time spent Googling flags is attention stolen from real work
+- **Transparency over magic**: Every command is previewed, explained, and approved by you
+- **Capability transfer**: You learn the patterns through repeated exposure, not dependency
+- **Safety without surveillance**: Deep system knowledge without privacy invasion
+- **No paperclips**: Hard-coded limits prevent runaway AI execution
+
+ReOS is a **Rosetta Stone** for the terminal, not a black box.
 
 ## Requirements
 
@@ -171,13 +174,24 @@ REOS_LOG_LEVEL=DEBUG npm run tauri:dev
 
 ## Roadmap
 
-- [ ] Command history and undo stack
-- [ ] System monitoring dashboard
-- [ ] Cron job management
-- [ ] Network configuration
+**Current Focus (M2): Conversational Flows**
+- [ ] Command preview UI (approve/reject with explanations)
+- [ ] Live system state dashboard (CPU, RAM, services, containers)
+- [ ] Multi-step workflow progress tracking
+- [ ] Inspector pane (see reasoning trail for any response)
+
+**Next (M3): Intelligence & Learning**
+- [ ] Personal runbooks (remember past solutions)
+- [ ] Proactive monitoring (alert on service failures)
+- [ ] Pattern learning (auto-approve safe patterns)
+
+**Future (M4+): Advanced Capabilities**
+- [ ] Configuration file editing with diffs
+- [ ] Network troubleshooting workflows
+- [ ] Cron/timer management
 - [ ] User/group management
-- [ ] Firewall configuration
-- [ ] Backup automation
+
+See [tech-roadmap.md](docs/tech-roadmap.md) for full details.
 
 ## License
 

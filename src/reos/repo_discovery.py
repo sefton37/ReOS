@@ -1,9 +1,15 @@
-"""Local git repository discovery.
+"""Local git repository discovery (OPTIONAL - M5 Roadmap Feature).
 
-ReOS is Git-first. This module discovers git repositories on disk by looking for
-`.git` directories within a bounded set of roots.
+⚠️  GIT INTEGRATION FEATURE - DISABLED BY DEFAULT ⚠️
 
-Discovery is metadata-only and stays local.
+REQUIRES: settings.git_integration_enabled = True
+Enable via: REOS_GIT_INTEGRATION_ENABLED=true
+
+This module discovers git repositories on disk by looking for `.git` directories
+within a bounded set of roots.
+
+Core ReOS functionality (natural language Linux control) does NOT require this.
+This is an optional developer workflow feature for M5 roadmap.
 
 Design goals:
 - Avoid "full disk" scanning by default (consent + transparency matter).

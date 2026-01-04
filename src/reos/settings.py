@@ -37,7 +37,22 @@ class Settings:
     ollama_url: str = os.environ.get("REOS_OLLAMA_URL", "http://127.0.0.1:11434")
     ollama_model: str | None = os.environ.get("REOS_OLLAMA_MODEL")
 
-    # Commit code review (opt-in).
+    # =========================================================================
+    # Git Integration (OPTIONAL - M5 Roadmap Feature)
+    # =========================================================================
+    # Git integration is DISABLED by default. ReOS core functionality
+    # (natural language Linux control) does NOT depend on git features.
+    #
+    # When enabled, ReOS can:
+    # - Analyze code changes vs project roadmap/charter
+    # - Provide commit review and suggestions
+    # - Track alignment with project goals
+    #
+    # Enable via: REOS_GIT_INTEGRATION_ENABLED=true
+    # =========================================================================
+    git_integration_enabled: bool = _env_bool("REOS_GIT_INTEGRATION_ENABLED", False)
+
+    # Commit code review (requires git_integration_enabled).
     # When enabled, ReOS will read commit patches via `git show` and send them to the local LLM.
     auto_review_commits: bool = _env_bool("REOS_AUTO_REVIEW_COMMITS", False)
     auto_review_commits_include_diff: bool = _env_bool(
@@ -48,7 +63,7 @@ class Settings:
         os.environ.get("REOS_AUTO_REVIEW_COMMITS_COOLDOWN_SECONDS", "5")
     )
 
-    # Git companion: which repo ReOS should observe.
+    # Git companion: which repo ReOS should observe (requires git_integration_enabled).
     # If unset, ReOS will fall back to the workspace root if it's a git repo.
     repo_path: Path | None = (
         Path(os.environ["REOS_REPO_PATH"]) if os.environ.get("REOS_REPO_PATH") else None

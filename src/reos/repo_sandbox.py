@@ -1,3 +1,15 @@
+"""Repository path sandboxing (OPTIONAL - M5 Roadmap Feature).
+
+⚠️  GIT INTEGRATION FEATURE - DISABLED BY DEFAULT ⚠️
+
+REQUIRES: settings.git_integration_enabled = True
+
+Provides path validation to prevent directory traversal attacks when
+accessing files within git repositories.
+
+Core ReOS functionality does NOT require this module.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

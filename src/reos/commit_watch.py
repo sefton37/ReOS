@@ -1,3 +1,16 @@
+"""Commit watching and automated review (OPTIONAL - M5 Roadmap Feature).
+
+⚠️  GIT INTEGRATION FEATURE - DISABLED BY DEFAULT ⚠️
+
+REQUIRES: settings.git_integration_enabled = True
+Enable via: REOS_GIT_INTEGRATION_ENABLED=true
+
+Polls git repository HEAD for changes and triggers automated code review.
+
+Core ReOS functionality (natural language Linux control) does NOT require this.
+This is an optional developer workflow feature for M5 roadmap.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -33,13 +46,19 @@ def poll_commits_and_review(
 ) -> list[CommitReviewEvent]:
     """Detect new commits and run a code review for each (opt-in).
 
+    REQUIRES: settings.git_integration_enabled = True (M5 roadmap feature)
+
     This watches the HEAD SHA for the configured repo.
     When HEAD changes, it reviews the new commit.
 
     Privacy:
-    - Disabled by default.
+    - Disabled by default (requires git_integration_enabled).
     - When enabled with include_diff, it reads commit patches via `git show`.
     """
+
+    # Git integration must be enabled (M5 roadmap feature)
+    if not settings.git_integration_enabled:
+        return []
 
     if not settings.auto_review_commits:
         return []
