@@ -100,7 +100,7 @@ command_not_found_handle() {
     # Auto mode - no confirmation
     if [[ -n "${REOS_SHELL_AUTO:-}" ]]; then
         printf '\033[36mReOS:\033[0m Processing: %s\n' "$full_input" >&2
-        "$python_bin" -m reos.shell_cli --quiet "$full_input"
+        "$python_bin" -m reos.shell_cli "$full_input"
         return $?
     fi
 
@@ -117,7 +117,7 @@ command_not_found_handle() {
             return 127
             ;;
         *)
-            "$python_bin" -m reos.shell_cli --quiet "$full_input"
+            "$python_bin" -m reos.shell_cli "$full_input"
             return $?
             ;;
     esac
