@@ -29,6 +29,10 @@ def configure_logging(*, log_path: Path | None = None) -> None:
     root = logging.getLogger()
     root.setLevel(level)
 
+    # Quiet noisy third-party loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     formatter = logging.Formatter(
         fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",

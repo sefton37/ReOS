@@ -14,7 +14,7 @@ import argparse
 import sys
 from typing import NoReturn
 
-from .agent import ChatAgent
+from .agent import ChatAgent, ChatResponse
 from .db import get_db
 from .logging_setup import configure_logging
 
@@ -32,6 +32,10 @@ def colorize(text: str, color: str) -> str:
         "bold": "\033[1m",
         "dim": "\033[2m",
         "reset": "\033[0m",
+        "blue": "\033[34m",
+        "magenta": "\033[35m",
+        "white": "\033[97m",
+        "bg_dim": "\033[48;5;236m",
     }
     return f"{colors.get(color, '')}{text}{colors['reset']}"
 
@@ -44,15 +48,83 @@ def print_header() -> None:
 
 def print_thinking() -> None:
     """Show thinking indicator."""
-    print(colorize("  Thinking...", "dim"), end="\r", file=sys.stderr)
+    print(colorize("  ⠿ Thinking...", "dim"), end="\r", file=sys.stderr)
 
 
 def clear_thinking() -> None:
     """Clear the thinking indicator."""
-    print(" " * 20, end="\r", file=sys.stderr)
+    print(" " * 30, end="\r", file=sys.stderr)
 
 
-def handle_prompt(prompt: str, *, verbose: bool = False) -> str:
+def print_processing_summary(response: ChatResponse, *, quiet: bool = False) -> None:
+    """Print a summary of what ReOS did during processing.
+
+    This shows tool calls, pending approvals, and other metadata
+    in a visually distinct format from the response.
+    """
+    if quiet:
+        return
+
+    has_output = False
+
+    # Show tool calls
+    if response.tool_calls:
+        if not has_output:
+            print(colorize("─" * 50, "dim"), file=sys.stderr)
+        print(colorize("⚙ Actions taken:", "dim"), file=sys.stderr)
+
+        for tc in response.tool_calls:
+            name = tc.get("name", "unknown")
+            ok = tc.get("ok", False)
+
+            # Format tool name nicely
+            display_name = name.replace("linux_", "").replace("reos_", "").replace("_", " ")
+
+            if ok:
+                status = colorize("✓", "green")
+                # Show brief result preview for some tools
+                result = tc.get("result", {})
+                preview = ""
+                if isinstance(result, dict):
+                    if "stdout" in result and result["stdout"]:
+                        lines = result["stdout"].strip().split("\n")
+                        preview = f" → {len(lines)} lines"
+                    elif "hostname" in result:
+                        preview = f" → {result.get('hostname', '')}"
+                    elif "status" in result:
+                        preview = f" → {result.get('status', '')}"
+            else:
+                status = colorize("✗", "red")
+                error = tc.get("error", {})
+                preview = f" → {error.get('message', 'failed')}" if error else ""
+
+            print(f"    {status} {colorize(display_name, 'cyan')}{colorize(preview, 'dim')}", file=sys.stderr)
+
+        has_output = True
+
+    # Show pending approval
+    if response.pending_approval_id:
+        if not has_output:
+            print(colorize("─" * 50, "dim"), file=sys.stderr)
+        print(colorize("⚠ Pending approval:", "yellow"), file=sys.stderr)
+        print(f"    ID: {response.pending_approval_id}", file=sys.stderr)
+        print(colorize("    Use 'yes' to approve or 'no' to reject", "dim"), file=sys.stderr)
+        has_output = True
+
+    # Show conversation tracking
+    if response.conversation_id and not quiet:
+        if not has_output:
+            print(colorize("─" * 50, "dim"), file=sys.stderr)
+        print(colorize(f"📝 Conversation: {response.conversation_id}", "dim"), file=sys.stderr)
+        has_output = True
+
+    # Separator before response
+    if has_output:
+        print(colorize("─" * 50, "dim"), file=sys.stderr)
+        print(file=sys.stderr)
+
+
+def handle_prompt(prompt: str, *, verbose: bool = False) -> ChatResponse:
     """Process a natural language prompt through ReOS.
 
     Args:
@@ -60,7 +132,7 @@ def handle_prompt(prompt: str, *, verbose: bool = False) -> str:
         verbose: If True, show detailed progress.
 
     Returns:
-        The agent's response text.
+        ChatResponse with answer and metadata.
     """
     db = get_db()
     agent = ChatAgent(db=db)
@@ -94,6 +166,11 @@ def main() -> NoReturn:
         "--quiet", "-q",
         action="store_true",
         help="Suppress header and progress indicators",
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show detailed processing information",
     )
     parser.add_argument(
         "--command-not-found",
@@ -133,14 +210,15 @@ def main() -> NoReturn:
     try:
         result = handle_prompt(prompt, verbose=not args.quiet)
 
-        if not args.quiet:
-            print()  # Blank line before response
+        # Show processing summary (tools called, pending approvals, etc.)
+        print_processing_summary(result, quiet=args.quiet and not args.verbose)
 
-        # handle_prompt returns ChatResponse, extract the answer
-        if hasattr(result, 'answer'):
-            print(result.answer)
-        else:
-            print(result)
+        # Print the actual response
+        if not args.quiet:
+            print(colorize("ReOS:", "cyan"), file=sys.stderr)
+            print(file=sys.stderr)
+
+        print(result.answer)
         sys.exit(0)
 
     except KeyboardInterrupt:
