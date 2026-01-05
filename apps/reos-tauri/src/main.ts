@@ -11,6 +11,7 @@ import './style.css';
 // Modular imports
 import { kernelRequest, KernelError } from './kernel';
 import { el, rowHeader, label, textInput, textArea, smallButton } from './dom';
+import { createPlayOverlay } from './playOverlay';
 import type {
   ChatRespondResult,
   SystemInfoResult,
@@ -39,6 +40,10 @@ function buildUi() {
   const query = new URLSearchParams(window.location.search);
   if (query.get('view') === 'me') {
     void buildMeWindow();
+    return;
+  }
+  if (query.get('view') === 'dashboard') {
+    void buildDashboardWindow();
     return;
   }
 
@@ -86,162 +91,103 @@ function buildUi() {
   systemSection.appendChild(systemHeader);
   systemSection.appendChild(systemStatus);
 
-  // Services Section
-  const servicesSection = el('div');
-  servicesSection.className = 'services-section';
-  servicesSection.style.marginTop = '12px';
-
-  const servicesHeader = el('div');
-  servicesHeader.style.display = 'flex';
-  servicesHeader.style.justifyContent = 'space-between';
-  servicesHeader.style.alignItems = 'center';
-  servicesHeader.style.marginBottom = '8px';
-
-  const servicesTitle = el('div');
-  servicesTitle.textContent = 'Services';
-  servicesTitle.style.fontWeight = '600';
-  servicesTitle.style.fontSize = '13px';
-  servicesTitle.style.color = '#666';
-
-  const servicesRefresh = el('button');
-  servicesRefresh.textContent = '↻';
-  servicesRefresh.style.background = 'transparent';
-  servicesRefresh.style.border = 'none';
-  servicesRefresh.style.cursor = 'pointer';
-  servicesRefresh.style.opacity = '0.6';
-  servicesRefresh.style.fontSize = '14px';
-  servicesRefresh.title = 'Refresh';
-
-  servicesHeader.appendChild(servicesTitle);
-  servicesHeader.appendChild(servicesRefresh);
-
-  const servicesList = el('div');
-  servicesList.className = 'services-list';
-  servicesList.style.fontSize = '12px';
-  servicesList.innerHTML = '<span style="opacity: 0.6">Loading...</span>';
-
-  servicesSection.appendChild(servicesHeader);
-  servicesSection.appendChild(servicesList);
-
-  // Containers Section
-  const containersSection = el('div');
-  containersSection.className = 'containers-section';
-  containersSection.style.marginTop = '12px';
-
-  const containersHeader = el('div');
-  containersHeader.style.display = 'flex';
-  containersHeader.style.justifyContent = 'space-between';
-  containersHeader.style.alignItems = 'center';
-  containersHeader.style.marginBottom = '8px';
-
-  const containersTitle = el('div');
-  containersTitle.textContent = 'Containers';
-  containersTitle.style.fontWeight = '600';
-  containersTitle.style.fontSize = '13px';
-  containersTitle.style.color = '#666';
-
-  const containersRefresh = el('button');
-  containersRefresh.textContent = '↻';
-  containersRefresh.style.background = 'transparent';
-  containersRefresh.style.border = 'none';
-  containersRefresh.style.cursor = 'pointer';
-  containersRefresh.style.opacity = '0.6';
-  containersRefresh.style.fontSize = '14px';
-  containersRefresh.title = 'Refresh';
-
-  containersHeader.appendChild(containersTitle);
-  containersHeader.appendChild(containersRefresh);
-
-  const containersList = el('div');
-  containersList.className = 'containers-list';
-  containersList.style.fontSize = '12px';
-  containersList.innerHTML = '<span style="opacity: 0.6">Loading...</span>';
-
-  containersSection.appendChild(containersHeader);
-  containersSection.appendChild(containersList);
-
-  // Quick Actions Section
-  const actionsHeader = el('div');
-  actionsHeader.textContent = 'Quick Actions';
-  actionsHeader.style.fontWeight = '600';
-  actionsHeader.style.marginTop = '12px';
-  actionsHeader.style.marginBottom = '8px';
-  actionsHeader.style.fontSize = '13px';
-  actionsHeader.style.color = '#666';
-
-  const quickActions = el('div');
-  quickActions.className = 'quick-actions';
-  quickActions.style.display = 'flex';
-  quickActions.style.flexDirection = 'column';
-  quickActions.style.gap = '4px';
-  quickActions.style.marginBottom = '16px';
-
-  const quickActionItems = [
-    { label: 'System Info', prompt: 'Show me my system information' },
-    { label: 'Disk Usage', prompt: 'How much disk space do I have?' },
-    { label: 'Top Processes', prompt: 'What processes are using the most CPU?' },
-    { label: 'Running Services', prompt: 'Show me the active services' },
-    { label: 'Network Info', prompt: 'Show me my network interfaces and IP addresses' },
-    { label: 'Update System', prompt: 'How do I update my system packages?' },
-  ];
-
-  for (const action of quickActionItems) {
-    const btn = el('button');
-    btn.className = 'quick-action-btn';
-    btn.textContent = action.label;
-    btn.style.textAlign = 'left';
-    btn.style.padding = '8px 10px';
+  // Shared nav button style
+  const navBtnStyle = (btn: HTMLElement) => {
+    btn.style.padding = '10px';
     btn.style.fontSize = '12px';
-    btn.style.border = '1px solid rgba(209, 213, 219, 0.5)';
+    btn.style.fontWeight = '500';
+    btn.style.border = '1px solid rgba(255, 255, 255, 0.15)';
     btn.style.borderRadius = '8px';
-    btn.style.background = 'rgba(255, 255, 255, 0.3)';
+    btn.style.background = 'rgba(255, 255, 255, 0.08)';
+    btn.style.color = '#e5e7eb';
     btn.style.cursor = 'pointer';
-    btn.addEventListener('click', () => {
-      input.value = action.prompt;
-      void onSend();
-    });
-    quickActions.appendChild(btn);
-  }
+    btn.style.width = '100%';
+    btn.style.textAlign = 'left';
+  };
 
-  // The Play Section
-  const meHeader = el('div');
-  meHeader.textContent = 'The Play';
-  meHeader.style.marginTop = '16px';
-  meHeader.style.fontWeight = '600';
-  meHeader.style.marginBottom = '8px';
-  meHeader.style.fontSize = '13px';
-  meHeader.style.color = '#666';
+  // System Dashboard Button
+  const dashboardBtn = el('button');
+  dashboardBtn.textContent = 'Open System Dashboard';
+  dashboardBtn.style.marginTop = '12px';
+  navBtnStyle(dashboardBtn);
 
-  const meBtn = el('button');
-  meBtn.textContent = 'Open Me File';
-  meBtn.style.padding = '8px 10px';
-  meBtn.style.fontSize = '12px';
-  meBtn.style.border = '1px solid rgba(209, 213, 219, 0.5)';
-  meBtn.style.borderRadius = '8px';
-  meBtn.style.background = 'rgba(255, 255, 255, 0.3)';
+  // The Play Section - Your Story (always in context)
+  const playSection = el('div');
+  playSection.style.marginTop = '16px';
+
+  const playHeader = el('div');
+  playHeader.style.display = 'flex';
+  playHeader.style.alignItems = 'center';
+  playHeader.style.justifyContent = 'space-between';
+  playHeader.style.marginBottom = '8px';
+
+  const playTitle = el('div');
+  playTitle.textContent = 'The Play';
+  playTitle.style.fontWeight = '600';
+  playTitle.style.fontSize = '13px';
+  playTitle.style.color = 'rgba(255, 255, 255, 0.9)';
+
+  const playContextBadge = el('span');
+  playContextBadge.textContent = 'always in context';
+  playContextBadge.style.fontSize = '9px';
+  playContextBadge.style.padding = '2px 6px';
+  playContextBadge.style.borderRadius = '4px';
+  playContextBadge.style.background = 'rgba(34, 197, 94, 0.2)';
+  playContextBadge.style.color = '#22c55e';
+  playContextBadge.style.fontWeight = '500';
+
+  playHeader.appendChild(playTitle);
+  playHeader.appendChild(playContextBadge);
+
+  // The Play button - opens your story notebook
+  const playBtn = el('button');
+  playBtn.textContent = 'Your Story';
+  playBtn.title = 'Open your narrative and identity documents (always available to ReOS)';
+  navBtnStyle(playBtn);
+  playBtn.style.borderColor = 'rgba(34, 197, 94, 0.3)';
+
+  playSection.appendChild(playHeader);
+  playSection.appendChild(playBtn);
+
+  // Acts Section - Selectable focus areas
+  const actsSection = el('div');
+  actsSection.style.marginTop = '12px';
 
   const actsHeader = el('div');
-  actsHeader.textContent = 'Acts';
-  actsHeader.style.marginTop = '12px';
-  actsHeader.style.fontWeight = '600';
-  actsHeader.style.fontSize = '12px';
+  actsHeader.style.display = 'flex';
+  actsHeader.style.alignItems = 'center';
+  actsHeader.style.justifyContent = 'space-between';
+  actsHeader.style.marginBottom = '6px';
+
+  const actsTitle = el('div');
+  actsTitle.textContent = 'Acts';
+  actsTitle.style.fontWeight = '600';
+  actsTitle.style.fontSize = '12px';
+  actsTitle.style.color = 'rgba(255, 255, 255, 0.7)';
+  actsTitle.style.cursor = 'pointer';
+  actsTitle.title = 'Click to manage all Acts';
+
+  const actsHint = el('span');
+  actsHint.textContent = 'includes scenes & beats';
+  actsHint.style.fontSize = '9px';
+  actsHint.style.color = 'rgba(255, 255, 255, 0.4)';
+
+  actsHeader.appendChild(actsTitle);
+  actsHeader.appendChild(actsHint);
 
   const actsList = el('div');
   actsList.style.display = 'flex';
   actsList.style.flexDirection = 'column';
   actsList.style.gap = '4px';
-  actsList.style.marginTop = '6px';
+
+  actsSection.appendChild(actsHeader);
+  actsSection.appendChild(actsList);
 
   nav.appendChild(navTitle);
   nav.appendChild(systemSection);
-  nav.appendChild(servicesSection);
-  nav.appendChild(containersSection);
-  nav.appendChild(actionsHeader);
-  nav.appendChild(quickActions);
-  nav.appendChild(meHeader);
-  nav.appendChild(meBtn);
-  nav.appendChild(actsHeader);
-  nav.appendChild(actsList);
+  nav.appendChild(dashboardBtn);
+  nav.appendChild(playSection);
+  nav.appendChild(actsSection);
 
   const center = el('div');
   center.className = 'center';
@@ -286,12 +232,177 @@ function buildUi() {
   const inspectionTitle = el('div');
   inspectionTitle.style.fontWeight = '600';
   inspectionTitle.style.marginBottom = '8px';
-  inspectionTitle.textContent = 'Inspection';
+  inspectionTitle.textContent = 'Message Inspector';
 
   const inspectionBody = el('div');
+  inspectionBody.innerHTML = `
+    <div style="color: rgba(255,255,255,0.5); font-size: 13px; text-align: center; padding: 40px 20px;">
+      <div style="font-size: 24px; margin-bottom: 8px;">🔍</div>
+      <div>Click any ReOS message to inspect its details</div>
+    </div>
+  `;
 
   inspection.appendChild(inspectionTitle);
   inspection.appendChild(inspectionBody);
+
+  // Store for message data (keyed by bubble element)
+  const messageDataMap = new WeakMap<HTMLElement, ChatRespondResult>();
+
+  // Function to display message details in inspector
+  function showMessageInInspector(data: ChatRespondResult) {
+    inspectionTitle.textContent = 'Message Inspector';
+    inspectionBody.innerHTML = '';
+
+    // Tool Calls Section
+    if (data.tool_calls && data.tool_calls.length > 0) {
+      const toolsSection = el('div');
+      toolsSection.style.marginBottom = '16px';
+
+      const toolsHeader = el('div');
+      toolsHeader.textContent = '🔧 Tool Calls';
+      toolsHeader.style.fontWeight = '600';
+      toolsHeader.style.marginBottom = '8px';
+      toolsHeader.style.fontSize = '13px';
+      toolsSection.appendChild(toolsHeader);
+
+      for (const tool of data.tool_calls) {
+        const toolBox = el('div');
+        toolBox.style.cssText = `
+          background: rgba(59, 130, 246, 0.1);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: 8px;
+          padding: 10px;
+          margin-bottom: 8px;
+          font-size: 12px;
+        `;
+
+        const toolName = el('div');
+        toolName.style.fontWeight = '600';
+        toolName.style.marginBottom = '4px';
+        toolName.textContent = `${tool.ok ? '✅' : '❌'} ${tool.name}`;
+        toolBox.appendChild(toolName);
+
+        if (tool.arguments && Object.keys(tool.arguments).length > 0) {
+          const argsLabel = el('div');
+          argsLabel.style.opacity = '0.7';
+          argsLabel.style.marginTop = '6px';
+          argsLabel.textContent = 'Arguments:';
+          toolBox.appendChild(argsLabel);
+
+          const argsPre = el('pre');
+          argsPre.style.cssText = 'margin: 4px 0 0 0; font-size: 11px; white-space: pre-wrap; word-break: break-all;';
+          argsPre.textContent = JSON.stringify(tool.arguments, null, 2);
+          toolBox.appendChild(argsPre);
+        }
+
+        if (tool.result !== undefined) {
+          const resultLabel = el('div');
+          resultLabel.style.opacity = '0.7';
+          resultLabel.style.marginTop = '6px';
+          resultLabel.textContent = 'Result:';
+          toolBox.appendChild(resultLabel);
+
+          const resultPre = el('pre');
+          resultPre.style.cssText = 'margin: 4px 0 0 0; font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 150px; overflow: auto;';
+          const resultText = typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2);
+          resultPre.textContent = resultText.length > 500 ? resultText.slice(0, 500) + '...' : resultText;
+          toolBox.appendChild(resultPre);
+        }
+
+        if (tool.error) {
+          const errorBox = el('div');
+          errorBox.style.cssText = 'margin-top: 6px; color: #ef4444;';
+          errorBox.textContent = `Error: ${tool.error.message}`;
+          toolBox.appendChild(errorBox);
+        }
+
+        toolsSection.appendChild(toolBox);
+      }
+      inspectionBody.appendChild(toolsSection);
+    }
+
+    // Metadata Section
+    const metaSection = el('div');
+    metaSection.style.marginBottom = '16px';
+
+    const metaHeader = el('div');
+    metaHeader.textContent = '📋 Metadata';
+    metaHeader.style.fontWeight = '600';
+    metaHeader.style.marginBottom = '8px';
+    metaHeader.style.fontSize = '13px';
+    metaSection.appendChild(metaHeader);
+
+    const metaBox = el('div');
+    metaBox.style.cssText = `
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 12px;
+    `;
+
+    const metaItems = [
+      { label: 'Conversation ID', value: data.conversation_id },
+      { label: 'Message ID', value: data.message_id },
+      { label: 'Message Type', value: data.message_type },
+      { label: 'Pending Approval', value: data.pending_approval_id || 'None' },
+    ];
+
+    if (data.intent_handled) {
+      metaItems.push({ label: 'Intent Handled', value: data.intent_handled });
+    }
+
+    for (const item of metaItems) {
+      const row = el('div');
+      row.style.cssText = 'display: flex; justify-content: space-between; margin-bottom: 4px;';
+      row.innerHTML = `<span style="opacity: 0.7">${item.label}:</span><span style="font-family: monospace;">${item.value}</span>`;
+      metaBox.appendChild(row);
+    }
+
+    metaSection.appendChild(metaBox);
+    inspectionBody.appendChild(metaSection);
+
+    // Raw JSON Section (collapsible)
+    const rawSection = el('div');
+
+    const rawHeader = el('div');
+    rawHeader.style.cssText = 'font-weight: 600; margin-bottom: 8px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px;';
+    rawHeader.innerHTML = '<span class="raw-toggle">▶</span> 📄 Raw JSON';
+    rawSection.appendChild(rawHeader);
+
+    const rawContent = el('div');
+    rawContent.style.display = 'none';
+
+    const rawPre = el('pre');
+    rawPre.style.cssText = `
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 300px;
+      overflow: auto;
+      margin: 0;
+    `;
+    rawPre.textContent = JSON.stringify(data, null, 2);
+    rawContent.appendChild(rawPre);
+
+    rawSection.appendChild(rawContent);
+    inspectionBody.appendChild(rawSection);
+
+    // Toggle raw JSON visibility
+    rawHeader.addEventListener('click', () => {
+      const toggle = rawHeader.querySelector('.raw-toggle');
+      if (rawContent.style.display === 'none') {
+        rawContent.style.display = 'block';
+        if (toggle) toggle.textContent = '▼';
+      } else {
+        rawContent.style.display = 'none';
+        if (toggle) toggle.textContent = '▶';
+      }
+    });
+  }
 
   center.appendChild(chatLog);
   center.appendChild(inputRow);
@@ -301,6 +412,13 @@ function buildUi() {
   shell.appendChild(inspection);
 
   root.appendChild(shell);
+
+  // Create Play overlay
+  const playOverlay = createPlayOverlay(() => {
+    // Callback when overlay closes
+    playInspectorActive = false;
+  });
+  root.appendChild(playOverlay.element);
 
   function append(role: 'user' | 'reos', text: string) {
     const row = el('div');
@@ -345,6 +463,9 @@ function buildUi() {
   let kbTextDraft = '';
   let kbPreview: PlayKbWritePreviewResult | null = null;
 
+  // Flag to track if "The Play" view is active in the inspection panel
+  let playInspectorActive = false;
+
   function showJsonInInspector(title: string, obj: unknown) {
     inspectionTitle.textContent = title;
     inspectionBody.innerHTML = '';
@@ -354,27 +475,46 @@ function buildUi() {
     inspectionBody.appendChild(pre);
   }
 
-  async function openMeWindow() {
+  async function openDashboardWindow() {
+    console.log('openDashboardWindow called');
     try {
-      const existing = await WebviewWindow.getByLabel('me');
+      const existing = await WebviewWindow.getByLabel('dashboard');
+      console.log('existing dashboard window:', existing);
       if (existing) {
         await existing.setFocus();
         return;
       }
-    } catch {
+    } catch (e) {
+      console.log('getByLabel error (expected if window does not exist):', e);
       // Best effort: if getByLabel fails, fall through and create a new window.
     }
 
-    const w = new WebviewWindow('me', {
-      title: 'Me — ReOS',
-      url: '/?view=me',
-      width: 900,
-      height: 700
-    });
-    void w;
+    try {
+      console.log('Creating new dashboard window...');
+      const w = new WebviewWindow('dashboard', {
+        title: 'System Dashboard — ReOS',
+        url: '/?view=dashboard',
+        width: 1000,
+        height: 800
+      });
+      console.log('WebviewWindow created:', w);
+
+      w.once('tauri://created', () => {
+        console.log('Dashboard window created successfully');
+      });
+      w.once('tauri://error', (e) => {
+        console.error('Dashboard window creation error:', e);
+      });
+    } catch (e) {
+      console.error('Failed to create dashboard window:', e);
+    }
   }
 
-  meBtn.addEventListener('click', () => void openMeWindow());
+  // Play button opens The Play overlay at Play level (your story)
+  playBtn.addEventListener('click', () => {
+    playOverlay.open(); // Opens at Play level
+  });
+  dashboardBtn.addEventListener('click', () => void openDashboardWindow());
 
   // Helper functions (rowHeader, label, textInput, textArea, smallButton)
   // are now imported from ./dom.ts
@@ -912,27 +1052,151 @@ function buildUi() {
 
     actsList.innerHTML = '';
     for (const a of actsCache) {
-      const btn = el('button');
-      btn.textContent = a.act_id === activeActId ? `• ${a.title}` : a.title;
-      btn.addEventListener('click', async () => {
-        const setRes = (await kernelRequest('play/acts/set_active', { act_id: a.act_id })) as PlayActsListResult;
-        activeActId = setRes.active_act_id ?? null;
+      const isActive = a.act_id === activeActId;
+
+      const actRow = el('div');
+      actRow.style.display = 'flex';
+      actRow.style.alignItems = 'center';
+      actRow.style.gap = '8px';
+      actRow.style.padding = '8px 10px';
+      actRow.style.borderRadius = '8px';
+      actRow.style.cursor = 'pointer';
+      actRow.style.transition = 'all 0.15s ease';
+      actRow.style.background = isActive ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)';
+      actRow.style.border = isActive ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)';
+
+      // Context indicator (checkbox-like)
+      const contextIndicator = el('div');
+      contextIndicator.style.width = '16px';
+      contextIndicator.style.height = '16px';
+      contextIndicator.style.borderRadius = '4px';
+      contextIndicator.style.border = isActive ? '2px solid #22c55e' : '2px solid rgba(255, 255, 255, 0.3)';
+      contextIndicator.style.background = isActive ? '#22c55e' : 'transparent';
+      contextIndicator.style.display = 'flex';
+      contextIndicator.style.alignItems = 'center';
+      contextIndicator.style.justifyContent = 'center';
+      contextIndicator.style.flexShrink = '0';
+      if (isActive) {
+        contextIndicator.innerHTML = '<span style="color: white; font-size: 10px; font-weight: bold;">✓</span>';
+      }
+      contextIndicator.title = isActive
+        ? 'In context (with all Scenes & Beats) - click to deselect'
+        : 'Click to add this Act and its Scenes & Beats to context';
+
+      // Act title
+      const actTitle = el('span');
+      actTitle.textContent = a.title;
+      actTitle.style.flex = '1';
+      actTitle.style.fontSize = '12px';
+      actTitle.style.fontWeight = '500';
+      actTitle.style.color = isActive ? '#22c55e' : '#e5e7eb';
+      actTitle.style.overflow = 'hidden';
+      actTitle.style.textOverflow = 'ellipsis';
+      actTitle.style.whiteSpace = 'nowrap';
+
+      // Open button (arrow)
+      const openBtn = el('span');
+      openBtn.textContent = '→';
+      openBtn.style.fontSize = '12px';
+      openBtn.style.opacity = '0.5';
+      openBtn.style.transition = 'opacity 0.15s';
+      openBtn.title = 'Open Act details';
+
+      actRow.appendChild(contextIndicator);
+      actRow.appendChild(actTitle);
+      actRow.appendChild(openBtn);
+
+      // Hover effects
+      actRow.addEventListener('mouseenter', () => {
+        actRow.style.background = isActive ? 'rgba(34, 197, 94, 0.25)' : 'rgba(255, 255, 255, 0.1)';
+        openBtn.style.opacity = '1';
+      });
+      actRow.addEventListener('mouseleave', () => {
+        actRow.style.background = isActive ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)';
+        openBtn.style.opacity = '0.5';
+      });
+
+      // Click on context indicator toggles selection
+      contextIndicator.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (isActive) {
+          // Deselect - clear active act
+          await kernelRequest('play/acts/set_active', { act_id: null });
+          activeActId = null;
+        } else {
+          // Select - set as active
+          const setRes = (await kernelRequest('play/acts/set_active', { act_id: a.act_id })) as PlayActsListResult;
+          activeActId = setRes.active_act_id ?? null;
+        }
         selectedSceneId = null;
         selectedBeatId = null;
         await refreshActs();
-        if (activeActId) await refreshScenes(activeActId);
       });
-      actsList.appendChild(btn);
+
+      // Click on row opens the Play overlay with this act
+      actRow.addEventListener('click', async () => {
+        // Set active act if not already
+        if (!isActive) {
+          const setRes = (await kernelRequest('play/acts/set_active', { act_id: a.act_id })) as PlayActsListResult;
+          activeActId = setRes.active_act_id ?? null;
+          selectedSceneId = null;
+          selectedBeatId = null;
+          await refreshActs();
+          if (activeActId) await refreshScenes(activeActId);
+        }
+        // Open the Play overlay with this act selected
+        playOverlay.open(a.act_id);
+      });
+
+      actsList.appendChild(actRow);
     }
+
+    // Add "New Act" button
+    const newActBtn = el('button');
+    newActBtn.textContent = '+ New Act';
+    newActBtn.style.width = '100%';
+    newActBtn.style.padding = '8px';
+    newActBtn.style.marginTop = '6px';
+    newActBtn.style.fontSize = '11px';
+    newActBtn.style.border = '1px dashed rgba(255, 255, 255, 0.2)';
+    newActBtn.style.borderRadius = '8px';
+    newActBtn.style.background = 'transparent';
+    newActBtn.style.color = 'rgba(255, 255, 255, 0.5)';
+    newActBtn.style.cursor = 'pointer';
+    newActBtn.style.transition = 'all 0.15s';
+    newActBtn.addEventListener('mouseenter', () => {
+      newActBtn.style.borderColor = 'rgba(34, 197, 94, 0.4)';
+      newActBtn.style.color = '#22c55e';
+      newActBtn.style.background = 'rgba(34, 197, 94, 0.1)';
+    });
+    newActBtn.addEventListener('mouseleave', () => {
+      newActBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+      newActBtn.style.color = 'rgba(255, 255, 255, 0.5)';
+      newActBtn.style.background = 'transparent';
+    });
+    newActBtn.addEventListener('click', async () => {
+      const title = prompt('Enter Act title:');
+      if (title?.trim()) {
+        await kernelRequest('play/acts/create', { title: title.trim() });
+        await refreshActs();
+      }
+    });
+    actsList.appendChild(newActBtn);
 
     if (actsCache.length === 0) {
       const empty = el('div');
-      empty.textContent = '(no acts yet)';
-      empty.style.opacity = '0.7';
-      actsList.appendChild(empty);
+      empty.textContent = 'No acts yet. Create one to focus ReOS on a specific chapter of your story.';
+      empty.style.opacity = '0.5';
+      empty.style.fontSize = '11px';
+      empty.style.padding = '8px 0';
+      empty.style.lineHeight = '1.4';
+      actsList.insertBefore(empty, newActBtn);
     }
 
-    renderPlayInspector();
+    // Only render The Play inspector if the user has activated it
+    if (playInspectorActive) {
+      renderPlayInspector();
+    }
   }
 
   async function refreshScenes(actId: string) {
@@ -949,7 +1213,10 @@ function buildUi() {
         beatsCache = [];
       }
     }
-    renderPlayInspector();
+    // Only render The Play inspector if the user has activated it
+    if (playInspectorActive) {
+      renderPlayInspector();
+    }
   }
 
 
@@ -1815,6 +2082,18 @@ function buildUi() {
       pending.bubble.classList.remove('thinking');
       pending.bubble.textContent = res.answer ?? '(no answer)';
 
+      // Store response data for inspector and make clickable
+      messageDataMap.set(pending.bubble, res);
+      pending.bubble.style.cursor = 'pointer';
+      pending.bubble.title = 'Click to inspect message details';
+      pending.bubble.addEventListener('click', () => {
+        // Remove selection from other bubbles
+        document.querySelectorAll('.chat-bubble.selected').forEach(b => b.classList.remove('selected'));
+        pending.bubble.classList.add('selected');
+        playInspectorActive = false;  // Switch back to Message Inspector mode
+        showMessageInInspector(res);
+      });
+
       // Check if there are pending approvals to display
       if (res.pending_approval_id) {
         // Fetch and display the pending approval
@@ -1920,190 +2199,6 @@ function buildUi() {
     }
   }
 
-  // Load live state (services, containers)
-  async function refreshLiveState() {
-    try {
-      const result = await kernelRequest('system/live_state', {}) as SystemLiveStateResult;
-
-      // Render services list
-      const services = result.services ?? [];
-      if (services.length === 0) {
-        servicesList.innerHTML = '<span style="opacity: 0.6">No services found</span>';
-      } else {
-        servicesList.innerHTML = '';
-        // Show top 8 services, prioritizing active/failed
-        const sortedServices = [...services].sort((a, b) => {
-          if (a.status === 'failed' && b.status !== 'failed') return -1;
-          if (b.status === 'failed' && a.status !== 'failed') return 1;
-          if (a.active && !b.active) return -1;
-          if (b.active && !a.active) return 1;
-          return a.name.localeCompare(b.name);
-        }).slice(0, 8);
-
-        for (const svc of sortedServices) {
-          const row = el('div');
-          row.style.display = 'flex';
-          row.style.alignItems = 'center';
-          row.style.justifyContent = 'space-between';
-          row.style.padding = '4px 0';
-          row.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
-
-          const nameCol = el('div');
-          nameCol.style.display = 'flex';
-          nameCol.style.alignItems = 'center';
-          nameCol.style.gap = '6px';
-          nameCol.style.flex = '1';
-          nameCol.style.overflow = 'hidden';
-
-          const dot = el('span');
-          dot.textContent = '●';
-          dot.style.fontSize = '8px';
-          if (svc.status === 'failed') {
-            dot.style.color = '#ef4444';
-          } else if (svc.active) {
-            dot.style.color = '#22c55e';
-          } else {
-            dot.style.color = '#9ca3af';
-          }
-
-          const name = el('span');
-          name.textContent = svc.name.replace('.service', '');
-          name.style.overflow = 'hidden';
-          name.style.textOverflow = 'ellipsis';
-          name.style.whiteSpace = 'nowrap';
-
-          nameCol.appendChild(dot);
-          nameCol.appendChild(name);
-
-          const actions = el('div');
-          actions.style.display = 'flex';
-          actions.style.gap = '4px';
-
-          const logsBtn = el('button');
-          logsBtn.textContent = '📋';
-          logsBtn.title = 'View logs';
-          logsBtn.style.background = 'transparent';
-          logsBtn.style.border = 'none';
-          logsBtn.style.cursor = 'pointer';
-          logsBtn.style.fontSize = '10px';
-          logsBtn.style.padding = '2px';
-          logsBtn.addEventListener('click', async () => {
-            input.value = `Show me the logs for ${svc.name}`;
-            void onSend();
-          });
-
-          const toggleBtn = el('button');
-          toggleBtn.textContent = svc.active ? '⏹' : '▶';
-          toggleBtn.title = svc.active ? 'Stop service' : 'Start service';
-          toggleBtn.style.background = 'transparent';
-          toggleBtn.style.border = 'none';
-          toggleBtn.style.cursor = 'pointer';
-          toggleBtn.style.fontSize = '10px';
-          toggleBtn.style.padding = '2px';
-          toggleBtn.addEventListener('click', async () => {
-            const action = svc.active ? 'stop' : 'start';
-            input.value = `${action} the ${svc.name} service`;
-            void onSend();
-          });
-
-          actions.appendChild(logsBtn);
-          actions.appendChild(toggleBtn);
-
-          row.appendChild(nameCol);
-          row.appendChild(actions);
-          servicesList.appendChild(row);
-        }
-      }
-
-      // Render containers list
-      const containers = result.containers ?? [];
-      if (containers.length === 0) {
-        containersList.innerHTML = '<span style="opacity: 0.6">No containers running</span>';
-      } else {
-        containersList.innerHTML = '';
-        // Show up to 8 containers
-        const displayContainers = containers.slice(0, 8);
-
-        for (const ctr of displayContainers) {
-          const row = el('div');
-          row.style.display = 'flex';
-          row.style.alignItems = 'center';
-          row.style.justifyContent = 'space-between';
-          row.style.padding = '4px 0';
-          row.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
-
-          const nameCol = el('div');
-          nameCol.style.display = 'flex';
-          nameCol.style.alignItems = 'center';
-          nameCol.style.gap = '6px';
-          nameCol.style.flex = '1';
-          nameCol.style.overflow = 'hidden';
-
-          const dot = el('span');
-          dot.textContent = '●';
-          dot.style.fontSize = '8px';
-          const isRunning = ctr.status.toLowerCase().includes('up');
-          dot.style.color = isRunning ? '#22c55e' : '#9ca3af';
-
-          const name = el('span');
-          name.textContent = ctr.name;
-          name.style.overflow = 'hidden';
-          name.style.textOverflow = 'ellipsis';
-          name.style.whiteSpace = 'nowrap';
-          name.title = `${ctr.image}\n${ctr.status}`;
-
-          nameCol.appendChild(dot);
-          nameCol.appendChild(name);
-
-          const actions = el('div');
-          actions.style.display = 'flex';
-          actions.style.gap = '4px';
-
-          const logsBtn = el('button');
-          logsBtn.textContent = '📋';
-          logsBtn.title = 'View logs';
-          logsBtn.style.background = 'transparent';
-          logsBtn.style.border = 'none';
-          logsBtn.style.cursor = 'pointer';
-          logsBtn.style.fontSize = '10px';
-          logsBtn.style.padding = '2px';
-          logsBtn.addEventListener('click', async () => {
-            input.value = `Show me the logs for the ${ctr.name} container`;
-            void onSend();
-          });
-
-          const stopBtn = el('button');
-          stopBtn.textContent = isRunning ? '⏹' : '▶';
-          stopBtn.title = isRunning ? 'Stop container' : 'Start container';
-          stopBtn.style.background = 'transparent';
-          stopBtn.style.border = 'none';
-          stopBtn.style.cursor = 'pointer';
-          stopBtn.style.fontSize = '10px';
-          stopBtn.style.padding = '2px';
-          stopBtn.addEventListener('click', async () => {
-            const action = isRunning ? 'stop' : 'start';
-            input.value = `${action} the ${ctr.name} container`;
-            void onSend();
-          });
-
-          actions.appendChild(logsBtn);
-          actions.appendChild(stopBtn);
-
-          row.appendChild(nameCol);
-          row.appendChild(actions);
-          containersList.appendChild(row);
-        }
-      }
-    } catch (e) {
-      servicesList.innerHTML = '<span style="opacity: 0.6">Could not load services</span>';
-      containersList.innerHTML = '<span style="opacity: 0.6">Could not load containers</span>';
-    }
-  }
-
-  // Wire up refresh buttons
-  servicesRefresh.addEventListener('click', () => void refreshLiveState());
-  containersRefresh.addEventListener('click', () => void refreshLiveState());
-
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
     // Ctrl+K or Cmd+K to focus input
@@ -2120,11 +2215,10 @@ function buildUi() {
       append('reos', 'Chat cleared. How can I help you with your Linux system?');
     }
 
-    // Ctrl+R to refresh system status and live state
+    // Ctrl+R to refresh system status
     if ((e.ctrlKey || e.metaKey) && e.key === 'r' && !e.shiftKey) {
       e.preventDefault();
       void refreshSystemStatus();
-      void refreshLiveState();
     }
 
     // Escape to clear input
@@ -2134,17 +2228,20 @@ function buildUi() {
     }
   });
 
+  // Click on Acts title to open The Play overlay (legacy compatibility)
+  actsTitle.addEventListener('click', () => {
+    playOverlay.open();
+  });
+
   // Initial load
   void (async () => {
     try {
-      // Load system status and live state
+      // Load system status
       await refreshSystemStatus();
-      await refreshLiveState();
-      // Refresh every 10 seconds for live feel
+      // Refresh every 30 seconds
       setInterval(() => {
         void refreshSystemStatus();
-        void refreshLiveState();
-      }, 10000);
+      }, 30000);
 
       await refreshActs();
       if (activeActId) await refreshScenes(activeActId);
@@ -2187,6 +2284,255 @@ async function buildMeWindow() {
   } catch (e) {
     body.textContent = `Error: ${String(e)}`;
   }
+}
+
+async function buildDashboardWindow() {
+  const root = document.getElementById('app');
+  if (!root) return;
+  root.innerHTML = '';
+
+  const wrap = el('div');
+  wrap.style.padding = '16px';
+  wrap.style.height = '100vh';
+  wrap.style.boxSizing = 'border-box';
+  wrap.style.overflow = 'auto';
+  wrap.style.fontFamily = 'system-ui, sans-serif';
+
+  const header = el('div');
+  header.style.display = 'flex';
+  header.style.justifyContent = 'space-between';
+  header.style.alignItems = 'center';
+  header.style.marginBottom = '20px';
+
+  const title = el('div');
+  title.textContent = 'System Dashboard';
+  title.style.fontWeight = '600';
+  title.style.fontSize = '18px';
+
+  const refreshBtn = el('button');
+  refreshBtn.textContent = '↻ Refresh';
+  refreshBtn.style.padding = '6px 12px';
+  refreshBtn.style.fontSize = '12px';
+  refreshBtn.style.border = '1px solid #ddd';
+  refreshBtn.style.borderRadius = '6px';
+  refreshBtn.style.background = 'white';
+  refreshBtn.style.cursor = 'pointer';
+
+  header.appendChild(title);
+  header.appendChild(refreshBtn);
+
+  // Grid layout for sections
+  const grid = el('div');
+  grid.style.display = 'grid';
+  grid.style.gridTemplateColumns = 'repeat(2, 1fr)';
+  grid.style.gap = '16px';
+
+  // Section helper
+  function createSection(sectionTitle: string): { section: HTMLElement; content: HTMLElement } {
+    const section = el('div');
+    section.style.background = 'white';
+    section.style.borderRadius = '8px';
+    section.style.border = '1px solid #e5e7eb';
+    section.style.padding = '16px';
+
+    const sectionHeader = el('div');
+    sectionHeader.textContent = sectionTitle;
+    sectionHeader.style.fontWeight = '600';
+    sectionHeader.style.fontSize = '14px';
+    sectionHeader.style.marginBottom = '12px';
+    sectionHeader.style.color = '#374151';
+
+    const content = el('div');
+    content.style.fontSize = '13px';
+
+    section.appendChild(sectionHeader);
+    section.appendChild(content);
+
+    return { section, content };
+  }
+
+  // Create sections
+  const servicesSection = createSection('Services');
+  const containersSection = createSection('Containers');
+  const portsSection = createSection('Listening Ports');
+  const trafficSection = createSection('Network Traffic');
+
+  grid.appendChild(servicesSection.section);
+  grid.appendChild(containersSection.section);
+  grid.appendChild(portsSection.section);
+  grid.appendChild(trafficSection.section);
+
+  wrap.appendChild(header);
+  wrap.appendChild(grid);
+  root.appendChild(wrap);
+
+  // Refresh function
+  async function refreshDashboard() {
+    servicesSection.content.innerHTML = '<span style="opacity: 0.6">Loading...</span>';
+    containersSection.content.innerHTML = '<span style="opacity: 0.6">Loading...</span>';
+    portsSection.content.innerHTML = '<span style="opacity: 0.6">Loading...</span>';
+    trafficSection.content.innerHTML = '<span style="opacity: 0.6">Loading...</span>';
+
+    try {
+      const result = await kernelRequest('system/live_state', {}) as SystemLiveStateResult;
+
+      // Render services
+      const services = result.services ?? [];
+      if (services.length === 0) {
+        servicesSection.content.innerHTML = '<span style="opacity: 0.6">No services found</span>';
+      } else {
+        servicesSection.content.innerHTML = '';
+        for (const svc of services) {
+          const row = el('div');
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+          row.style.gap = '8px';
+          row.style.padding = '6px 0';
+          row.style.borderBottom = '1px solid #f3f4f6';
+
+          const dot = el('span');
+          dot.textContent = '●';
+          dot.style.fontSize = '10px';
+          dot.style.color = svc.status === 'failed' ? '#ef4444' : svc.active ? '#22c55e' : '#9ca3af';
+
+          const name = el('span');
+          name.textContent = svc.name;
+          name.style.flex = '1';
+
+          const status = el('span');
+          status.textContent = svc.status;
+          status.style.fontSize = '11px';
+          status.style.opacity = '0.6';
+
+          row.appendChild(dot);
+          row.appendChild(name);
+          row.appendChild(status);
+          servicesSection.content.appendChild(row);
+        }
+      }
+
+      // Render containers
+      const containers = result.containers ?? [];
+      if (containers.length === 0) {
+        containersSection.content.innerHTML = '<span style="opacity: 0.6">No containers found</span>';
+      } else {
+        containersSection.content.innerHTML = '';
+        for (const ctr of containers) {
+          const row = el('div');
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+          row.style.gap = '8px';
+          row.style.padding = '6px 0';
+          row.style.borderBottom = '1px solid #f3f4f6';
+
+          const isRunning = ctr.status.toLowerCase().includes('up');
+          const dot = el('span');
+          dot.textContent = '●';
+          dot.style.fontSize = '10px';
+          dot.style.color = isRunning ? '#22c55e' : '#9ca3af';
+
+          const name = el('span');
+          name.textContent = ctr.name;
+          name.style.flex = '1';
+
+          const image = el('span');
+          image.textContent = ctr.image.split(':')[0].split('/').pop() ?? ctr.image;
+          image.style.fontSize = '11px';
+          image.style.opacity = '0.6';
+
+          row.appendChild(dot);
+          row.appendChild(name);
+          row.appendChild(image);
+          containersSection.content.appendChild(row);
+        }
+      }
+
+      // Render ports
+      const ports = result.ports ?? [];
+      if (ports.length === 0) {
+        portsSection.content.innerHTML = '<span style="opacity: 0.6">No listening ports</span>';
+      } else {
+        portsSection.content.innerHTML = '';
+        for (const port of ports) {
+          const row = el('div');
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+          row.style.gap = '8px';
+          row.style.padding = '6px 0';
+          row.style.borderBottom = '1px solid #f3f4f6';
+
+          const portNum = el('span');
+          portNum.textContent = `:${port.port}`;
+          portNum.style.fontFamily = 'monospace';
+          portNum.style.fontWeight = '600';
+          portNum.style.minWidth = '60px';
+
+          const addr = el('span');
+          addr.textContent = port.address === '0.0.0.0' || port.address === '*' ? 'all interfaces' : port.address;
+          addr.style.flex = '1';
+          addr.style.opacity = '0.7';
+
+          const process = el('span');
+          process.textContent = port.process || `PID ${port.pid ?? '?'}`;
+          process.style.fontSize = '11px';
+          process.style.background = '#f3f4f6';
+          process.style.padding = '2px 6px';
+          process.style.borderRadius = '4px';
+
+          row.appendChild(portNum);
+          row.appendChild(addr);
+          row.appendChild(process);
+          portsSection.content.appendChild(row);
+        }
+      }
+
+      // Render traffic
+      const traffic = result.traffic ?? [];
+      if (traffic.length === 0) {
+        trafficSection.content.innerHTML = '<span style="opacity: 0.6">No network interfaces</span>';
+      } else {
+        trafficSection.content.innerHTML = '';
+        for (const iface of traffic) {
+          const row = el('div');
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+          row.style.gap = '8px';
+          row.style.padding = '8px 0';
+          row.style.borderBottom = '1px solid #f3f4f6';
+
+          const name = el('span');
+          name.textContent = iface.interface;
+          name.style.fontWeight = '500';
+          name.style.minWidth = '100px';
+
+          const rx = el('span');
+          rx.innerHTML = `<span style="color: #22c55e">↓</span> ${iface.rx_formatted}`;
+          rx.style.flex = '1';
+
+          const tx = el('span');
+          tx.innerHTML = `<span style="color: #3b82f6">↑</span> ${iface.tx_formatted}`;
+          tx.style.flex = '1';
+
+          row.appendChild(name);
+          row.appendChild(rx);
+          row.appendChild(tx);
+          trafficSection.content.appendChild(row);
+        }
+      }
+    } catch (e) {
+      servicesSection.content.innerHTML = `<span style="color: #ef4444">Error: ${String(e)}</span>`;
+      containersSection.content.innerHTML = '';
+      portsSection.content.innerHTML = '';
+      trafficSection.content.innerHTML = '';
+    }
+  }
+
+  // Initial load and refresh button
+  refreshBtn.addEventListener('click', () => void refreshDashboard());
+  await refreshDashboard();
+
+  // Auto-refresh every 10 seconds
+  setInterval(() => void refreshDashboard(), 10000);
 }
 
 buildUi();

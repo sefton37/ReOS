@@ -37,6 +37,7 @@ from .security import (
     get_auditor,
     configure_auditor,
 )
+from .play_fs import add_attachment as play_add_attachment
 from .play_fs import create_act as play_create_act
 from .play_fs import create_beat as play_create_beat
 from .play_fs import create_scene as play_create_scene
@@ -45,9 +46,11 @@ from .play_fs import kb_read as play_kb_read
 from .play_fs import kb_write_apply as play_kb_write_apply
 from .play_fs import kb_write_preview as play_kb_write_preview
 from .play_fs import list_acts as play_list_acts
+from .play_fs import list_attachments as play_list_attachments
 from .play_fs import list_beats as play_list_beats
 from .play_fs import list_scenes as play_list_scenes
 from .play_fs import read_me_markdown as play_read_me_markdown
+from .play_fs import remove_attachment as play_remove_attachment
 from .play_fs import set_active_act_id as play_set_active_act_id
 from .play_fs import update_act as play_update_act
 from .play_fs import update_beat as play_update_beat
@@ -702,6 +705,8 @@ def _handle_system_live_state(db: Database) -> dict[str, Any]:
         "services": [],
         "containers": [],
         "network": [],
+        "ports": [],
+        "traffic": [],
     }
 
     # Get system info
@@ -727,14 +732,19 @@ def _handle_system_live_state(db: Database) -> dict[str, Any]:
 
     # Get services (top 10 most relevant)
     try:
-        services = linux_tools.list_services(limit=10)
+        all_services = linux_tools.list_services()
+        # Prioritize running services, then sort by name
+        sorted_services = sorted(
+            all_services,
+            key=lambda s: (0 if s.active_state == "active" else 1, s.name)
+        )[:10]
         result["services"] = [
             {
-                "name": s.get("name", ""),
-                "status": s.get("status", "unknown"),
-                "active": s.get("active", False),
+                "name": s.name,
+                "status": s.active_state,
+                "active": s.active_state == "active",
             }
-            for s in services
+            for s in sorted_services
         ]
     except Exception:
         pass
@@ -767,6 +777,38 @@ def _handle_system_live_state(db: Database) -> dict[str, Any]:
                 }
                 for iface in network["interfaces"][:5]
             ]
+    except Exception:
+        pass
+
+    # Get listening ports
+    try:
+        ports = linux_tools.list_listening_ports()
+        result["ports"] = [
+            {
+                "port": p.port,
+                "protocol": p.protocol,
+                "address": p.address,
+                "process": p.process,
+                "pid": p.pid,
+            }
+            for p in ports[:20]  # Limit to 20 ports
+        ]
+    except Exception:
+        pass
+
+    # Get network traffic
+    try:
+        traffic = linux_tools.get_network_traffic()
+        result["traffic"] = [
+            {
+                "interface": t.interface,
+                "rx_bytes": t.rx_bytes,
+                "tx_bytes": t.tx_bytes,
+                "rx_formatted": linux_tools.format_bytes(t.rx_bytes),
+                "tx_formatted": linux_tools.format_bytes(t.tx_bytes),
+            }
+            for t in traffic
+        ]
     except Exception:
         pass
 
@@ -1295,6 +1337,95 @@ def _handle_play_kb_write_apply(
         # Surface conflicts as a deterministic JSON-RPC error.
         raise RpcError(code=-32009, message=str(exc)) from exc
     return {"path": path, **res}
+
+
+def _handle_play_attachments_list(
+    _db: Database,
+    *,
+    act_id: str | None = None,
+    scene_id: str | None = None,
+    beat_id: str | None = None,
+) -> dict[str, Any]:
+    try:
+        attachments = play_list_attachments(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
+    except ValueError as exc:
+        raise RpcError(code=-32602, message=str(exc)) from exc
+    return {
+        "attachments": [
+            {
+                "attachment_id": a.attachment_id,
+                "file_path": a.file_path,
+                "file_name": a.file_name,
+                "file_type": a.file_type,
+                "added_at": a.added_at,
+            }
+            for a in attachments
+        ]
+    }
+
+
+def _handle_play_attachments_add(
+    _db: Database,
+    *,
+    act_id: str | None = None,
+    scene_id: str | None = None,
+    beat_id: str | None = None,
+    file_path: str,
+    file_name: str | None = None,
+) -> dict[str, Any]:
+    try:
+        attachments = play_add_attachment(
+            act_id=act_id,
+            scene_id=scene_id,
+            beat_id=beat_id,
+            file_path=file_path,
+            file_name=file_name,
+        )
+    except ValueError as exc:
+        raise RpcError(code=-32602, message=str(exc)) from exc
+    return {
+        "attachments": [
+            {
+                "attachment_id": a.attachment_id,
+                "file_path": a.file_path,
+                "file_name": a.file_name,
+                "file_type": a.file_type,
+                "added_at": a.added_at,
+            }
+            for a in attachments
+        ]
+    }
+
+
+def _handle_play_attachments_remove(
+    _db: Database,
+    *,
+    act_id: str | None = None,
+    scene_id: str | None = None,
+    beat_id: str | None = None,
+    attachment_id: str,
+) -> dict[str, Any]:
+    try:
+        attachments = play_remove_attachment(
+            act_id=act_id,
+            scene_id=scene_id,
+            beat_id=beat_id,
+            attachment_id=attachment_id,
+        )
+    except ValueError as exc:
+        raise RpcError(code=-32602, message=str(exc)) from exc
+    return {
+        "attachments": [
+            {
+                "attachment_id": a.attachment_id,
+                "file_path": a.file_path,
+                "file_name": a.file_name,
+                "file_type": a.file_type,
+                "added_at": a.added_at,
+            }
+            for a in attachments
+        ]
+    }
 
 
 def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any] | None:
@@ -1928,6 +2059,73 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                     path=path,
                     text=text,
                     expected_sha256_current=expected_sha256_current,
+                ),
+            )
+
+        if method == "play/attachments/list":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            act_id = params.get("act_id")
+            scene_id = params.get("scene_id")
+            beat_id = params.get("beat_id")
+            for k, v in {"act_id": act_id, "scene_id": scene_id, "beat_id": beat_id}.items():
+                if v is not None and not isinstance(v, str):
+                    raise RpcError(code=-32602, message=f"{k} must be a string or null")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_play_attachments_list(
+                    db,
+                    act_id=act_id,
+                    scene_id=scene_id,
+                    beat_id=beat_id,
+                ),
+            )
+
+        if method == "play/attachments/add":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            act_id = params.get("act_id")
+            scene_id = params.get("scene_id")
+            beat_id = params.get("beat_id")
+            file_path = params.get("file_path")
+            file_name = params.get("file_name")
+            if not isinstance(file_path, str) or not file_path:
+                raise RpcError(code=-32602, message="file_path is required")
+            for k, v in {"act_id": act_id, "scene_id": scene_id, "beat_id": beat_id, "file_name": file_name}.items():
+                if v is not None and not isinstance(v, str):
+                    raise RpcError(code=-32602, message=f"{k} must be a string or null")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_play_attachments_add(
+                    db,
+                    act_id=act_id,
+                    scene_id=scene_id,
+                    beat_id=beat_id,
+                    file_path=file_path,
+                    file_name=file_name,
+                ),
+            )
+
+        if method == "play/attachments/remove":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            act_id = params.get("act_id")
+            scene_id = params.get("scene_id")
+            beat_id = params.get("beat_id")
+            attachment_id = params.get("attachment_id")
+            if not isinstance(attachment_id, str) or not attachment_id:
+                raise RpcError(code=-32602, message="attachment_id is required")
+            for k, v in {"act_id": act_id, "scene_id": scene_id, "beat_id": beat_id}.items():
+                if v is not None and not isinstance(v, str):
+                    raise RpcError(code=-32602, message=f"{k} must be a string or null")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_play_attachments_remove(
+                    db,
+                    act_id=act_id,
+                    scene_id=scene_id,
+                    beat_id=beat_id,
+                    attachment_id=attachment_id,
                 ),
             )
 

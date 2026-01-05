@@ -4,6 +4,7 @@ import difflib
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -39,6 +40,16 @@ class Beat:
     status: str
     notes: str
     link: str | None = None
+
+
+@dataclass(frozen=True)
+class FileAttachment:
+    """A file attachment reference (stores path only, not file content)."""
+    attachment_id: str
+    file_path: str      # Absolute path on disk
+    file_name: str      # Display name
+    file_type: str      # Extension (pdf, docx, etc.)
+    added_at: str       # ISO timestamp
 
 
 def play_root() -> Path:
@@ -716,3 +727,172 @@ def kb_write_apply(
     target.write_text(text, encoding="utf-8")
     after_sha = _sha256_text(text)
     return {"ok": True, "sha256_current": after_sha}
+
+
+# --- File Attachments (stores paths only, not file content) ---
+
+
+def _attachments_path(*, act_id: str | None = None, scene_id: str | None = None, beat_id: str | None = None) -> Path:
+    """Return path to attachments.json for the given level."""
+    if act_id is None:
+        # Play-level attachments (root level)
+        return play_root() / "attachments.json"
+    kb_root = _kb_root_for(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
+    return kb_root / "attachments.json"
+
+
+def _load_attachments(path: Path) -> list[dict[str, Any]]:
+    """Load attachments list from JSON file."""
+    if not path.exists():
+        return []
+    data = _load_json(path)
+    attachments = data.get("attachments")
+    return attachments if isinstance(attachments, list) else []
+
+
+def _write_attachments(path: Path, attachments: list[dict[str, Any]]) -> None:
+    """Write attachments list to JSON file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(path, {"attachments": attachments})
+
+
+def list_attachments(
+    *,
+    act_id: str | None = None,
+    scene_id: str | None = None,
+    beat_id: str | None = None,
+) -> list[FileAttachment]:
+    """List file attachments at the specified level (Play, Act, Scene, or Beat)."""
+    ensure_play_skeleton()
+    att_path = _attachments_path(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
+    raw = _load_attachments(att_path)
+
+    attachments: list[FileAttachment] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        attachment_id = item.get("attachment_id")
+        file_path = item.get("file_path")
+        file_name = item.get("file_name")
+        file_type = item.get("file_type")
+        added_at = item.get("added_at")
+
+        if not isinstance(attachment_id, str) or not attachment_id:
+            continue
+        if not isinstance(file_path, str) or not file_path:
+            continue
+        if not isinstance(file_name, str):
+            file_name = Path(file_path).name
+        if not isinstance(file_type, str):
+            file_type = Path(file_path).suffix.lstrip(".").lower()
+        if not isinstance(added_at, str):
+            added_at = ""
+
+        attachments.append(
+            FileAttachment(
+                attachment_id=attachment_id,
+                file_path=file_path,
+                file_name=file_name,
+                file_type=file_type,
+                added_at=added_at,
+            )
+        )
+
+    return attachments
+
+
+def add_attachment(
+    *,
+    act_id: str | None = None,
+    scene_id: str | None = None,
+    beat_id: str | None = None,
+    file_path: str,
+    file_name: str | None = None,
+) -> list[FileAttachment]:
+    """Add a file attachment (stores path only, validates file exists).
+
+    If act_id is None, adds to Play-level attachments.
+    """
+    ensure_play_skeleton()
+    if act_id is not None:
+        _validate_id(name="act_id", value=act_id)
+    if scene_id is not None:
+        _validate_id(name="scene_id", value=scene_id)
+    if beat_id is not None:
+        _validate_id(name="beat_id", value=beat_id)
+
+    if not isinstance(file_path, str) or not file_path.strip():
+        raise ValueError("file_path is required")
+
+    # Validate the file exists
+    p = Path(file_path)
+    if not p.exists():
+        raise ValueError(f"file does not exist: {file_path}")
+    if not p.is_file():
+        raise ValueError(f"path is not a file: {file_path}")
+
+    # Derive file_name and file_type if not provided
+    if not file_name:
+        file_name = p.name
+    file_type = p.suffix.lstrip(".").lower()
+
+    att_path = _attachments_path(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
+    raw = _load_attachments(att_path)
+
+    # Check for duplicates by path
+    for item in raw:
+        if isinstance(item, dict) and item.get("file_path") == file_path:
+            # Already attached, return current list
+            return list_attachments(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
+
+    attachment_id = _new_id("att")
+    added_at = datetime.now(timezone.utc).isoformat()
+
+    raw.append({
+        "attachment_id": attachment_id,
+        "file_path": file_path,
+        "file_name": file_name,
+        "file_type": file_type,
+        "added_at": added_at,
+    })
+
+    _write_attachments(att_path, raw)
+    return list_attachments(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
+
+
+def remove_attachment(
+    *,
+    act_id: str | None = None,
+    scene_id: str | None = None,
+    beat_id: str | None = None,
+    attachment_id: str,
+) -> list[FileAttachment]:
+    """Remove a file attachment reference by ID.
+
+    If act_id is None, removes from Play-level attachments.
+    """
+    ensure_play_skeleton()
+    if act_id is not None:
+        _validate_id(name="act_id", value=act_id)
+    if scene_id is not None:
+        _validate_id(name="scene_id", value=scene_id)
+    if beat_id is not None:
+        _validate_id(name="beat_id", value=beat_id)
+    _validate_id(name="attachment_id", value=attachment_id)
+
+    att_path = _attachments_path(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
+    raw = _load_attachments(att_path)
+
+    found = False
+    updated: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict) and item.get("attachment_id") == attachment_id:
+            found = True
+            continue
+        updated.append(item)
+
+    if not found:
+        raise ValueError("unknown attachment_id")
+
+    _write_attachments(att_path, updated)
+    return list_attachments(act_id=act_id, scene_id=scene_id, beat_id=beat_id)

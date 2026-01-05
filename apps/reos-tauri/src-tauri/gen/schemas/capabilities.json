@@ -1,1 +1,1 @@
-{}
+{"main-capability":{"identifier":"main-capability","description":"Capability for the main window","local":true,"windows":["main","me","dashboard"],"permissions":["core:default","core:window:default","core:window:allow-create","core:window:allow-close","core:window:allow-set-focus","core:webview:default","core:webview:allow-create-webview-window","dialog:default","dialog:allow-open"]}}

@@ -110,6 +110,17 @@ body,
 	background: var(--chat-reos-bg);
 }
 
+.chat-bubble.reos:hover {
+	outline: 2px solid rgba(255, 255, 255, 0.3);
+	outline-offset: 2px;
+}
+
+.chat-bubble.reos.selected {
+	outline: 2px solid rgba(255, 255, 255, 0.6);
+	outline-offset: 2px;
+	background: rgba(34, 197, 94, 0.85);
+}
+
 /* Thinking animation inside an otherwise empty bubble */
 .chat-bubble.thinking {
 	min-width: 64px;
@@ -214,4 +225,371 @@ body,
 	background: rgba(34, 197, 94, 0.3);
 	border-color: rgba(34, 197, 94, 0.6);
 	transform: translateY(-1px);
+}
+
+/* ========================================
+   Play Overlay - Full Screen Modal
+   ======================================== */
+
+.play-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.85);
+	backdrop-filter: blur(20px);
+	z-index: 1000;
+	display: flex;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.2s ease;
+}
+
+.play-overlay.open {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.play-container {
+	margin: 24px;
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	background: rgba(26, 26, 46, 0.95);
+	border-radius: 16px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+	overflow: hidden;
+}
+
+.play-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 16px 24px;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+	background: rgba(0, 0, 0, 0.2);
+}
+
+.play-header h1 {
+	margin: 0;
+	font-size: 18px;
+	font-weight: 600;
+	color: #e5e7eb;
+}
+
+.play-close-btn {
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+	border: none;
+	background: rgba(255, 255, 255, 0.1);
+	color: #e5e7eb;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 20px;
+	transition: background 0.15s;
+}
+
+.play-close-btn:hover {
+	background: rgba(255, 255, 255, 0.2);
+}
+
+.play-body {
+	flex: 1;
+	display: flex;
+	overflow: hidden;
+}
+
+/* Tree sidebar */
+.play-sidebar {
+	width: 260px;
+	min-width: 260px;
+	border-right: 1px solid rgba(255, 255, 255, 0.1);
+	overflow-y: auto;
+	padding: 16px;
+	background: rgba(0, 0, 0, 0.15);
+}
+
+.tree-item {
+	padding: 8px 12px;
+	border-radius: 8px;
+	cursor: pointer;
+	color: rgba(255, 255, 255, 0.8);
+	font-size: 13px;
+	transition: background 0.15s;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 2px;
+}
+
+.tree-item:hover {
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.tree-item.selected {
+	background: rgba(34, 197, 94, 0.2);
+	color: #22c55e;
+}
+
+.tree-item.play {
+	padding-left: 12px;
+	font-weight: 500;
+}
+
+.tree-item.act {
+	padding-left: 12px;
+}
+
+.tree-item.scene {
+	padding-left: 32px;
+}
+
+.tree-item.beat {
+	padding-left: 52px;
+}
+
+.tree-expand {
+	width: 16px;
+	font-size: 10px;
+	opacity: 0.6;
+	cursor: pointer;
+}
+
+.tree-expand:hover {
+	opacity: 1;
+}
+
+.tree-icon {
+	font-size: 14px;
+}
+
+.tree-new-btn {
+	width: 100%;
+	padding: 6px 12px;
+	margin: 4px 0 8px 0;
+	border-radius: 6px;
+	border: 1px dashed rgba(255, 255, 255, 0.2);
+	background: transparent;
+	color: rgba(255, 255, 255, 0.5);
+	cursor: pointer;
+	font-size: 12px;
+	text-align: left;
+	transition: all 0.15s;
+}
+
+.tree-new-btn:hover {
+	border-color: rgba(34, 197, 94, 0.4);
+	color: #22c55e;
+	background: rgba(34, 197, 94, 0.1);
+}
+
+.tree-new-btn.scene-level {
+	margin-left: 20px;
+	width: calc(100% - 20px);
+}
+
+.tree-new-btn.beat-level {
+	margin-left: 40px;
+	width: calc(100% - 40px);
+}
+
+/* Content area */
+.play-content {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	padding: 24px;
+}
+
+.play-title-input {
+	font-size: 28px;
+	font-weight: 700;
+	border: none;
+	background: transparent;
+	color: #e5e7eb;
+	width: 100%;
+	padding: 0;
+	margin-bottom: 16px;
+	outline: none;
+}
+
+.play-title-input::placeholder {
+	color: rgba(255, 255, 255, 0.3);
+}
+
+.play-title-input:disabled {
+	cursor: default;
+}
+
+.play-editor-wrap {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 200px;
+}
+
+.play-editor {
+	flex: 1;
+	background: rgba(255, 255, 255, 0.03);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 12px;
+	padding: 16px;
+	color: #e5e7eb;
+	font-family: 'Inter', system-ui, sans-serif;
+	font-size: 14px;
+	line-height: 1.7;
+	resize: none;
+	outline: none;
+	overflow-y: auto;
+}
+
+.play-editor::placeholder {
+	color: rgba(255, 255, 255, 0.35);
+	line-height: 1.8;
+}
+
+.play-editor:focus {
+	border-color: rgba(34, 197, 94, 0.4);
+}
+
+/* Attachments section */
+.play-attachments {
+	margin-top: 24px;
+	padding-top: 16px;
+	border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.attachments-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 12px;
+}
+
+.attachments-title {
+	font-size: 13px;
+	font-weight: 600;
+	color: rgba(255, 255, 255, 0.6);
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.add-attachment-btn {
+	padding: 6px 12px;
+	border-radius: 8px;
+	border: 1px dashed rgba(255, 255, 255, 0.2);
+	background: transparent;
+	color: rgba(255, 255, 255, 0.6);
+	cursor: pointer;
+	font-size: 12px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	transition: all 0.15s;
+}
+
+.add-attachment-btn:hover {
+	border-color: rgba(34, 197, 94, 0.4);
+	color: #22c55e;
+	background: rgba(34, 197, 94, 0.1);
+}
+
+.attachment-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.attachment-empty {
+	color: rgba(255, 255, 255, 0.4);
+	font-size: 13px;
+	font-style: italic;
+}
+
+.attachment-pill {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 8px;
+	color: #e5e7eb;
+	font-size: 12px;
+	transition: background 0.15s;
+}
+
+.attachment-pill:hover {
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.attachment-icon {
+	min-width: 28px;
+	height: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 9px;
+	font-weight: 700;
+	background: rgba(156, 163, 175, 0.3);
+	border-radius: 4px;
+	color: #9ca3af;
+	text-transform: uppercase;
+}
+
+.attachment-icon.pdf {
+	background: rgba(239, 68, 68, 0.3);
+	color: #f87171;
+}
+
+.attachment-icon.doc,
+.attachment-icon.docx {
+	background: rgba(59, 130, 246, 0.3);
+	color: #60a5fa;
+}
+
+.attachment-icon.xls,
+.attachment-icon.xlsx {
+	background: rgba(34, 197, 94, 0.3);
+	color: #4ade80;
+}
+
+.attachment-icon.csv {
+	background: rgba(34, 197, 94, 0.3);
+	color: #4ade80;
+}
+
+.attachment-icon.txt,
+.attachment-icon.md {
+	background: rgba(156, 163, 175, 0.3);
+	color: #9ca3af;
+}
+
+.attachment-name {
+	max-width: 200px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.attachment-remove {
+	padding: 2px 6px;
+	border: none;
+	background: transparent;
+	color: rgba(255, 255, 255, 0.4);
+	cursor: pointer;
+	font-size: 16px;
+	border-radius: 4px;
+	transition: all 0.15s;
+}
+
+.attachment-remove:hover {
+	background: rgba(239, 68, 68, 0.2);
+	color: #f87171;
 }

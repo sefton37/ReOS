@@ -2252,3 +2252,168 @@ def remove_user_from_group(
         )
 
     return execute_command(cmd, timeout=30)
+
+
+# =============================================================================
+# Network Monitoring Functions
+# =============================================================================
+
+
+@dataclass
+class ListeningPort:
+    """Information about a listening port."""
+    protocol: str  # tcp, udp
+    port: int
+    address: str  # 0.0.0.0, 127.0.0.1, ::, etc.
+    process: str  # Process name or PID
+    pid: int | None
+
+
+def list_listening_ports() -> list[ListeningPort]:
+    """List all listening network ports on the system."""
+    ports = []
+
+    try:
+        # Try ss first (modern), fall back to netstat
+        result = subprocess.run(
+            ["ss", "-tlnp"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines()[1:]:  # Skip header
+                parts = line.split()
+                if len(parts) >= 5:
+                    # Parse Local Address:Port
+                    local = parts[3]
+                    if ":" in local:
+                        addr, port_str = local.rsplit(":", 1)
+                        try:
+                            port = int(port_str)
+                        except ValueError:
+                            continue
+
+                        # Parse process info from last column
+                        process = ""
+                        pid = None
+                        if len(parts) >= 6:
+                            proc_info = parts[5]
+                            # Format: users:(("nginx",pid=1234,fd=6))
+                            if 'pid=' in proc_info:
+                                try:
+                                    pid_str = proc_info.split('pid=')[1].split(',')[0].split(')')[0]
+                                    pid = int(pid_str)
+                                except (IndexError, ValueError):
+                                    pass
+                            if '(("' in proc_info:
+                                try:
+                                    process = proc_info.split('(("')[1].split('"')[0]
+                                except IndexError:
+                                    pass
+
+                        ports.append(ListeningPort(
+                            protocol="tcp",
+                            port=port,
+                            address=addr.strip("[]"),
+                            process=process,
+                            pid=pid,
+                        ))
+    except FileNotFoundError:
+        # Fall back to netstat
+        try:
+            result = subprocess.run(
+                ["netstat", "-tlnp"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines()[2:]:  # Skip headers
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[0] in ("tcp", "tcp6"):
+                        local = parts[3]
+                        if ":" in local:
+                            addr, port_str = local.rsplit(":", 1)
+                            try:
+                                port = int(port_str)
+                            except ValueError:
+                                continue
+
+                            process = ""
+                            pid = None
+                            if len(parts) >= 7 and parts[6] != "-":
+                                proc_info = parts[6]
+                                if "/" in proc_info:
+                                    pid_str, process = proc_info.split("/", 1)
+                                    try:
+                                        pid = int(pid_str)
+                                    except ValueError:
+                                        pass
+
+                            ports.append(ListeningPort(
+                                protocol="tcp",
+                                port=port,
+                                address=addr,
+                                process=process,
+                                pid=pid,
+                            ))
+        except Exception as e:
+            logger.debug("Failed to list ports with netstat: %s", e)
+    except Exception as e:
+        logger.debug("Failed to list ports with ss: %s", e)
+
+    # Sort by port number
+    return sorted(ports, key=lambda p: p.port)
+
+
+@dataclass
+class NetworkTraffic:
+    """Network traffic statistics for an interface."""
+    interface: str
+    rx_bytes: int
+    tx_bytes: int
+    rx_packets: int
+    tx_packets: int
+    rx_errors: int
+    tx_errors: int
+
+
+def get_network_traffic() -> list[NetworkTraffic]:
+    """Get network traffic statistics for all interfaces."""
+    traffic = []
+
+    try:
+        with open("/proc/net/dev", "r") as f:
+            lines = f.readlines()[2:]  # Skip headers
+
+        for line in lines:
+            parts = line.split()
+            if len(parts) >= 10:
+                interface = parts[0].rstrip(":")
+                # Skip loopback
+                if interface == "lo":
+                    continue
+
+                traffic.append(NetworkTraffic(
+                    interface=interface,
+                    rx_bytes=int(parts[1]),
+                    rx_packets=int(parts[2]),
+                    rx_errors=int(parts[3]),
+                    tx_bytes=int(parts[9]),
+                    tx_packets=int(parts[10]),
+                    tx_errors=int(parts[11]),
+                ))
+    except Exception as e:
+        logger.debug("Failed to read network traffic: %s", e)
+
+    return traffic
+
+
+def format_bytes(bytes_val: int) -> str:
+    """Format bytes into human-readable string."""
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if bytes_val < 1024:
+            return f"{bytes_val:.1f} {unit}"
+        bytes_val /= 1024
+    return f"{bytes_val:.1f} PB"

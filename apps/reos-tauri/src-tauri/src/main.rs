@@ -44,7 +44,8 @@ async fn kernel_request(state: State<'_, KernelState>, method: String, params: V
 
 fn main() {
     tauri::Builder::default()
-    .manage(KernelState(Arc::new(Mutex::new(None))))
+        .plugin(tauri_plugin_dialog::init())
+        .manage(KernelState(Arc::new(Mutex::new(None))))
         .invoke_handler(tauri::generate_handler![kernel_start, kernel_request])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -189,6 +189,20 @@ export type SystemLiveStateResult = {
     ip: string;
     state: string;
   }>;
+  ports: Array<{
+    port: number;
+    protocol: string;
+    address: string;
+    process: string;
+    pid: number | null;
+  }>;
+  traffic: Array<{
+    interface: string;
+    rx_bytes: number;
+    tx_bytes: number;
+    rx_formatted: string;
+    tx_formatted: string;
+  }>;
 };
 
 export type ServiceActionResult = {
@@ -290,6 +304,26 @@ export type PlayKbWriteApplyResult = {
   ok: boolean;
   sha256_current: string;
 };
+
+// File attachment types
+export type PlayAttachment = {
+  attachment_id: string;
+  file_path: string;
+  file_name: string;
+  file_type: string;
+  added_at: string;
+};
+
+export type PlayAttachmentsListResult = {
+  attachments: PlayAttachment[];
+};
+
+export type PlayAttachmentsMutationResult = {
+  attachments: PlayAttachment[];
+};
+
+// Play levels for placeholder text
+export type PlayLevel = 'play' | 'act' | 'scene' | 'beat';
 
 // Intent detection types (Phase 6 - Conversational Troubleshooting)
 export type IntentDetectResult = {

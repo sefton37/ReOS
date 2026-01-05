@@ -615,36 +615,135 @@ class ChatAgent:
             return {}
 
     def _get_play_context(self) -> str:
+        """Build context from The Play hierarchy.
+
+        Context structure:
+        - README (always included - app identity and documentation)
+        - The Play (always included - user's story and identity)
+        - Selected Act + all its Scenes and Beats (if an act is selected)
+        """
+        from pathlib import Path
+        from .play_fs import (
+            play_root,
+            list_scenes,
+            list_beats,
+            kb_read,
+            list_attachments,
+        )
+
+        ctx_parts: list[str] = []
+
+        # 1. README - Always in context (app identity and documentation)
+        try:
+            readme_path = Path(__file__).parent.parent.parent / "README.md"
+            if readme_path.exists():
+                readme_content = readme_path.read_text(encoding="utf-8").strip()
+                # Cap README to reasonable size
+                cap = 4000
+                if len(readme_content) > cap:
+                    readme_content = readme_content[:cap] + "\n…"
+                ctx_parts.append(f"REOS_README:\n{readme_content}")
+        except Exception:  # noqa: BLE001
+            pass
+
+        # 2. The Play - Always in context (user's story)
+        try:
+            me = play_read_me_markdown().strip()
+            if me:
+                cap = 2000
+                if len(me) > cap:
+                    me = me[:cap] + "\n…"
+                ctx_parts.append(f"THE_PLAY (User's Story - Always in Context):\n{me}")
+
+            # Play-level attachments
+            play_attachments = list_attachments()
+            if play_attachments:
+                att_list = ", ".join(f"{a.file_name} ({a.file_type})" for a in play_attachments)
+                ctx_parts.append(f"PLAY_ATTACHMENTS: {att_list}")
+        except Exception:  # noqa: BLE001
+            pass
+
+        # 3. Selected Act and its hierarchy
         try:
             acts, active_id = play_list_acts()
         except Exception:  # noqa: BLE001
-            return ""
+            return "\n\n".join(ctx_parts)
 
         if not active_id:
-            return ""
+            if ctx_parts:
+                ctx_parts.append("NO_ACTIVE_ACT: User has not selected an Act to focus on.")
+            return "\n\n".join(ctx_parts)
 
         act = next((a for a in acts if a.act_id == active_id), None)
         if act is None:
-            return ""
+            return "\n\n".join(ctx_parts)
 
-        ctx = f"ACTIVE_ACT: {act.title}".strip()
+        # Act context
+        act_ctx = f"ACTIVE_ACT: {act.title} (selected = in context with all Scenes & Beats)"
         if act.notes.strip():
-            ctx = ctx + "\n" + f"ACT_NOTES: {act.notes.strip()}"
+            act_ctx += f"\nACT_NOTES: {act.notes.strip()}"
 
+        # Act KB
         try:
-            me = play_read_me_markdown().strip()
+            act_kb = kb_read(act_id=active_id, path="kb.md")
+            if act_kb.strip():
+                cap = 1500
+                if len(act_kb) > cap:
+                    act_kb = act_kb[:cap] + "\n…"
+                act_ctx += f"\nACT_KB:\n{act_kb.strip()}"
         except Exception:  # noqa: BLE001
-            me = ""
+            pass
 
-        if me:
-            # Keep this small and stable; it should be identity-level context,
-            # not a task list.
-            cap = 2000
-            if len(me) > cap:
-                me = me[:cap] + "\n…"
-            ctx = ctx + "\n\n" + "ME_CONTEXT:\n" + me
+        # Act attachments
+        try:
+            act_attachments = list_attachments(act_id=active_id)
+            if act_attachments:
+                att_list = ", ".join(f"{a.file_name} ({a.file_type})" for a in act_attachments)
+                act_ctx += f"\nACT_ATTACHMENTS: {att_list}"
+        except Exception:  # noqa: BLE001
+            pass
 
-        return ctx
+        ctx_parts.append(act_ctx)
+
+        # Scenes under active act
+        try:
+            scenes = list_scenes(act_id=active_id)
+            for scene in scenes:
+                scene_ctx = f"  SCENE: {scene.title}"
+                if scene.intent:
+                    scene_ctx += f" | Intent: {scene.intent}"
+                if scene.status:
+                    scene_ctx += f" | Status: {scene.status}"
+                if scene.notes and scene.notes.strip():
+                    scene_ctx += f"\n    Notes: {scene.notes.strip()[:500]}"
+
+                # Scene attachments
+                try:
+                    scene_attachments = list_attachments(act_id=active_id, scene_id=scene.scene_id)
+                    if scene_attachments:
+                        att_list = ", ".join(f"{a.file_name}" for a in scene_attachments)
+                        scene_ctx += f"\n    Attachments: {att_list}"
+                except Exception:  # noqa: BLE001
+                    pass
+
+                ctx_parts.append(scene_ctx)
+
+                # Beats under scene
+                try:
+                    beats = list_beats(act_id=active_id, scene_id=scene.scene_id)
+                    for beat in beats:
+                        beat_ctx = f"    BEAT: {beat.title}"
+                        if beat.status:
+                            beat_ctx += f" | Status: {beat.status}"
+                        if beat.notes and beat.notes.strip():
+                            beat_ctx += f"\n      Notes: {beat.notes.strip()[:300]}"
+                        ctx_parts.append(beat_ctx)
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+
+        return "\n\n".join(ctx_parts)
 
     def _user_opted_into_diff(self, user_text: str) -> bool:
         t = user_text.lower()

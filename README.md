@@ -15,6 +15,68 @@ ReOS is a local-first AI companion that lets you control your entire Linux syste
 - **Quality Commitment**: Engineering best practices enforced through quality gates and reasoning audits. [Learn more](#quality-commitment)
 - **No Paperclips**: Hard-coded circuit breakers prevent runaway AI execution. [Learn more](#circuit-breakers)
 
+## The Play - Your Personal Knowledge System
+
+ReOS includes a hierarchical knowledge system called **The Play** that helps you organize your life and work. This isn't just note-taking—it's how ReOS understands your context, goals, and current focus.
+
+### The Hierarchy
+
+Your life is structured like a play with acts, scenes, and beats:
+
+| Level | Time Horizon | Description | Example |
+|-------|--------------|-------------|---------|
+| **The Play** | Your life | Your identity, story, values, and long-term vision | "Who I am, where I'm going" |
+| **Acts** | > 1 year | Major chapters or phases of your life | "Career at Company X", "Building my startup" |
+| **Scenes** | > 1 month | Projects or initiatives within an act | "Launch MVP", "Learn Rust" |
+| **Beats** | > 1 week | Focused work blocks within a scene | "Set up CI/CD", "Write user docs" |
+| **Tasks** | < 1 day | Individual actions | "Fix login bug", "Review PR #42" |
+
+### Context Selection
+
+ReOS uses this hierarchy to understand what you're working on:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  THE PLAY (always in context)                               │
+│  Your story, identity, resume, self-narrative               │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  ☑ ACT: Career at Acme Corp (selected = in context) │   │
+│  │    └─ Scene: Q1 Platform Migration                  │   │
+│  │         └─ Beat: Database optimization              │   │
+│  │         └─ Beat: API refactoring                    │   │
+│  │    └─ Scene: Team Growth                            │   │
+│  │         └─ Beat: Hiring pipeline                    │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  ☐ ACT: Side Project (not selected = not in context)│   │
+│  │    └─ Scene: MVP Development                        │   │
+│  │         └─ Beat: Landing page                       │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**How it works:**
+- **The Play** is always in context—ReOS always knows your story
+- **Selected Acts** bring their entire subtree (all Scenes and Beats) into context
+- **Unselected Acts** are ignored—ReOS won't reference them
+- You control focus by selecting/deselecting Acts in the sidebar
+
+This means when you ask ReOS for help, it understands:
+- Who you are (from The Play)
+- What chapter of your life you're in (from selected Acts)
+- What projects matter right now (from Scenes)
+- What specific work you're doing (from Beats)
+
+### Knowledge Storage
+
+Each level has:
+- **A markdown notebook** for narrative, notes, and context
+- **File attachments** (PDF, Word, Excel, CSV, TXT) stored as references
+
+ReOS can reference any of this context when helping you—whether you're asking about your system, planning work, or just having a conversation.
+
 ## Examples
 
 ```bash
