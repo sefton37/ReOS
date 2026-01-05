@@ -18,6 +18,8 @@ from .conversation import ConversationManager, ConversationPreferences, Verbosit
 from .safety import SafetyManager
 from .adaptive import AdaptiveExecutor, ExecutionLearner, ErrorClassifier
 
+from ..quality import get_quality_framework, DecisionType, QualityLevel
+
 logger = logging.getLogger(__name__)
 
 
@@ -172,6 +174,9 @@ class ReasoningEngine:
         )
         self.conversation = ConversationManager(conv_prefs)
 
+        # Quality framework for engineering excellence
+        self.quality = get_quality_framework()
+
         # Active contexts for multi-turn interactions
         self._active_contexts: dict[str, ExecutionContext] = {}
         self._pending_plan: TaskPlan | None = None
@@ -213,12 +218,42 @@ class ReasoningEngine:
 
         # LLM-FIRST APPROACH: Let LLM decide if this needs a plan
         # The LLM planner understands natural language and system context
+
+        # Start tracking decision reasoning
+        self.quality.start_decision(
+            DecisionType.PLAN_CREATION,
+            goal=request,
+            context=str(system_context)[:200] if system_context else "No context",
+        )
+
         plan = self.planner.create_plan(request, system_context)
 
         # If LLM returned actionable steps, present the plan
         if plan.steps and any(s.step_type in (StepType.COMMAND, StepType.TOOL_CALL) for s in plan.steps):
             # Get complexity for display purposes only
             complexity = self.assessor.assess(request)
+
+            # QUALITY: Run pre-flight quality gates
+            plan_steps = [{"command": s.action, "description": s.title} for s in plan.steps]
+            preflight_passed, gate_results = self.quality.run_pre_flight(
+                goal=request,
+                plan=plan_steps,
+                context=system_context or {},
+            )
+
+            # QUALITY: Assess plan quality
+            plan_assessment = self.quality.assess_plan(plan_steps)
+
+            # Record reasoning
+            self.quality.record_reasoning_step(
+                description=f"Created plan with {len(plan.steps)} steps",
+                rationale=f"Based on request: {request[:50]}",
+                alternatives=["Direct execution", "Query for more info"],
+                why_chosen="Request requires system modifications",
+            )
+            self.quality.conclude_decision(
+                f"Plan created, quality: {plan_assessment.level.value}"
+            )
 
             # Format the plan for presentation
             intro = self.conversation.format_complexity_result(
@@ -227,10 +262,19 @@ class ReasoningEngine:
             )
             plan_text = self.conversation.format_plan_presentation(plan)
 
+            # Add quality assessment to response
+            quality_note = ""
+            if plan_assessment.level == QualityLevel.EXCELLENT:
+                quality_note = "\n\n[Quality: Excellent - Well-engineered plan]"
+            elif plan_assessment.level == QualityLevel.GOOD:
+                quality_note = "\n\n[Quality: Good]"
+            elif plan_assessment.suggestions:
+                quality_note = f"\n\n[Quality Note: {plan_assessment.suggestions[0]}]"
+
             self._pending_plan = plan
 
             return ProcessingResult(
-                response=f"{intro}\n\n{plan_text}" if intro else plan_text,
+                response=f"{intro}\n\n{plan_text}{quality_note}" if intro else f"{plan_text}{quality_note}",
                 complexity=complexity,
                 plan=plan,
                 needs_approval=True,

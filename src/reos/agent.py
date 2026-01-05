@@ -18,6 +18,12 @@ from .system_index import get_or_refresh_context as get_system_context
 from .system_state import SteadyStateCollector
 from .certainty import CertaintyWrapper, create_certainty_prompt_addition
 from .security import detect_prompt_injection, audit_log, AuditEventType
+from .quality import (
+    get_quality_framework,
+    create_quality_prompt_addition,
+    DecisionType,
+    QualityLevel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +115,9 @@ class ChatAgent:
             require_evidence=True,
             stale_threshold_seconds=300,  # 5 minutes
         )
+
+        # Initialize quality framework for engineering excellence
+        self._quality = get_quality_framework()
 
         # Track tool outputs for certainty validation
         self._recent_tool_outputs: list[dict[str, Any]] = []
@@ -518,10 +527,11 @@ class ChatAgent:
         return "\n".join(lines)
 
     def _get_system_context(self) -> str:
-        """Get system state context for RAG with certainty rules.
+        """Get system state context for RAG with certainty and quality rules.
 
         Uses SteadyStateCollector for comprehensive system knowledge,
-        formatted with certainty rules to prevent hallucination.
+        formatted with certainty rules to prevent hallucination and
+        quality commitment rules to ensure engineering excellence.
         """
         try:
             # Get steady state context (cached, refreshed if stale)
@@ -529,7 +539,12 @@ class ChatAgent:
             context = steady_state.to_context_string()
 
             # Add certainty rules to prevent hallucination
-            return create_certainty_prompt_addition(context)
+            certainty_context = create_certainty_prompt_addition(context)
+
+            # Add quality commitment rules for engineering excellence
+            quality_context = create_quality_prompt_addition()
+
+            return certainty_context + "\n\n" + quality_context
         except Exception as e:
             logger.warning("Failed to get system context: %s", e)
             # Fallback to basic context

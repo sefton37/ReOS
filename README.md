@@ -12,6 +12,7 @@ ReOS is a local-first AI companion that lets you control your entire Linux syste
 - **Transparent Actions**: Every command is previewed before execution. You always see what's happening.
 - **Recoverable Mistakes**: Destructive operations show undo commands. It's conversational - you can say "wait, undo that."
 - **Safety First**: Dangerous commands are blocked. Risky operations require confirmation.
+- **Quality Commitment**: Engineering best practices enforced through quality gates and reasoning audits. [Learn more](#quality-commitment)
 - **No Paperclips**: Hard-coded circuit breakers prevent runaway AI execution. [Learn more](#circuit-breakers)
 
 ## Examples
@@ -153,6 +154,39 @@ Original: apt install nginx
 Edited:   apt install nginx && rm -rf /
 Result:   ✗ Blocked - cannot bypass safety by editing
 ```
+
+## Quality Commitment
+
+ReOS enforces engineering best practices through a Quality Commitment Framework.
+
+### Quality Gates
+
+Every plan goes through quality checks:
+
+| Gate | What It Checks |
+|------|----------------|
+| **Pre-flight** | Goal clarity, reasonable scope, no conflicts |
+| **Mid-flight** | Step success, warnings, error handling |
+| **Post-flight** | Goal achieved, no critical errors |
+
+### Engineering Standards
+
+Commands are checked for anti-patterns:
+
+| Good | Anti-Pattern |
+|------|-------------|
+| `grep pattern file` | `cat file \| grep pattern` (useless cat) |
+| Fail on error | `command \|\| true` (silent failure) |
+| Absolute paths | `cd dir && command` (implicit state) |
+
+### Reasoning Transparency
+
+Every significant decision has an audit trail showing:
+- What alternatives were considered
+- Why the chosen approach was selected
+- Confidence level in the decision
+
+See [docs/reasoning.md](docs/reasoning.md#quality-commitment-framework) for full details.
 
 ### Preview Mode
 

@@ -335,6 +335,123 @@ For safety, automatic recovery is limited:
 - Maximum 2 fix attempts per error type
 - User intervention required for critical or unclassifiable errors
 
+## Quality Commitment Framework
+
+ReOS implements a Quality Commitment Framework to ensure every decision and action meets engineering excellence standards.
+
+### Engineering Quality Layers
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  QUALITY COMMITMENT LAYERS                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  Layer 1: REASONING TRANSPARENCY                                 │
+│  ├─ Every decision has a chain-of-thought audit trail          │
+│  ├─ Alternatives considered are logged                          │
+│  └─ Justification for chosen approach is recorded               │
+│                                                                   │
+│  Layer 2: ENGINEERING STANDARDS                                  │
+│  ├─ Idempotent operations preferred                             │
+│  ├─ Explicit over implicit (no hidden state changes)           │
+│  ├─ Fail-fast patterns (don't silently ignore errors)          │
+│  └─ Commands checked for anti-patterns                          │
+│                                                                   │
+│  Layer 3: QUALITY GATES                                          │
+│  ├─ Pre-flight: Is this the right approach?                    │
+│  ├─ Mid-flight: Is execution proceeding correctly?             │
+│  └─ Post-flight: Did we achieve the goal?                       │
+│                                                                   │
+│  Layer 4: MAINTAINABILITY SCORING                                │
+│  ├─ Documentation/comments assessed                             │
+│  ├─ Reversibility considered                                    │
+│  ├─ Hardcoded values flagged                                    │
+│  └─ Clarity of intent evaluated                                 │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### What Gets Checked
+
+| Category | Good Patterns | Anti-Patterns |
+|----------|--------------|---------------|
+| **Idempotency** | `--force`, `--exist-ok`, `IF NOT EXISTS` | - |
+| **Explicit** | `--yes`, `-y`, `--no-interaction` | Implicit state changes |
+| **Error Handling** | Fail-fast, explicit errors | `\|\| true`, `2>/dev/null` |
+| **Efficiency** | Direct file access | `cat file \| grep` (useless cat) |
+| **Maintainability** | Comments, documentation | Hardcoded IPs, home paths |
+
+### Quality Gates in Action
+
+**Pre-flight checks** (before execution):
+- Is the goal clearly stated?
+- Does a plan exist?
+- Is the scope reasonable (≤25 steps)?
+- Is system context available?
+- Are there conflicting operations?
+
+**Mid-flight checks** (during execution):
+- Did each step succeed?
+- Are there warnings to note?
+- Should we pause for review?
+
+**Post-flight checks** (after execution):
+- Did all steps complete?
+- Were there critical errors?
+- Was the goal achieved?
+
+### Reasoning Audit Trail
+
+Every significant decision creates an audit trail:
+
+```
+=== REASONING CHAIN: plan_creation ===
+Goal: Stop all nextcloud containers
+Context: User has 4 running containers
+
+Step 1: Parse intent
+  Rationale: Need to understand action and targets
+  Alternatives: Ask for clarification, execute directly
+  Why chosen: Request is unambiguous
+
+Step 2: Match resources
+  Rationale: Find containers matching "nextcloud"
+  Confidence: 100%
+
+Conclusion: Plan created with 2 stop operations
+Quality Score: 85%
+```
+
+### Quality Assessment Example
+
+```
+You: stop the nextcloud containers
+
+ReOS: [Quality Assessment]
+      Plan Score: 0.9 (Excellent)
+      ✓ Concise plan with focused steps
+      ✓ Uses idempotent patterns
+      ✓ Includes verification steps
+
+      Plan:
+        1. Stop nextcloud-app
+        2. Stop nextcloud-redis
+
+      Proceed? [y/n]
+```
+
+### Configuration
+
+The quality framework uses the same config file (`~/.config/reos/settings.toml`):
+
+```toml
+[reasoning]
+explain_steps = true     # Show reasoning in responses
+
+[safety]
+verify_each_step = true  # Run mid-flight quality gates
+```
+
 ## Circuit Breakers (Paperclip Problem Prevention)
 
 To prevent runaway AI behavior, ReOS enforces hard limits that **cannot be overridden by the AI**:
