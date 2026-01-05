@@ -28,6 +28,7 @@ export type ChatRespondResult = {
     result?: unknown;
     error?: { code: string; message: string; data?: unknown };
   }>;
+  thinking_steps: string[];  // Chain of thought - reasoning steps before final answer
   pending_approval_id: string | null;
   intent_handled?: 'approval' | 'rejection';  // Phase 6: Set when a conversational intent was handled
 };

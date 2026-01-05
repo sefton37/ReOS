@@ -237,8 +237,13 @@ export function createPlayOverlay(onClose: () => void): {
 
   async function saveKbContent(text: string) {
     if (state.selectedLevel === 'play') {
-      // Can't save play-level (me.md) through kb endpoint
-      // Would need a separate me/write endpoint
+      // Save play-level (me.md) through me/write endpoint
+      try {
+        await kernelRequest('play/me/write', { text });
+        state.kbText = text;
+      } catch (e) {
+        console.error('Failed to save Play content:', e);
+      }
       return;
     }
 

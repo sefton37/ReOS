@@ -87,6 +87,8 @@ class ChatResponse:
     message_type: str = "text"
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     pending_approval_id: str | None = None
+    # Chain of thought - separate reasoning steps from final answer
+    thinking_steps: list[str] = field(default_factory=list)
     # Certainty tracking
     confidence: float = 1.0
     evidence_summary: str = ""
@@ -255,33 +257,38 @@ class ChatAgent:
 
         return {
             "system_prompt": (
-                "You are ReOS, a local-first AI companion for Linux system administration. "
-                "You run entirely on the user's machine using Ollama - no cloud services.\n\n"
+                "You are ReOS, a personal AI companion that runs locally on the user's Linux machine.\n\n"
+                "CRITICAL DISTINCTION - USER vs SYSTEM:\n"
+                "- THE USER is a PERSON - a human being with goals, identity, projects, and context\n"
+                "- THE SYSTEM is a COMPUTER - hardware, OS, services, containers, files\n"
+                "- When user asks about 'me', 'myself', 'my goals', 'what do you know about me' → Look at THE_PLAY context\n"
+                "- When user asks about 'this machine', 'system info', 'services' → Use system tools\n"
+                "- NEVER confuse the person with their computer!\n\n"
+                "THE PLAY - Your Knowledge About The User:\n"
+                "- THE_PLAY section contains the user's story - who they are, their goals, principles, context\n"
+                "- ACTIVE_ACT contains their current focus area\n"
+                "- SCENE/BEAT contains specific projects and tasks\n"
+                "- This is YOUR PRIMARY SOURCE for questions about the user as a person\n"
+                "- If THE_PLAY is empty, tell them to fill out 'Your Story' in The Play\n\n"
                 "REASONING FIRST:\n"
-                "Before acting, THINK through the task:\n"
-                "1. What is the user asking for? (e.g., 'remove nextcloud containers')\n"
-                "2. What resources match? Look at NAMES - 'nextcloud-redis' contains 'nextcloud'!\n"
-                "3. What steps are needed? List them: stop → remove → verify\n"
-                "4. Execute each step\n\n"
-                "PATTERN MATCHING:\n"
-                "- 'nextcloud containers' = ANY container with 'nextcloud' in the name\n"
-                "- 'redis services' = ANY service with 'redis' in the name\n"
-                "- When user says 'X containers', find ALL containers containing 'X'\n\n"
-                "TOOLS:\n"
-                "- linux_system_info: Get CPU, memory, disk, uptime\n"
-                "- linux_list_services: Show systemd services\n"
-                "- linux_docker_containers: List Docker containers\n"
-                "- linux_run_command: Execute shell commands (docker, apt, systemctl)\n\n"
+                "Before acting, THINK through:\n"
+                "1. Is this about the USER (person) or the SYSTEM (computer)?\n"
+                "2. What context do I have? (THE_PLAY for user, tools for system)\n"
+                "3. What resources/information match the request?\n"
+                "4. What steps are needed?\n\n"
+                "SYSTEM TOOLS (for computer operations):\n"
+                "- linux_system_info: CPU, memory, disk, uptime\n"
+                "- linux_list_services: Systemd services\n"
+                "- linux_docker_containers: Docker containers\n"
+                "- linux_run_command: Execute shell commands\n\n"
                 "EXECUTION:\n"
-                "- When user confirms (yes, proceed, do it), EXECUTE immediately\n"
-                "- For Docker: linux_run_command with 'docker stop X && docker rm X'\n"
-                "- For multiple items, run commands for EACH one\n"
+                "- When user confirms (yes, proceed), EXECUTE immediately\n"
+                "- For dangerous operations, always ask for confirmation first\n"
                 "- Don't just describe - DO IT when confirmed!\n\n"
-                "RESPONSE FORMAT:\n"
-                "1. State what you understood\n"
-                "2. List the matching resources (by name pattern)\n"
-                "3. Explain what you'll do\n"
-                "4. Ask for confirmation OR execute if already confirmed"
+                "RESPONSE STYLE:\n"
+                "- Be helpful, direct, and personal\n"
+                "- Remember: you serve THIS person, not just any user\n"
+                "- Use what you know about them from THE_PLAY"
             ),
             "default_context": "",
             "temperature": 0.2,
@@ -436,7 +443,7 @@ class ChatAgent:
         # Keep only recent tool outputs (last 20)
         self._recent_tool_outputs = self._recent_tool_outputs[-20:]
 
-        answer = self._answer(
+        answer, thinking_steps = self._answer(
             user_text=user_text,
             tools=tools,
             tool_results=tool_results,
@@ -474,10 +481,11 @@ class ChatAgent:
             message_type="text",
             metadata=json.dumps({
                 "tool_calls": tool_results,
+                "thinking_steps": thinking_steps,
                 "confidence": confidence,
                 "evidence_summary": evidence_summary,
                 "has_uncertainties": has_uncertainties,
-            }) if tool_results or confidence < 1.0 else None,
+            }) if tool_results or thinking_steps or confidence < 1.0 else None,
         )
 
         # Generate title for new conversations (first message)
@@ -492,6 +500,7 @@ class ChatAgent:
             message_id=assistant_message_id,
             message_type="text",
             tool_calls=tool_results,
+            thinking_steps=thinking_steps,
             confidence=confidence,
             evidence_summary=evidence_summary,
             has_uncertainties=has_uncertainties,
@@ -653,7 +662,11 @@ class ChatAgent:
                 cap = 2000
                 if len(me) > cap:
                     me = me[:cap] + "\n…"
-                ctx_parts.append(f"THE_PLAY (User's Story - Always in Context):\n{me}")
+                ctx_parts.append(
+                    f"THE_PLAY (About the USER - the person you serve, NOT the computer):\n"
+                    f"Use this to answer questions about 'me', 'myself', 'my goals', etc.\n"
+                    f"{me}"
+                )
 
             # Play-level attachments
             play_attachments = list_attachments()
@@ -910,17 +923,25 @@ class ChatAgent:
             persona_prefix
             + "\n\n"
             + "You are deciding which tools to call to answer the user.\n\n"
-            + "IMPORTANT RULES:\n"
-            + "- For system/hardware questions: USE linux_system_info\n"
-            + "- For listing services: USE linux_list_services\n"
-            + "- For listing Docker containers: USE linux_docker_containers\n"
-            + "- For git/repo questions: USE reos_git_summary\n"
-            + "- For EXECUTING commands (docker stop, apt install, systemctl, etc.): USE linux_run_command\n"
-            + "- When user says 'yes', 'proceed', 'do it', 'confirm': USE linux_run_command to execute!\n"
-            + "- linux_run_command takes {\"command\": \"the shell command\"}\n"
-            + f"- Call 1-{tool_call_limit} tools. DO NOT return empty tool_calls.\n\n"
+            + "CRITICAL - PERSONAL vs SYSTEM QUESTIONS:\n"
+            + "- Questions about 'me', 'myself', 'my goals', 'what do you know about me' = PERSONAL\n"
+            + "- For PERSONAL questions: Return EMPTY tool_calls []. Use THE_PLAY context instead!\n"
+            + "- Questions about 'this machine', 'CPU', 'memory', 'services', 'containers' = SYSTEM\n"
+            + "- For SYSTEM questions: Use appropriate tools below\n\n"
+            + "SYSTEM TOOLS (only for computer/hardware questions):\n"
+            + "- linux_system_info: CPU, memory, disk, uptime (NOT for personal info!)\n"
+            + "- linux_list_services: Systemd services\n"
+            + "- linux_docker_containers: Docker containers\n"
+            + "- reos_git_summary: Git repository info\n"
+            + "- linux_run_command: Execute shell commands (docker, apt, systemctl)\n\n"
+            + "RULES:\n"
+            + "- When user says 'yes', 'proceed', 'do it': USE linux_run_command to execute\n"
+            + "- linux_run_command takes {\"command\": \"shell command\"}\n"
+            + f"- Call 0-{tool_call_limit} tools. Empty is OK for personal questions!\n\n"
             + "Return JSON:\n"
             + "{\"tool_calls\": [{\"name\": \"tool_name\", \"arguments\": {}}]}\n"
+            + "OR for personal questions:\n"
+            + "{\"tool_calls\": []}\n"
         )
 
         user = (
@@ -933,8 +954,8 @@ class ChatAgent:
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
-            # Fallback: get system info if LLM returns invalid JSON
-            return [ToolCall(name="linux_system_info", arguments={})]
+            # Fallback: return empty - don't assume system tools
+            return []
 
         calls = payload.get("tool_calls")
         if not isinstance(calls, list):
@@ -990,7 +1011,12 @@ class ChatAgent:
         ollama: OllamaClient,
         temperature: float,
         top_p: float,
-    ) -> str:
+    ) -> tuple[str, list[str]]:
+        """Generate answer with optional thinking steps.
+
+        Returns:
+            Tuple of (answer, thinking_steps)
+        """
         tool_dump = []
         for r in tool_results:
             rendered = render_tool_result(r.get("result")) if r.get("ok") else json.dumps(r.get("error"), indent=2)
@@ -1006,12 +1032,31 @@ class ChatAgent:
         system = (
             persona_prefix
             + "\n\n"
-            + "Answer the user using the available tool outputs.\n\n"
+            + "Answer the user's question.\n\n"
+            + "INFORMATION SOURCES (in order of priority):\n"
+            + "1. THE_PLAY context above - Contains info about the USER as a person (their story, goals, identity)\n"
+            + "2. Tool outputs below - Contains info about the SYSTEM (computer, services, containers)\n"
+            + "3. Conversation history - Previous messages in this chat\n\n"
+            + "IMPORTANT:\n"
+            + "- For personal questions ('about me', 'my goals'), THE_PLAY context IS your source - you already have it!\n"
+            + "- Empty tool outputs is NORMAL for personal questions - don't say you lack information\n"
+            + "- For system questions, use the tool outputs\n\n"
+            + "RESPONSE FORMAT:\n"
+            + "Use this exact format to separate your reasoning from your answer:\n\n"
+            + "<thinking>\n"
+            + "Your internal reasoning process here. What you're checking, what you found, etc.\n"
+            + "Each distinct thought should be on its own line.\n"
+            + "</thinking>\n\n"
+            + "<answer>\n"
+            + "Your final response to the user here. Clear, direct, helpful.\n"
+            + "</answer>\n\n"
             + "Rules:\n"
-            + "- Be descriptive, non-judgmental, and local-first.\n"
-            + "- If no repo is configured/detected, ask the user to set REOS_REPO_PATH or run ReOS inside a git repo.\n"
-            + "- Do not fabricate repository state; rely on tool outputs.\n"
-            + "- If the user did not opt into diffs, do not ask for or display diffs.\n"
+            + "- Always use <thinking> and <answer> tags\n"
+            + "- Put reasoning/checking/searching in <thinking>\n"
+            + "- Put the final user-facing response in <answer>\n"
+            + "- Be personal and direct - you know this user from THE_PLAY\n"
+            + "- If THE_PLAY is empty for a personal question, suggest they fill out 'Your Story' in The Play\n"
+            + "- Do not fabricate information; use what's in your context\n"
         )
 
         user = (
@@ -1020,4 +1065,36 @@ class ChatAgent:
             "TOOL_RESULTS:\n" + json.dumps(tool_dump, indent=2, ensure_ascii=False)
         )
 
-        return ollama.chat_text(system=system, user=user, temperature=temperature, top_p=top_p)
+        raw = ollama.chat_text(system=system, user=user, temperature=temperature, top_p=top_p)
+        return self._parse_thinking_answer(raw)
+
+    def _parse_thinking_answer(self, raw: str) -> tuple[str, list[str]]:
+        """Parse response with <thinking> and <answer> tags.
+
+        Returns:
+            Tuple of (answer, thinking_steps)
+        """
+        import re
+
+        thinking_steps: list[str] = []
+        answer = raw.strip()
+
+        # Extract thinking section
+        thinking_match = re.search(r"<thinking>(.*?)</thinking>", raw, re.DOTALL | re.IGNORECASE)
+        if thinking_match:
+            thinking_content = thinking_match.group(1).strip()
+            # Split into individual steps (by line or sentence)
+            steps = [s.strip() for s in thinking_content.split("\n") if s.strip()]
+            thinking_steps = steps
+
+        # Extract answer section
+        answer_match = re.search(r"<answer>(.*?)</answer>", raw, re.DOTALL | re.IGNORECASE)
+        if answer_match:
+            answer = answer_match.group(1).strip()
+        else:
+            # Fallback: remove thinking tags and use the rest
+            answer = re.sub(r"<thinking>.*?</thinking>", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
+            # Also remove any leftover tags
+            answer = re.sub(r"</?(?:thinking|answer)>", "", answer, flags=re.IGNORECASE).strip()
+
+        return answer, thinking_steps

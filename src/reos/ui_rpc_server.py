@@ -52,6 +52,7 @@ from .play_fs import list_beats as play_list_beats
 from .play_fs import list_scenes as play_list_scenes
 from .play_fs import read_me_markdown as play_read_me_markdown
 from .play_fs import remove_attachment as play_remove_attachment
+from .play_fs import write_me_markdown as play_write_me_markdown
 from .play_fs import set_active_act_id as play_set_active_act_id
 from .play_fs import update_act as play_update_act
 from .play_fs import update_beat as play_update_beat
@@ -234,6 +235,7 @@ def _handle_chat_respond(
                         "message_id": message_id,
                         "message_type": "text",
                         "tool_calls": [],
+                        "thinking_steps": [],
                         "pending_approval_id": None,
                         "intent_handled": intent.intent_type,
                     }
@@ -255,6 +257,7 @@ def _handle_chat_respond(
         "message_id": response.message_id,
         "message_type": response.message_type,
         "tool_calls": response.tool_calls,
+        "thinking_steps": response.thinking_steps,
         "pending_approval_id": response.pending_approval_id,
     }
 
@@ -1092,6 +1095,11 @@ def _handle_play_me_read(_db: Database) -> dict[str, Any]:
     return {"markdown": play_read_me_markdown()}
 
 
+def _handle_play_me_write(_db: Database, *, text: str) -> dict[str, Any]:
+    play_write_me_markdown(text)
+    return {"ok": True}
+
+
 def _handle_play_acts_list(_db: Database) -> dict[str, Any]:
     acts, active_id = play_list_acts()
     return {
@@ -1886,6 +1894,14 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
 
         if method == "play/me/read":
             return _jsonrpc_result(req_id=req_id, result=_handle_play_me_read(db))
+
+        if method == "play/me/write":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            text = params.get("text")
+            if not isinstance(text, str):
+                raise RpcError(code=-32602, message="text is required")
+            return _jsonrpc_result(req_id=req_id, result=_handle_play_me_write(db, text=text))
 
         if method == "play/acts/list":
             return _jsonrpc_result(req_id=req_id, result=_handle_play_acts_list(db))

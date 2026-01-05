@@ -330,6 +330,41 @@ function buildUi() {
       inspectionBody.appendChild(toolsSection);
     }
 
+    // Thinking Steps Section
+    if (data.thinking_steps && data.thinking_steps.length > 0) {
+      const thinkingSection = el('div');
+      thinkingSection.style.marginBottom = '16px';
+
+      const thinkingHeader = el('div');
+      thinkingHeader.textContent = '💭 Thinking Steps';
+      thinkingHeader.style.fontWeight = '600';
+      thinkingHeader.style.marginBottom = '8px';
+      thinkingHeader.style.fontSize = '13px';
+      thinkingSection.appendChild(thinkingHeader);
+
+      const thinkingBox = el('div');
+      thinkingBox.style.cssText = `
+        background: rgba(100, 100, 120, 0.2);
+        border: 1px solid rgba(150, 150, 180, 0.3);
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 12px;
+      `;
+
+      data.thinking_steps.forEach((step, i) => {
+        const stepEl = el('div');
+        stepEl.style.cssText = `
+          padding: 6px 0;
+          border-bottom: 1px solid rgba(255,255,255,0.05);
+        `;
+        stepEl.textContent = `${i + 1}. ${step}`;
+        thinkingBox.appendChild(stepEl);
+      });
+
+      thinkingSection.appendChild(thinkingBox);
+      inspectionBody.appendChild(thinkingSection);
+    }
+
     // Metadata Section
     const metaSection = el('div');
     metaSection.style.marginBottom = '16px';
@@ -429,13 +464,54 @@ function buildUi() {
   });
   root.appendChild(playOverlay.element);
 
+  function createCopyButton(getText: () => string): HTMLButtonElement {
+    const btn = el('button') as HTMLButtonElement;
+    btn.className = 'copy-btn';
+    btn.innerHTML = '📋';
+    btn.title = 'Copy to clipboard';
+    btn.style.cssText = `
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background: rgba(255,255,255,0.1);
+      border: none;
+      border-radius: 4px;
+      padding: 4px 6px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s;
+      font-size: 12px;
+    `;
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(getText());
+        btn.innerHTML = '✓';
+        setTimeout(() => { btn.innerHTML = '📋'; }, 1500);
+      } catch {
+        btn.innerHTML = '✗';
+        setTimeout(() => { btn.innerHTML = '📋'; }, 1500);
+      }
+    });
+    return btn;
+  }
+
   function append(role: 'user' | 'reos', text: string) {
     const row = el('div');
     row.className = `chat-row ${role}`;
 
     const bubble = el('div');
     bubble.className = `chat-bubble ${role}`;
+    bubble.style.position = 'relative';
     bubble.textContent = text;
+
+    // Add copy button
+    const copyBtn = createCopyButton(() => text);
+    bubble.appendChild(copyBtn);
+
+    // Show copy button on hover
+    bubble.addEventListener('mouseenter', () => { copyBtn.style.opacity = '1'; });
+    bubble.addEventListener('mouseleave', () => { copyBtn.style.opacity = '0'; });
 
     row.appendChild(bubble);
     chatLog.appendChild(row);
@@ -2088,8 +2164,83 @@ function buildUi() {
       // Update conversation ID for context continuity
       currentConversationId = res.conversation_id;
 
+      // If there are thinking steps, render them as collapsible bubbles before the answer
+      if (res.thinking_steps && res.thinking_steps.length > 0) {
+        const thinkingRow = el('div');
+        thinkingRow.className = 'chat-row reos thinking-row';
+
+        const thinkingBubble = el('div');
+        thinkingBubble.className = 'chat-bubble reos thinking-bubble';
+        thinkingBubble.style.cssText = `
+          position: relative;
+          background: rgba(100, 100, 120, 0.3);
+          border-left: 3px solid rgba(150, 150, 180, 0.5);
+          font-size: 13px;
+          opacity: 0.85;
+        `;
+
+        // Header with toggle
+        const thinkingHeader = el('div');
+        thinkingHeader.style.cssText = `
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          font-weight: 500;
+          margin-bottom: 6px;
+        `;
+        thinkingHeader.innerHTML = '<span class="thinking-toggle">▼</span> <span style="opacity: 0.7;">💭 Thinking...</span>';
+
+        // Content (collapsible)
+        const thinkingContent = el('div');
+        thinkingContent.className = 'thinking-content';
+        thinkingContent.style.cssText = `padding-left: 4px;`;
+
+        res.thinking_steps.forEach((step, i) => {
+          const stepEl = el('div');
+          stepEl.style.cssText = `
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: rgba(255,255,255,0.75);
+          `;
+          stepEl.textContent = step;
+          thinkingContent.appendChild(stepEl);
+        });
+
+        // Toggle collapse
+        let collapsed = false;
+        thinkingHeader.addEventListener('click', () => {
+          collapsed = !collapsed;
+          thinkingContent.style.display = collapsed ? 'none' : 'block';
+          const toggle = thinkingHeader.querySelector('.thinking-toggle');
+          if (toggle) toggle.textContent = collapsed ? '▶' : '▼';
+        });
+
+        // Copy button for thinking
+        const thinkingText = res.thinking_steps.join('\n');
+        const thinkingCopyBtn = createCopyButton(() => thinkingText);
+        thinkingBubble.appendChild(thinkingCopyBtn);
+        thinkingBubble.addEventListener('mouseenter', () => { thinkingCopyBtn.style.opacity = '1'; });
+        thinkingBubble.addEventListener('mouseleave', () => { thinkingCopyBtn.style.opacity = '0'; });
+
+        thinkingBubble.appendChild(thinkingHeader);
+        thinkingBubble.appendChild(thinkingContent);
+        thinkingRow.appendChild(thinkingBubble);
+
+        // Insert thinking bubble before the pending row
+        chatLog.insertBefore(thinkingRow, pending.row);
+      }
+
       pending.bubble.classList.remove('thinking');
+      pending.bubble.style.position = 'relative';
       pending.bubble.textContent = res.answer ?? '(no answer)';
+
+      // Add copy button to response
+      const answerText = res.answer ?? '(no answer)';
+      const copyBtn = createCopyButton(() => answerText);
+      pending.bubble.appendChild(copyBtn);
+      pending.bubble.addEventListener('mouseenter', () => { copyBtn.style.opacity = '1'; });
+      pending.bubble.addEventListener('mouseleave', () => { copyBtn.style.opacity = '0'; });
 
       // Store response data for inspector and make clickable
       messageDataMap.set(pending.bubble, res);

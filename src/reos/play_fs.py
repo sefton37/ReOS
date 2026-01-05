@@ -116,6 +116,12 @@ def read_me_markdown() -> str:
     return _me_path().read_text(encoding="utf-8", errors="replace")
 
 
+def write_me_markdown(text: str) -> None:
+    """Write the me.md file (Your Story / Play level content)."""
+    ensure_play_skeleton()
+    _me_path().write_text(text, encoding="utf-8")
+
+
 def _load_json(path: Path) -> _JSON:
     try:
         raw = path.read_text(encoding="utf-8", errors="replace")
