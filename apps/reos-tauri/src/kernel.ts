@@ -84,13 +84,25 @@ export interface AuthResult {
 }
 
 /**
- * Authenticate user via PAM.
+ * Get the current system username.
+ * @returns System username or null if unavailable
+ */
+export async function getSystemUsername(): Promise<string | null> {
+  try {
+    return await invoke<string>('get_system_username');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Authenticate user via Polkit (native system dialog).
  * @param username - Linux username
- * @param password - User password
+ * @param _password - Ignored, kept for API compatibility
  * @returns Authentication result
  */
-export async function login(username: string, password: string): Promise<AuthResult> {
-  const result = await invoke<AuthResult>('auth_login', { username, password });
+export async function login(username: string, _password?: string | null): Promise<AuthResult> {
+  const result = await invoke<AuthResult>('auth_login', { username });
 
   if (result.success && result.session_token && result.username) {
     setSession(result.session_token, result.username);

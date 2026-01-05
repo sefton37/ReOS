@@ -29,7 +29,6 @@ async fn auth_login(
     state: State<'_, KernelState>,
     auth_state: State<'_, AuthState>,
     username: String,
-    password: String,
 ) -> Result<AuthResult, String> {
     // Validate username format (prevent injection)
     if username.is_empty() || username.len() > 32 {
@@ -41,7 +40,7 @@ async fn auth_login(
         });
     }
 
-    // Forward to Python kernel for PAM authentication
+    // Forward to Python kernel for Polkit authentication
     let state_clone = state.0.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let mut guard = state_clone.lock().map_err(|_| "lock poisoned".to_string())?;
@@ -54,12 +53,11 @@ async fn auth_login(
             .as_mut()
             .ok_or_else(|| KernelError::NotStarted.to_string())?;
 
-        // Call Python's auth/login endpoint
+        // Call Python's auth/login endpoint (Polkit handles auth via system dialog)
         proc.request(
             "auth/login",
             json!({
                 "username": username,
-                "password": password,
             }),
         )
         .map_err(|e| e.to_string())
@@ -67,8 +65,11 @@ async fn auth_login(
     .await
     .map_err(|e| format!("auth_login join error: {e}"))??;
 
-    // Parse response from Python
-    let auth_result: AuthResult = serde_json::from_value(result)
+    // Parse response from Python - extract the 'result' field from JSON-RPC envelope
+    let result_inner = result
+        .get("result")
+        .ok_or_else(|| "No result field in JSON-RPC response".to_string())?;
+    let auth_result: AuthResult = serde_json::from_value(result_inner.clone())
         .map_err(|e| format!("Failed to parse auth response: {e}"))?;
 
     // If successful, store the session in Rust
@@ -112,6 +113,14 @@ fn auth_refresh(auth_state: State<'_, AuthState>, session_token: String) -> Resu
         }
         None => Err("Session not found or expired".to_string()),
     }
+}
+
+/// Get the current system username
+#[tauri::command]
+fn get_system_username() -> Result<String, String> {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .map_err(|_| "Could not determine username".to_string())
 }
 
 /// Get current session info (for UI display)
@@ -220,6 +229,7 @@ fn main() {
             auth_validate,
             auth_refresh,
             auth_get_session,
+            get_system_username,
             // Kernel commands
             kernel_start,
             kernel_request,

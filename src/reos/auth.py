@@ -1,13 +1,15 @@
 """Authentication module for ReOS.
 
 Handles:
-- PAM authentication against Linux system
+- Polkit authentication via native system dialog
 - Session token generation
-- Encryption key derivation using Argon2id
+- Encryption key derivation using Scrypt
 - Per-user session management
 
 Security Notes:
-- Credentials are validated locally via PAM, never stored
+- Uses Polkit for authentication (freedesktop.org standard)
+- Shows native system authentication dialog
+- Integrates with PAM, fingerprint, smartcard, etc.
 - Encryption keys derived from password, stored only in memory
 - Session tokens are 256-bit cryptographically random
 """
@@ -17,13 +19,13 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import subprocess
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import pam
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
@@ -120,22 +122,66 @@ def get_session_store() -> SessionStore:
     return _session_store
 
 
-def authenticate_pam(username: str, password: str) -> bool:
-    """Authenticate a user against Linux PAM.
+def authenticate_polkit(username: str) -> bool:
+    """Authenticate user via Polkit (native system dialog).
+
+    This shows the system's native authentication dialog, which:
+    - Integrates with PAM for password verification
+    - Supports fingerprint, smartcard, and other auth methods
+    - Is the freedesktop.org standard for desktop authentication
+    - Is what Linux users expect from native applications
+
+    Uses the com.reos.authenticate polkit action which always requires
+    authentication (auth_self), even if the user is already logged in.
 
     Args:
-        username: Linux username
-        password: User's password
+        username: Linux username to authenticate
 
     Returns:
         True if authentication succeeded, False otherwise
 
     Security:
-        - Credentials are validated locally via PAM
-        - Password is not stored or logged
+        - Uses pkcheck with custom polkit action
+        - No password handling in our code
+        - System handles all credential verification
     """
-    p = pam.pam()
-    return p.authenticate(username, password, service="login")
+    try:
+        # Ensure required environment variables are passed for Polkit dialog
+        env = os.environ.copy()
+
+        # These are required for the Polkit agent to show the dialog
+        uid = os.getuid()
+        if 'DISPLAY' not in env:
+            env['DISPLAY'] = ':0'
+        if 'XDG_RUNTIME_DIR' not in env:
+            env['XDG_RUNTIME_DIR'] = f'/run/user/{uid}'
+        if 'DBUS_SESSION_BUS_ADDRESS' not in env:
+            env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path=/run/user/{uid}/bus'
+
+        # Get the process ID for pkcheck
+        pid = os.getpid()
+
+        # Use pkcheck to trigger authentication for our custom action
+        # --action-id: our custom polkit action that requires auth_self
+        # --process: the current process
+        # --allow-user-interaction: show the auth dialog
+        result = subprocess.run(
+            [
+                "pkcheck",
+                "--action-id", "com.reos.authenticate",
+                "--process", str(pid),
+                "--allow-user-interaction",
+            ],
+            capture_output=True,
+            timeout=120,  # 2 minute timeout for user to authenticate
+            env=env,
+        )
+
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+    except Exception:
+        return False
 
 
 def derive_encryption_key(username: str, password: str) -> bytes:
@@ -182,31 +228,30 @@ def generate_session_token() -> str:
     return secrets.token_hex(32)
 
 
-def create_session(username: str, password: str) -> Session | None:
-    """Authenticate user and create a new session.
+def create_session_polkit(username: str) -> Session | None:
+    """Authenticate user via Polkit and create a new session.
+
+    Note: Since Polkit handles authentication without exposing the password,
+    we cannot derive an encryption key from it. For encrypted storage,
+    a separate key setup step would be needed.
 
     Args:
         username: Linux username
-        password: User's password
 
     Returns:
         Session if authentication succeeded, None otherwise
-
-    Security:
-        - PAM validates credentials
-        - Encryption key derived and stored only in memory
-        - Password is not stored
     """
-    # Authenticate via PAM
-    if not authenticate_pam(username, password):
+    # Authenticate via Polkit (shows system dialog)
+    if not authenticate_polkit(username):
         return None
-
-    # Derive encryption key
-    key_material = derive_encryption_key(username, password)
 
     # Generate session token
     token = generate_session_token()
     now = datetime.now(timezone.utc)
+
+    # For Polkit auth, we don't have access to password for key derivation
+    # Use a placeholder - encrypted storage requires separate key setup
+    key_material = secrets.token_bytes(32)
 
     return Session(
         token=token,
@@ -217,12 +262,13 @@ def create_session(username: str, password: str) -> Session | None:
     )
 
 
-def login(username: str, password: str) -> dict[str, Any]:
-    """Authenticate and create a session.
+def login_polkit(username: str) -> dict[str, Any]:
+    """Authenticate via Polkit and create a session.
+
+    Shows the native system authentication dialog.
 
     Args:
         username: Linux username
-        password: User's password
 
     Returns:
         Dict with success status, session_token, username, or error
@@ -241,12 +287,13 @@ def login(username: str, password: str) -> dict[str, Any]:
             "error": "Invalid username format",
         }
 
-    # Create session (authenticates via PAM)
-    session = create_session(username, password)
+    # Create session (authenticates via Polkit)
+    session = create_session_polkit(username)
+
     if session is None:
         return {
             "success": False,
-            "error": "Authentication failed",
+            "error": "Authentication cancelled or failed",
         }
 
     # Store session
@@ -261,6 +308,22 @@ def login(username: str, password: str) -> dict[str, Any]:
         "session_token": session.token,
         "username": session.username,
     }
+
+
+# Keep old function name for compatibility
+def login(username: str, password: str | None = None) -> dict[str, Any]:
+    """Authenticate and create a session.
+
+    Uses Polkit for authentication (password parameter is ignored).
+
+    Args:
+        username: Linux username
+        password: Ignored - Polkit handles authentication
+
+    Returns:
+        Dict with success status, session_token, username, or error
+    """
+    return login_polkit(username)
 
 
 def logout(session_token: str) -> dict[str, Any]:

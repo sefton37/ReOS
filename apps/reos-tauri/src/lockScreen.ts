@@ -1,33 +1,40 @@
 /**
  * Lock Screen for ReOS
  *
- * Provides login UI and session lock functionality.
- * Used for:
- * - Initial login on app launch
- * - Re-authentication after session expiry
- * - Manual lock (via system sleep/lock events)
+ * Uses Polkit for authentication - the system's native auth dialog.
+ * This is the Linux-native way to authenticate users, supporting:
+ * - Password authentication via PAM
+ * - Fingerprint readers
+ * - Smartcards
+ * - Any other PAM-configured auth method
  */
-import { login, getSessionUsername, isAuthenticated, validateSession } from './kernel';
+import { login, getSessionUsername, isAuthenticated, validateSession, getSystemUsername } from './kernel';
 import { el } from './dom';
 
 export interface LockScreenOptions {
   /** Called after successful login */
   onLogin: (username: string) => void;
-  /** If true, shows as re-authentication (username pre-filled, not editable) */
+  /** If true, shows as re-authentication (session expired) */
   isReauth?: boolean;
-  /** Username to pre-fill for re-authentication */
+  /** Username to authenticate */
   username?: string;
 }
 
 /**
  * Show the login/lock screen.
- * Replaces the app content with a login form.
+ * When user clicks authenticate, triggers Polkit system dialog.
  *
  * @param root - The root element to render into
  * @param options - Lock screen options
  */
-export function showLockScreen(root: HTMLElement, options: LockScreenOptions): void {
+export async function showLockScreen(root: HTMLElement, options: LockScreenOptions): Promise<void> {
   root.innerHTML = '';
+
+  // Get system username if not provided
+  let username = options.username;
+  if (!username) {
+    username = await getSystemUsername() || '';
+  }
 
   const container = el('div');
   container.className = 'lock-screen';
@@ -50,14 +57,12 @@ export function showLockScreen(root: HTMLElement, options: LockScreenOptions): v
     padding: 40px;
     width: 320px;
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    text-align: center;
   `;
 
   // Logo/Title
   const logo = el('div');
-  logo.style.cssText = `
-    text-align: center;
-    margin-bottom: 32px;
-  `;
+  logo.style.cssText = `margin-bottom: 32px;`;
 
   const logoText = el('div');
   logoText.textContent = 'ReOS';
@@ -69,7 +74,7 @@ export function showLockScreen(root: HTMLElement, options: LockScreenOptions): v
   `;
 
   const subtitle = el('div');
-  subtitle.textContent = options.isReauth ? 'Session Locked' : 'Natural Language Linux';
+  subtitle.textContent = options.isReauth ? 'Session Expired' : 'Natural Language Linux';
   subtitle.style.cssText = `
     font-size: 14px;
     color: rgba(148, 163, 184, 0.8);
@@ -79,87 +84,34 @@ export function showLockScreen(root: HTMLElement, options: LockScreenOptions): v
   logo.appendChild(logoText);
   logo.appendChild(subtitle);
 
-  // Form
-  const form = el('form') as HTMLFormElement;
-  form.style.cssText = `
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  `;
+  // User info
+  const userSection = el('div');
+  userSection.style.cssText = `margin-bottom: 24px;`;
 
-  // Username field
-  const usernameGroup = el('div');
-  usernameGroup.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
+  const userIcon = el('div');
+  userIcon.textContent = '👤';
+  userIcon.style.cssText = `font-size: 48px; margin-bottom: 12px;`;
 
-  const usernameLabel = el('label');
-  usernameLabel.textContent = 'Username';
-  usernameLabel.style.cssText = `
-    font-size: 12px;
+  const userLabel = el('div');
+  userLabel.textContent = username || 'Unknown User';
+  userLabel.style.cssText = `
+    font-size: 18px;
     font-weight: 500;
-    color: #94a3b8;
+    color: #e2e8f0;
   `;
 
-  const usernameInput = el('input') as HTMLInputElement;
-  usernameInput.type = 'text';
-  usernameInput.name = 'username';
-  usernameInput.autocomplete = 'username';
-  usernameInput.placeholder = 'Linux username';
-  usernameInput.required = true;
-  if (options.username) {
-    usernameInput.value = options.username;
-    if (options.isReauth) {
-      usernameInput.readOnly = true;
-      usernameInput.style.opacity = '0.7';
-    }
-  }
-  usernameInput.style.cssText = `
-    padding: 12px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    background: rgba(15, 23, 42, 0.6);
-    color: #f1f5f9;
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s;
+  userSection.appendChild(userIcon);
+  userSection.appendChild(userLabel);
+
+  // Info text
+  const infoText = el('div');
+  infoText.textContent = 'Click below to authenticate with your system credentials';
+  infoText.style.cssText = `
+    font-size: 13px;
+    color: rgba(148, 163, 184, 0.7);
+    margin-bottom: 24px;
+    line-height: 1.5;
   `;
-  usernameInput.addEventListener('focus', () => {
-    usernameInput.style.borderColor = 'rgba(59, 130, 246, 0.5)';
-  });
-  usernameInput.addEventListener('blur', () => {
-    usernameInput.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-  });
-
-  usernameGroup.appendChild(usernameLabel);
-  usernameGroup.appendChild(usernameInput);
-
-  // Password field
-  const passwordGroup = el('div');
-  passwordGroup.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
-
-  const passwordLabel = el('label');
-  passwordLabel.textContent = 'Password';
-  passwordLabel.style.cssText = `
-    font-size: 12px;
-    font-weight: 500;
-    color: #94a3b8;
-  `;
-
-  const passwordInput = el('input') as HTMLInputElement;
-  passwordInput.type = 'password';
-  passwordInput.name = 'password';
-  passwordInput.autocomplete = 'current-password';
-  passwordInput.placeholder = 'Linux password';
-  passwordInput.required = true;
-  passwordInput.style.cssText = usernameInput.style.cssText;
-  passwordInput.addEventListener('focus', () => {
-    passwordInput.style.borderColor = 'rgba(59, 130, 246, 0.5)';
-  });
-  passwordInput.addEventListener('blur', () => {
-    passwordInput.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-  });
-
-  passwordGroup.appendChild(passwordLabel);
-  passwordGroup.appendChild(passwordInput);
 
   // Error message
   const errorMsg = el('div');
@@ -172,92 +124,71 @@ export function showLockScreen(root: HTMLElement, options: LockScreenOptions): v
     border-radius: 6px;
     color: #fca5a5;
     font-size: 13px;
+    margin-bottom: 16px;
   `;
 
-  // Submit button
-  const submitBtn = el('button') as HTMLButtonElement;
-  submitBtn.type = 'submit';
-  submitBtn.textContent = options.isReauth ? 'Unlock' : 'Login';
-  submitBtn.style.cssText = `
-    padding: 12px;
+  // Authenticate button
+  const authBtn = el('button') as HTMLButtonElement;
+  authBtn.type = 'button';
+  authBtn.textContent = 'Authenticate';
+  authBtn.style.cssText = `
+    padding: 14px 32px;
     border: none;
     border-radius: 8px;
     background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
     color: white;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     cursor: pointer;
     transition: opacity 0.2s, transform 0.1s;
-    margin-top: 8px;
+    width: 100%;
   `;
-  submitBtn.addEventListener('mouseenter', () => {
-    submitBtn.style.opacity = '0.9';
+  authBtn.addEventListener('mouseenter', () => {
+    authBtn.style.opacity = '0.9';
   });
-  submitBtn.addEventListener('mouseleave', () => {
-    submitBtn.style.opacity = '1';
-  });
-  submitBtn.addEventListener('mousedown', () => {
-    submitBtn.style.transform = 'scale(0.98)';
-  });
-  submitBtn.addEventListener('mouseup', () => {
-    submitBtn.style.transform = 'scale(1)';
+  authBtn.addEventListener('mouseleave', () => {
+    authBtn.style.opacity = '1';
   });
 
   // Loading state
   let isLoading = false;
   const setLoading = (loading: boolean) => {
     isLoading = loading;
-    submitBtn.disabled = loading;
-    submitBtn.textContent = loading ? 'Authenticating...' : (options.isReauth ? 'Unlock' : 'Login');
-    submitBtn.style.opacity = loading ? '0.6' : '1';
-    usernameInput.disabled = loading;
-    passwordInput.disabled = loading;
+    authBtn.disabled = loading;
+    authBtn.textContent = loading ? 'Waiting for authentication...' : 'Authenticate';
+    authBtn.style.opacity = loading ? '0.6' : '1';
   };
 
-  // Form submit handler
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (isLoading) return;
-
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value;
-
-    if (!username || !password) {
-      errorMsg.textContent = 'Please enter both username and password';
-      errorMsg.style.display = 'block';
-      return;
-    }
+  // Click handler - triggers Polkit auth
+  authBtn.addEventListener('click', async () => {
+    if (isLoading || !username) return;
 
     setLoading(true);
     errorMsg.style.display = 'none';
 
     try {
-      const result = await login(username, password);
+      // This triggers the Polkit system dialog
+      const result = await login(username, null);
 
       if (result.success) {
         options.onLogin(username);
       } else {
-        errorMsg.textContent = result.error || 'Authentication failed';
+        errorMsg.textContent = result.error || 'Authentication cancelled or failed';
         errorMsg.style.display = 'block';
-        passwordInput.value = '';
-        passwordInput.focus();
       }
     } catch (err) {
-      errorMsg.textContent = err instanceof Error ? err.message : 'Login failed';
+      errorMsg.textContent = err instanceof Error ? err.message : 'Authentication failed';
       errorMsg.style.display = 'block';
-      passwordInput.value = '';
     } finally {
       setLoading(false);
     }
   });
 
-  form.appendChild(usernameGroup);
-  form.appendChild(passwordGroup);
-  form.appendChild(errorMsg);
-  form.appendChild(submitBtn);
-
   card.appendChild(logo);
-  card.appendChild(form);
+  card.appendChild(userSection);
+  card.appendChild(infoText);
+  card.appendChild(errorMsg);
+  card.appendChild(authBtn);
   container.appendChild(card);
 
   // Security note
@@ -269,29 +200,21 @@ export function showLockScreen(root: HTMLElement, options: LockScreenOptions): v
     text-align: center;
     max-width: 280px;
   `;
-  secNote.textContent = 'Authenticated via Linux PAM. Your password is validated locally and never stored.';
+  secNote.textContent = 'Authentication via Polkit using your system credentials. Supports password, fingerprint, and smartcard.';
   container.appendChild(secNote);
 
   root.appendChild(container);
-
-  // Focus appropriate field
-  if (options.isReauth || options.username) {
-    passwordInput.focus();
-  } else {
-    usernameInput.focus();
-  }
 }
 
 /**
  * Show lock screen overlay on top of existing content.
- * Used when session expires or device locks.
+ * Used when session expires.
  *
  * @param onUnlock - Called after successful re-authentication
  */
-export function showLockOverlay(onUnlock: () => void): void {
+export async function showLockOverlay(onUnlock: () => void): Promise<void> {
   const username = getSessionUsername();
   if (!username) {
-    // No session, trigger full reload to show login
     window.location.reload();
     return;
   }
@@ -329,7 +252,7 @@ export function showLockOverlay(onUnlock: () => void): void {
   lockIcon.style.cssText = `font-size: 48px; margin-bottom: 16px;`;
 
   const title = el('div');
-  title.textContent = 'Session Locked';
+  title.textContent = 'Session Expired';
   title.style.cssText = `
     font-size: 18px;
     font-weight: 600;
@@ -345,23 +268,6 @@ export function showLockOverlay(onUnlock: () => void): void {
     margin-bottom: 20px;
   `;
 
-  const passwordInput = el('input') as HTMLInputElement;
-  passwordInput.type = 'password';
-  passwordInput.placeholder = 'Password';
-  passwordInput.autocomplete = 'current-password';
-  passwordInput.style.cssText = `
-    width: 100%;
-    box-sizing: border-box;
-    padding: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    background: rgba(15, 23, 42, 0.6);
-    color: #f1f5f9;
-    font-size: 14px;
-    margin-bottom: 12px;
-    outline: none;
-  `;
-
   const errorMsg = el('div');
   errorMsg.style.cssText = `
     display: none;
@@ -371,7 +277,7 @@ export function showLockOverlay(onUnlock: () => void): void {
   `;
 
   const unlockBtn = el('button') as HTMLButtonElement;
-  unlockBtn.textContent = 'Unlock';
+  unlockBtn.textContent = 'Re-authenticate';
   unlockBtn.style.cssText = `
     width: 100%;
     padding: 12px;
@@ -388,20 +294,13 @@ export function showLockOverlay(onUnlock: () => void): void {
   const handleUnlock = async () => {
     if (isLoading) return;
 
-    const password = passwordInput.value;
-    if (!password) {
-      errorMsg.textContent = 'Please enter your password';
-      errorMsg.style.display = 'block';
-      return;
-    }
-
     isLoading = true;
-    unlockBtn.textContent = 'Unlocking...';
+    unlockBtn.textContent = 'Waiting for authentication...';
     unlockBtn.disabled = true;
     errorMsg.style.display = 'none';
 
     try {
-      const result = await login(username, password);
+      const result = await login(username, null);
 
       if (result.success) {
         overlay.remove();
@@ -409,37 +308,27 @@ export function showLockOverlay(onUnlock: () => void): void {
       } else {
         errorMsg.textContent = result.error || 'Authentication failed';
         errorMsg.style.display = 'block';
-        passwordInput.value = '';
-        passwordInput.focus();
       }
     } catch (err) {
-      errorMsg.textContent = err instanceof Error ? err.message : 'Unlock failed';
+      errorMsg.textContent = err instanceof Error ? err.message : 'Authentication failed';
       errorMsg.style.display = 'block';
-      passwordInput.value = '';
     } finally {
       isLoading = false;
-      unlockBtn.textContent = 'Unlock';
+      unlockBtn.textContent = 'Re-authenticate';
       unlockBtn.disabled = false;
     }
   };
 
-  passwordInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      handleUnlock();
-    }
-  });
   unlockBtn.addEventListener('click', handleUnlock);
 
   card.appendChild(lockIcon);
   card.appendChild(title);
   card.appendChild(userDisplay);
-  card.appendChild(passwordInput);
   card.appendChild(errorMsg);
   card.appendChild(unlockBtn);
   overlay.appendChild(card);
 
   document.body.appendChild(overlay);
-  passwordInput.focus();
 }
 
 /**
@@ -463,7 +352,7 @@ export async function checkSessionOrLogin(
 ): Promise<boolean> {
   // Check if we have a session token
   if (!isAuthenticated()) {
-    showLockScreen(root, { onLogin });
+    await showLockScreen(root, { onLogin });
     return false;
   }
 
@@ -471,7 +360,7 @@ export async function checkSessionOrLogin(
   const isValid = await validateSession();
   if (!isValid) {
     const username = getSessionUsername();
-    showLockScreen(root, {
+    await showLockScreen(root, {
       onLogin,
       isReauth: !!username,
       username: username || undefined,

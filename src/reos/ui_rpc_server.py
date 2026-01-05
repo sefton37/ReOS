@@ -103,15 +103,14 @@ def _write(obj: Any) -> None:
 def _handle_auth_login(
     *,
     username: str,
-    password: str,
+    password: str | None = None,
 ) -> dict[str, Any]:
-    """Authenticate user via PAM and create session.
+    """Authenticate user via Polkit and create session.
 
     Security:
-    - Credentials validated locally via Linux PAM
-    - Encryption key derived from password (Scrypt)
+    - Uses Polkit for authentication (native system dialog)
+    - Integrates with PAM, fingerprint, smartcard, etc.
     - Session token returned to Rust for storage
-    - Password never stored, only used for authentication
     """
     # Rate limit login attempts
     try:
@@ -1518,16 +1517,15 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
         if method == "ping":
             return _jsonrpc_result(req_id=req_id, result={"ok": True})
 
-        # Authentication methods (PAM + session management)
+        # Authentication methods (Polkit - native system dialog)
         if method == "auth/login":
             if not isinstance(params, dict):
                 raise RpcError(code=-32602, message="params must be an object")
             username = params.get("username")
-            password = params.get("password")
             if not isinstance(username, str) or not username:
                 raise RpcError(code=-32602, message="username is required")
-            if not isinstance(password, str) or not password:
-                raise RpcError(code=-32602, message="password is required")
+            # Password is optional - Polkit handles authentication via system dialog
+            password = params.get("password")
             return _jsonrpc_result(
                 req_id=req_id,
                 result=_handle_auth_login(username=username, password=password),
