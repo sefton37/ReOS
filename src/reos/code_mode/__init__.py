@@ -86,6 +86,31 @@ from reos.code_mode.diff_utils import (
     generate_edit_diff,
 )
 
+# Repository Map (Semantic Code Understanding)
+from reos.code_mode.symbol_extractor import (
+    SymbolExtractor,
+    Symbol,
+    SymbolKind,
+    Location,
+    FileNode,
+    DependencyEdge,
+    compute_file_hash,
+)
+from reos.code_mode.dependency_graph import (
+    DependencyGraphBuilder,
+    ImportInfo,
+)
+from reos.code_mode.repo_map import (
+    RepoMap,
+    IndexResult,
+    FileContext,
+)
+from reos.code_mode.embeddings import (
+    EmbeddingManager,
+    EmbeddingError,
+    EmbeddingResult,
+)
+
 __all__ = [
     # Sandbox
     "CodeSandbox",
@@ -140,4 +165,20 @@ __all__ = [
     "Hunk",
     "generate_diff",
     "generate_edit_diff",
+    # Repository Map
+    "SymbolExtractor",
+    "Symbol",
+    "SymbolKind",
+    "Location",
+    "FileNode",
+    "DependencyEdge",
+    "compute_file_hash",
+    "DependencyGraphBuilder",
+    "ImportInfo",
+    "RepoMap",
+    "IndexResult",
+    "FileContext",
+    "EmbeddingManager",
+    "EmbeddingError",
+    "EmbeddingResult",
 ]

@@ -841,6 +841,168 @@ def _handle_code_diff_clear(
 
 
 # -------------------------------------------------------------------------
+# Repository Map handlers (Code Mode - semantic code understanding)
+# -------------------------------------------------------------------------
+
+# Track active RepoMap instances per session
+_repo_map_instances: dict[str, "RepoMap"] = {}
+
+
+def _get_repo_map(db: Database, session_id: str) -> "RepoMap":
+    """Get or create a RepoMap instance for a session."""
+    from pathlib import Path
+
+    from .code_mode import CodeSandbox, RepoMap
+
+    if session_id in _repo_map_instances:
+        return _repo_map_instances[session_id]
+
+    # Get repo path from session/sandbox
+    if session_id not in _diff_preview_managers:
+        raise ValueError(f"No sandbox found for session {session_id}")
+
+    sandbox = _diff_preview_managers[session_id].sandbox
+    repo_map = RepoMap(sandbox, db)
+    _repo_map_instances[session_id] = repo_map
+    return repo_map
+
+
+def _handle_code_map_index(
+    db: Database,
+    *,
+    session_id: str,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Index or re-index the repository for semantic search."""
+    try:
+        repo_map = _get_repo_map(db, session_id)
+        result = repo_map.index_repo(force=force)
+        return result.to_dict()
+    except ValueError as e:
+        return {"error": str(e), "indexed": 0, "total_files": 0}
+
+
+def _handle_code_map_search(
+    db: Database,
+    *,
+    session_id: str,
+    query: str,
+    kind: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Search for symbols by name."""
+    try:
+        repo_map = _get_repo_map(db, session_id)
+        symbols = repo_map.find_symbol(query, kind=kind)[:limit]
+        return {
+            "symbols": [s.to_dict() for s in symbols],
+            "count": len(symbols),
+        }
+    except ValueError as e:
+        return {"error": str(e), "symbols": [], "count": 0}
+
+
+def _handle_code_map_find_symbol(
+    db: Database,
+    *,
+    session_id: str,
+    name: str,
+) -> dict[str, Any]:
+    """Find symbol by exact name."""
+    try:
+        repo_map = _get_repo_map(db, session_id)
+        symbols = repo_map.find_symbol_exact(name)
+        return {
+            "symbols": [s.to_dict() for s in symbols],
+            "count": len(symbols),
+        }
+    except ValueError as e:
+        return {"error": str(e), "symbols": [], "count": 0}
+
+
+def _handle_code_map_find_callers(
+    db: Database,
+    *,
+    session_id: str,
+    symbol_name: str,
+    file_path: str,
+) -> dict[str, Any]:
+    """Find all callers of a symbol."""
+    try:
+        repo_map = _get_repo_map(db, session_id)
+        callers = repo_map.find_callers(symbol_name, file_path)
+        return {
+            "callers": [loc.to_dict() for loc in callers],
+            "count": len(callers),
+        }
+    except ValueError as e:
+        return {"error": str(e), "callers": [], "count": 0}
+
+
+def _handle_code_map_file_context(
+    db: Database,
+    *,
+    session_id: str,
+    file_path: str,
+) -> dict[str, Any]:
+    """Get context for a file (symbols, dependencies)."""
+    try:
+        repo_map = _get_repo_map(db, session_id)
+        context = repo_map.get_file_context(file_path)
+        if context is None:
+            return {"error": "File not indexed", "context": None}
+        return {"context": context.to_dict()}
+    except ValueError as e:
+        return {"error": str(e), "context": None}
+
+
+def _handle_code_map_relevant_context(
+    db: Database,
+    *,
+    session_id: str,
+    query: str,
+    token_budget: int = 800,
+) -> dict[str, Any]:
+    """Get relevant code context for a query."""
+    try:
+        repo_map = _get_repo_map(db, session_id)
+        context = repo_map.get_relevant_context(query, token_budget=token_budget)
+        return {"context": context}
+    except ValueError as e:
+        return {"error": str(e), "context": ""}
+
+
+def _handle_code_map_stats(
+    db: Database,
+    *,
+    session_id: str,
+) -> dict[str, Any]:
+    """Get statistics about the repository index."""
+    try:
+        repo_map = _get_repo_map(db, session_id)
+        stats = repo_map.get_stats()
+        return {"stats": stats}
+    except ValueError as e:
+        return {"error": str(e), "stats": {}}
+
+
+def _handle_code_map_clear(
+    db: Database,
+    *,
+    session_id: str,
+) -> dict[str, Any]:
+    """Clear the repository index."""
+    try:
+        repo_map = _get_repo_map(db, session_id)
+        repo_map.clear_index()
+        if session_id in _repo_map_instances:
+            del _repo_map_instances[session_id]
+        return {"ok": True}
+    except ValueError as e:
+        return {"error": str(e), "ok": False}
+
+
+# -------------------------------------------------------------------------
 # Streaming execution handlers (Phase 4)
 # -------------------------------------------------------------------------
 
@@ -3588,6 +3750,126 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             return _jsonrpc_result(
                 req_id=req_id,
                 result=_handle_code_diff_clear(db, session_id=session_id),
+            )
+
+        # -------------------------------------------------------------------------
+        # Repository Map methods (Code Mode - semantic code understanding)
+        # -------------------------------------------------------------------------
+
+        if method == "code/map/index":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_id = params.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                raise RpcError(code=-32602, message="session_id is required")
+            force = params.get("force", False)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_map_index(db, session_id=session_id, force=bool(force)),
+            )
+
+        if method == "code/map/search":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_id = params.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                raise RpcError(code=-32602, message="session_id is required")
+            query = params.get("query")
+            if not isinstance(query, str) or not query:
+                raise RpcError(code=-32602, message="query is required")
+            kind = params.get("kind")
+            limit = params.get("limit", 20)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_map_search(
+                    db, session_id=session_id, query=query, kind=kind, limit=int(limit)
+                ),
+            )
+
+        if method == "code/map/find_symbol":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_id = params.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                raise RpcError(code=-32602, message="session_id is required")
+            name = params.get("name")
+            if not isinstance(name, str) or not name:
+                raise RpcError(code=-32602, message="name is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_map_find_symbol(db, session_id=session_id, name=name),
+            )
+
+        if method == "code/map/find_callers":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_id = params.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                raise RpcError(code=-32602, message="session_id is required")
+            symbol_name = params.get("symbol_name")
+            if not isinstance(symbol_name, str) or not symbol_name:
+                raise RpcError(code=-32602, message="symbol_name is required")
+            file_path = params.get("file_path")
+            if not isinstance(file_path, str) or not file_path:
+                raise RpcError(code=-32602, message="file_path is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_map_find_callers(
+                    db, session_id=session_id, symbol_name=symbol_name, file_path=file_path
+                ),
+            )
+
+        if method == "code/map/file_context":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_id = params.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                raise RpcError(code=-32602, message="session_id is required")
+            file_path = params.get("file_path")
+            if not isinstance(file_path, str) or not file_path:
+                raise RpcError(code=-32602, message="file_path is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_map_file_context(db, session_id=session_id, file_path=file_path),
+            )
+
+        if method == "code/map/relevant_context":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_id = params.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                raise RpcError(code=-32602, message="session_id is required")
+            query = params.get("query")
+            if not isinstance(query, str) or not query:
+                raise RpcError(code=-32602, message="query is required")
+            token_budget = params.get("token_budget", 800)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_map_relevant_context(
+                    db, session_id=session_id, query=query, token_budget=int(token_budget)
+                ),
+            )
+
+        if method == "code/map/stats":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_id = params.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                raise RpcError(code=-32602, message="session_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_map_stats(db, session_id=session_id),
+            )
+
+        if method == "code/map/clear":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_id = params.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                raise RpcError(code=-32602, message="session_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_map_clear(db, session_id=session_id),
             )
 
         raise RpcError(code=-32601, message=f"Method not found: {method}")

@@ -218,6 +218,92 @@ class Database:
             """
         )
 
+        # -------------------------------------------------------------------------
+        # Repository Map tables (Code Mode - semantic code understanding)
+        # -------------------------------------------------------------------------
+
+        # File index with hash for cache invalidation
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS repo_map_files (
+                id INTEGER PRIMARY KEY,
+                repo_path TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                language TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                indexed_at TEXT NOT NULL,
+                UNIQUE(repo_path, file_path)
+            )
+            """
+        )
+
+        # Symbol table (functions, classes, methods, etc.)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS repo_symbols (
+                id INTEGER PRIMARY KEY,
+                file_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                line_start INTEGER NOT NULL,
+                line_end INTEGER NOT NULL,
+                column_start INTEGER DEFAULT 0,
+                column_end INTEGER DEFAULT 0,
+                parent TEXT,
+                signature TEXT,
+                docstring TEXT,
+                decorators TEXT,
+                FOREIGN KEY (file_id) REFERENCES repo_map_files(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_repo_symbols_name ON repo_symbols(name)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_repo_symbols_kind ON repo_symbols(kind)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_repo_symbols_file ON repo_symbols(file_id)"
+        )
+
+        # Dependency edges (import relationships)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS repo_dependencies (
+                id INTEGER PRIMARY KEY,
+                from_file_id INTEGER NOT NULL,
+                to_file_id INTEGER NOT NULL,
+                import_type TEXT NOT NULL,
+                symbols TEXT,
+                FOREIGN KEY (from_file_id) REFERENCES repo_map_files(id) ON DELETE CASCADE,
+                FOREIGN KEY (to_file_id) REFERENCES repo_map_files(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_repo_deps_from ON repo_dependencies(from_file_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_repo_deps_to ON repo_dependencies(to_file_id)"
+        )
+
+        # Embeddings for semantic search
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS repo_embeddings (
+                id INTEGER PRIMARY KEY,
+                symbol_id INTEGER NOT NULL,
+                embedding BLOB NOT NULL,
+                model TEXT NOT NULL DEFAULT 'nomic-embed-text',
+                FOREIGN KEY (symbol_id) REFERENCES repo_symbols(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_repo_embeddings_symbol ON repo_embeddings(symbol_id)"
+        )
+
         conn.commit()
 
     def set_active_persona_id(self, *, persona_id: str | None) -> None:
