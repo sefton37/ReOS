@@ -17,7 +17,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from reos.code_mode.sandbox import CodeSandbox
-    from reos.ollama import OllamaClient
+    from reos.providers import LLMProvider
     from reos.play_fs import Act
 
 logger = logging.getLogger(__name__)
@@ -130,17 +130,17 @@ class CodePlanner:
 
     def __init__(
         self,
-        sandbox: CodeSandbox,
-        ollama: OllamaClient | None = None,
+        sandbox: "CodeSandbox",
+        llm: "LLMProvider | None" = None,
     ) -> None:
         """Initialize planner.
 
         Args:
             sandbox: CodeSandbox for repository access.
-            ollama: Optional Ollama client for LLM-based planning.
+            llm: Optional LLM provider for LLM-based planning.
         """
         self.sandbox = sandbox
-        self._ollama = ollama
+        self._llm = llm
 
     def create_plan(
         self,
@@ -160,7 +160,7 @@ class CodePlanner:
         repo_context = self._gather_repo_context()
 
         # Use LLM to generate plan if available
-        if self._ollama is not None:
+        if self._llm is not None:
             plan = self._generate_plan_with_llm(request, act, repo_context)
             if plan is not None:
                 return plan
@@ -261,7 +261,7 @@ class CodePlanner:
         repo_context: dict[str, Any],
     ) -> CodeTaskPlan | None:
         """Use LLM to generate a structured plan."""
-        if self._ollama is None:
+        if self._llm is None:
             return None
 
         system_prompt = """You are a code planning assistant. Given a user request and repository context,
@@ -299,7 +299,7 @@ Be specific about which files to read and modify. Keep plans focused and minimal
             git_status = repo_context.get("git_status")
             git_clean = "clean" if git_status and git_status.clean else "has changes"
 
-            response = self._ollama.chat_json(
+            response = self._llm.chat_json(
                 system=system_prompt.format(
                     artifact_type=act.artifact_type or "unknown",
                     python_files=python_files or "none found",

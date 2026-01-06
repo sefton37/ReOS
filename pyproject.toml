@@ -16,6 +16,10 @@ dependencies = [
   # Authentication & Encryption
   "python-pam>=2.0.0,<3.0.0",       # PAM authentication
   "cryptography>=42.0.0,<44.0.0",   # AES-256-GCM encryption, Argon2
+  # LLM Providers
+  "keyring>=24.0.0,<26.0.0",        # System keyring for API keys
+  "secretstorage>=3.3.0,<4.0.0",    # Linux D-Bus SecretService backend
+  "anthropic>=0.40.0,<1.0.0",       # Anthropic Claude API
 ]
 
 [project.optional-dependencies]

@@ -24,9 +24,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from reos.code_mode.intent import DiscoveredIntent
+    from reos.code_mode.project_memory import ProjectMemoryStore
     from reos.code_mode.sandbox import CodeSandbox
     from reos.code_mode.test_generator import TestGenerator
-    from reos.ollama import OllamaClient
+    from reos.providers import LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -385,19 +386,24 @@ class ContractBuilder:
 
     With test_first=True (default), generates actual test code as
     acceptance criteria - implementing test-first development.
+
+    With project_memory provided, injects project decisions into
+    criteria generation to ensure contracts respect learned preferences.
     """
 
     def __init__(
         self,
-        sandbox: CodeSandbox,
-        ollama: OllamaClient | None = None,
-        test_generator: TestGenerator | None = None,
+        sandbox: "CodeSandbox",
+        llm: "LLMProvider | None" = None,
+        test_generator: "TestGenerator | None" = None,
         test_first: bool = True,
+        project_memory: "ProjectMemoryStore | None" = None,
     ) -> None:
         self.sandbox = sandbox
-        self._ollama = ollama
+        self._llm = llm
         self._test_generator = test_generator
         self._test_first = test_first
+        self._project_memory = project_memory
 
     def build_from_intent(self, intent: DiscoveredIntent) -> Contract:
         """Build a contract from discovered intent.
@@ -495,7 +501,7 @@ class ContractBuilder:
                 logger.warning("Test generation failed: %s, using standard criteria", e)
 
         # 2. Add other criteria using LLM or heuristics
-        if self._ollama is not None:
+        if self._llm is not None:
             criteria.extend(self._generate_criteria_with_llm(intent))
         else:
             criteria.extend(self._generate_criteria_heuristic(intent))
@@ -583,7 +589,28 @@ Given an intent, output JSON with testable criteria:
 Make criteria:
 - Specific and testable
 - Minimal but complete
-- Focused on the actual change"""
+- Focused on the actual change
+- RESPECT any PROJECT DECISIONS listed (these are non-negotiable)"""
+
+        # Build project decisions section if available
+        decisions_section = ""
+        if self._project_memory is not None:
+            try:
+                memory_context = self._project_memory.get_relevant_context(
+                    repo_path=str(self.sandbox.repo_path),
+                    prompt=intent.goal,
+                    file_paths=intent.codebase_intent.related_files or None,
+                )
+                if memory_context.relevant_decisions:
+                    decisions = "\n".join(
+                        f"- {d.decision}" for d in memory_context.relevant_decisions
+                    )
+                    decisions_section = f"""
+PROJECT DECISIONS (must respect):
+{decisions}
+"""
+            except Exception as e:
+                logger.debug("Failed to get project decisions: %s", e)
 
         context = f"""
 GOAL: {intent.goal}
@@ -592,10 +619,10 @@ ACTION: {intent.prompt_intent.action_verb}
 TARGET: {intent.prompt_intent.target}
 LANGUAGE: {intent.codebase_intent.language}
 RELATED FILES: {', '.join(intent.codebase_intent.related_files[:5])}
-"""
+{decisions_section}"""
 
         try:
-            response = self._ollama.chat_json(  # type: ignore
+            response = self._llm.chat_json(  # type: ignore
                 system=system,
                 user=context,
                 temperature=0.2,
@@ -666,7 +693,7 @@ RELATED FILES: {', '.join(intent.codebase_intent.related_files[:5])}
                 )
 
         # 2. THEN: Implementation steps (from LLM or heuristics)
-        if self._ollama is not None:
+        if self._llm is not None:
             steps.extend(self._decompose_with_llm(intent, criteria))
         else:
             steps.extend(self._decompose_heuristic(intent, criteria))
@@ -752,7 +779,7 @@ MUST SATISFY:
 """
 
         try:
-            response = self._ollama.chat_json(  # type: ignore
+            response = self._llm.chat_json(  # type: ignore
                 system=system,
                 user=context,
                 temperature=0.2,

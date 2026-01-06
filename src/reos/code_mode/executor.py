@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from reos.code_mode.contract import (
+    AcceptanceCriterion,
     Contract,
     ContractBuilder,
     ContractStatus,
@@ -35,9 +36,12 @@ from reos.code_mode.perspectives import (
     PerspectiveManager,
 )
 from reos.code_mode.sandbox import CodeSandbox
+from reos.code_mode.streaming import ExecutionCancelledError, ExecutionObserver
+from reos.code_mode.explorer import StepExplorer, StepAlternative, ExplorationState
 
 if TYPE_CHECKING:
-    from reos.ollama import OllamaClient
+    from reos.code_mode.project_memory import ProjectMemoryStore
+    from reos.providers import LLMProvider
     from reos.play_fs import Act
 
 logger = logging.getLogger(__name__)
@@ -53,6 +57,7 @@ class LoopStatus(Enum):
     BUILDING = "build"              # Phase 4
     VERIFYING = "verify"            # Phase 5
     DEBUGGING = "debug"             # Phase 5.5 - Analyzing failures
+    EXPLORING = "exploring"         # Phase 5.6 - Trying alternative approaches
     INTEGRATING = "integrate"       # Phase 6
     ANALYZING_GAP = "gap"           # Phase 7
     COMPLETED = "completed"         # All done
@@ -139,18 +144,32 @@ class CodeExecutor:
     Intent -> Contract -> Decompose -> Build -> Verify -> Integrate -> Gap -> Repeat
 
     Each phase uses a different perspective for appropriate focus.
+
+    When project_memory is provided:
+    - Records coding sessions for history
+    - Tracks file changes
+    - Detects user corrections (comparing generated vs final content)
     """
 
     def __init__(
         self,
         sandbox: CodeSandbox,
-        ollama: OllamaClient | None = None,
+        llm: "LLMProvider | None" = None,
+        project_memory: "ProjectMemoryStore | None" = None,
+        observer: ExecutionObserver | None = None,
     ) -> None:
         self.sandbox = sandbox
-        self._ollama = ollama
-        self._perspectives = PerspectiveManager(ollama)
-        self._intent_discoverer = IntentDiscoverer(sandbox, ollama)
-        self._contract_builder = ContractBuilder(sandbox, ollama)
+        self._llm = llm
+        self._project_memory = project_memory
+        self._observer = observer
+        self._perspectives = PerspectiveManager(llm)
+        self._intent_discoverer = IntentDiscoverer(sandbox, llm, project_memory=project_memory)
+        self._contract_builder = ContractBuilder(sandbox, llm, project_memory=project_memory)
+        self._explorer = StepExplorer(sandbox, self._perspectives)
+        # Track generated content for correction detection
+        self._generated_content: dict[str, str] = {}
+        # Track exploration states by step ID
+        self._exploration_states: dict[str, ExplorationState] = {}
 
     def execute(
         self,
@@ -180,31 +199,40 @@ class CodeExecutor:
             max_iterations=max_iterations,
         )
 
+        # Clear generated content tracker for this session
+        self._generated_content.clear()
+
         try:
             # Phase 1: Discover Intent
             state.status = LoopStatus.DISCOVERING_INTENT
+            self._notify_phase_change(state.status)
             state.intent = self._discover_intent(prompt, act, knowledge_context)
 
             # Main loop
             while state.current_iteration < max_iterations:
+                # Notify iteration start
+                self._notify_iteration_start(state.current_iteration + 1, max_iterations)
+
                 iteration = self._run_iteration(state, act, auto_approve)
                 state.iterations.append(iteration)
                 state.current_iteration += 1
 
                 if iteration.error:
                     state.status = LoopStatus.FAILED
+                    self._notify_phase_change(state.status)
                     break
 
                 # Check if complete
                 if state.current_contract and state.current_contract.is_fulfilled(self.sandbox):
                     state.status = LoopStatus.COMPLETED
                     state.completed_at = datetime.now(timezone.utc)
+                    self._notify_phase_change(state.status)
                     break
 
             # Build result
             files_changed = self._collect_changed_files(state)
 
-            return ExecutionResult(
+            result = ExecutionResult(
                 success=state.status == LoopStatus.COMPLETED,
                 message=self._generate_result_message(state),
                 state=state,
@@ -212,14 +240,42 @@ class CodeExecutor:
                 total_iterations=state.current_iteration,
             )
 
+            # Notify completion
+            self._notify_complete(result)
+
+            # Record session in project memory
+            self._record_session(state, act, result)
+
+            return result
+
+        except ExecutionCancelledError:
+            logger.info("Execution cancelled by user")
+            state.status = LoopStatus.FAILED
+            result = ExecutionResult(
+                success=False,
+                message="Execution cancelled by user",
+                state=state,
+            )
+            self._notify_error("Execution cancelled by user")
+            self._record_session(state, act, result)
+            return result
+
         except Exception as e:
             logger.exception("Execution failed: %s", e)
             state.status = LoopStatus.FAILED
-            return ExecutionResult(
+            result = ExecutionResult(
                 success=False,
                 message=f"Execution failed: {e}",
                 state=state,
             )
+
+            # Notify error
+            self._notify_error(str(e))
+
+            # Record failed session
+            self._record_session(state, act, result)
+
+            return result
 
     def _discover_intent(
         self,
@@ -247,16 +303,19 @@ class CodeExecutor:
             # Phase 2: Build or update contract
             if state.current_contract is None:
                 state.status = LoopStatus.BUILDING_CONTRACT
+                self._notify_phase_change(state.status)
                 iteration.phase_reached = Phase.CONTRACT
                 state.current_contract = self._build_contract(state.intent)
                 state.contracts.append(state.current_contract)
                 iteration.contract_id = state.current_contract.id
                 iteration.criteria_total = len(state.current_contract.acceptance_criteria)
+                self._notify_contract_built(state.current_contract)
 
             contract = state.current_contract
 
             # Phase 3: Decompose (already done in contract building)
             state.status = LoopStatus.DECOMPOSING
+            self._notify_phase_change(state.status)
             iteration.phase_reached = Phase.DECOMPOSE
 
             # Phase 4: Build - execute next step
@@ -265,8 +324,11 @@ class CodeExecutor:
 
             if next_step:
                 state.status = LoopStatus.BUILDING
+                self._notify_phase_change(state.status)
                 iteration.phase_reached = Phase.BUILD
-                step_result = self._execute_step(next_step, state.intent, act)
+                self._notify_step_start(next_step)
+                step_result = self._execute_step(next_step, state.intent, act, state)
+                self._notify_step_complete(next_step, step_result.success, step_result.output)
 
                 if step_result.success:
                     next_step.status = "completed"
@@ -276,12 +338,15 @@ class CodeExecutor:
 
                     # Phase 5: Verify
                     state.status = LoopStatus.VERIFYING
+                    self._notify_phase_change(state.status)
                     iteration.phase_reached = Phase.VERIFY
                     verification_passed = self._verify_step(next_step, contract)
 
                     # Phase 5.5: Debug if verification failed
                     if not verification_passed and debug_attempts < 3:
                         state.status = LoopStatus.DEBUGGING
+                        self._notify_phase_change(state.status)
+                        self._notify_debug_start(debug_attempts + 1)
                         iteration.phase_reached = Phase.DEBUG
                         debug_result = self._debug_failure(
                             next_step, contract, step_result, state.intent, act
@@ -296,13 +361,31 @@ class CodeExecutor:
                             iteration.gap_remaining = "Debug fix applied, retrying step"
                             return iteration
 
+                    # Verification still failed after debug - try exploration
+                    if not verification_passed and debug_attempts >= 3 and state.intent is not None:
+                        exploration_result = self._explore_alternatives(
+                            next_step, step_result, state.intent, act, state
+                        )
+                        if exploration_result and exploration_result.success:
+                            # Alternative succeeded - re-verify
+                            next_step.status = "completed"
+                            next_step.result = exploration_result.output
+                            # Re-run verification with new implementation
+                            verification_passed = self._verify_step(next_step, contract)
+                            if not verification_passed:
+                                # Still failed verification - mark as failed
+                                next_step.status = "failed"
+
                     # Phase 6: Integrate (for now, changes are direct)
                     state.status = LoopStatus.INTEGRATING
+                    self._notify_phase_change(state.status)
                     iteration.phase_reached = Phase.INTEGRATE
                 else:
                     # Build step failed - try to debug
                     if debug_attempts < 3:
                         state.status = LoopStatus.DEBUGGING
+                        self._notify_phase_change(state.status)
+                        self._notify_debug_start(debug_attempts + 1)
                         iteration.phase_reached = Phase.DEBUG
                         debug_result = self._debug_failure(
                             next_step, contract, step_result, state.intent, act
@@ -315,11 +398,27 @@ class CodeExecutor:
                             iteration.gap_remaining = "Debug fix applied, retrying step"
                             return iteration
 
+                    # Debug exhausted - try multi-path exploration
+                    if state.intent is not None:
+                        exploration_result = self._explore_alternatives(
+                            next_step, step_result, state.intent, act, state
+                        )
+                        if exploration_result and exploration_result.success:
+                            # Alternative succeeded!
+                            next_step.status = "completed"
+                            next_step.result = exploration_result.output
+                            next_step.completed_at = datetime.now(timezone.utc)
+                            iteration.steps_completed += 1
+                            iteration.completed_at = datetime.now(timezone.utc)
+                            iteration.gap_remaining = "Alternative approach succeeded"
+                            return iteration
+
                     next_step.status = "failed"
                     next_step.result = step_result.error or "Unknown error"
 
             # Phase 7: Gap Analysis
             state.status = LoopStatus.ANALYZING_GAP
+            self._notify_phase_change(state.status)
             iteration.phase_reached = Phase.GAP_ANALYSIS
 
             # Check fulfillment
@@ -335,9 +434,14 @@ class CodeExecutor:
                 )
                 state.current_contract = gap_contract
                 state.contracts.append(gap_contract)
+                self._notify_contract_built(gap_contract)
                 iteration.gap_remaining = f"{len(unfulfilled)} criteria unfulfilled"
 
             iteration.completed_at = datetime.now(timezone.utc)
+
+        except ExecutionCancelledError:
+            # Re-raise cancellation to be handled by execute()
+            raise
 
         except Exception as e:
             logger.exception("Iteration failed: %s", e)
@@ -358,6 +462,7 @@ class CodeExecutor:
         step: ContractStep,
         intent: DiscoveredIntent | None,
         act: Act,
+        state: ExecutionState | None = None,
     ) -> StepResult:
         """Phase 4: Execute a single step."""
         self._perspectives.shift_to(Phase.BUILD)
@@ -365,9 +470,9 @@ class CodeExecutor:
 
         try:
             if step.action == "create_file":
-                return self._execute_create_file(step, intent, act)
+                return self._execute_create_file(step, intent, act, state)
             elif step.action == "edit_file":
-                return self._execute_edit_file(step, intent, act)
+                return self._execute_edit_file(step, intent, act, state)
             elif step.action == "run_command":
                 return self._execute_command(step)
             else:
@@ -390,6 +495,7 @@ class CodeExecutor:
         step: ContractStep,
         intent: DiscoveredIntent | None,
         act: Act,
+        state: ExecutionState | None = None,
     ) -> StepResult:
         """Execute a file creation step."""
         if not step.target_file:
@@ -415,6 +521,20 @@ class CodeExecutor:
         # Write the file
         result = self.sandbox.write_file(step.target_file, content)
 
+        # Track generated content for correction detection
+        self._generated_content[step.target_file] = content
+
+        # Record change in project memory
+        if state:
+            self._record_change(
+                state.session_id,
+                act,
+                step.target_file,
+                "create",
+                content,
+                step.id,
+            )
+
         return StepResult(
             success=True,
             step_id=step.id,
@@ -427,6 +547,7 @@ class CodeExecutor:
         step: ContractStep,
         intent: DiscoveredIntent | None,
         act: Act,
+        state: ExecutionState | None = None,
     ) -> StepResult:
         """Execute a file edit step."""
         if not step.target_file:
@@ -468,6 +589,28 @@ class CodeExecutor:
         if old_str and new_str:
             try:
                 self.sandbox.edit_file(step.target_file, old_str, new_str)
+
+                # Track the new content for correction detection
+                try:
+                    new_content = self.sandbox.read_file(step.target_file)
+                    self._generated_content[step.target_file] = new_content
+
+                    # Record change in project memory
+                    if state:
+                        diff_summary = f"Replaced: '{old_str[:50]}...' with '{new_str[:50]}...'"
+                        self._record_change(
+                            state.session_id,
+                            act,
+                            step.target_file,
+                            "edit",
+                            new_content,
+                            step.id,
+                            old_content=current_content,
+                            diff_summary=diff_summary,
+                        )
+                except Exception:
+                    pass
+
                 return StepResult(
                     success=True,
                     step_id=step.id,
@@ -492,7 +635,17 @@ class CodeExecutor:
     def _execute_command(self, step: ContractStep) -> StepResult:
         """Execute a command step."""
         command = step.command or "echo 'No command'"
+
+        # Notify observer of command being run
+        self._notify_command_output(f"$ {command}")
+
         returncode, stdout, stderr = self.sandbox.run_command(command)
+
+        # Stream output lines to observer
+        output = stdout if stdout else stderr
+        if output:
+            for line in output.split("\n")[:20]:  # First 20 lines
+                self._notify_command_output(line)
 
         return StepResult(
             success=returncode == 0,
@@ -508,15 +661,22 @@ class CodeExecutor:
         act: Act,
     ) -> str:
         """Generate content for a new file."""
-        if self._ollama is None:
+        if self._llm is None:
             return f"# {step.description}\n# TODO: Implement\n"
+
+        # Build API documentation context
+        api_context = ""
+        if intent and intent.codebase_intent.api_documentation:
+            api_context = "\nAVAILABLE APIs (use these correctly):\n"
+            for doc in intent.codebase_intent.api_documentation[:5]:
+                api_context += f"- {doc.format_for_context()}\n"
 
         context = f"""
 STEP: {step.description}
 TARGET FILE: {step.target_file}
 LANGUAGE: {intent.codebase_intent.language if intent else 'python'}
 CONVENTIONS: {', '.join(intent.codebase_intent.conventions) if intent else 'standard'}
-"""
+{api_context}"""
 
         response = self._perspectives.invoke(
             Phase.BUILD,
@@ -535,13 +695,20 @@ CONVENTIONS: {', '.join(intent.codebase_intent.conventions) if intent else 'stan
         act: Act,
     ) -> tuple[str, str] | None:
         """Generate an edit (old_str, new_str) for a file."""
-        if self._ollama is None:
+        if self._llm is None:
             return None
+
+        # Build API documentation context
+        api_context = ""
+        if intent and intent.codebase_intent.api_documentation:
+            api_context = "\nAVAILABLE APIs (use these correctly):\n"
+            for doc in intent.codebase_intent.api_documentation[:5]:
+                api_context += f"- {doc.format_for_context()}\n"
 
         context = f"""
 STEP: {step.description}
 TARGET FILE: {step.target_file}
-
+{api_context}
 CURRENT FILE CONTENT:
 ```
 {current_content[:2000]}
@@ -597,6 +764,8 @@ Output JSON with:
                         criterion.verified_at = datetime.now(timezone.utc)
                     else:
                         all_passed = False
+                    # Notify observer of verification result
+                    self._notify_criterion_verified(criterion)
 
         return all_passed
 
@@ -622,7 +791,7 @@ Output JSON with:
         """
         self._perspectives.shift_to(Phase.DEBUG)
 
-        if self._ollama is None:
+        if self._llm is None:
             return False
 
         # Gather failure information
@@ -684,6 +853,9 @@ FILE CONTENT (if relevant):
                 raw_output=response,
             )
 
+            # Notify observer of diagnosis
+            self._notify_debug_diagnosis(diagnosis)
+
             # Apply fix if confident enough
             if diagnosis.confidence in ("high", "medium") and not diagnosis.needs_more_info:
                 fix_applied = self._apply_debug_fix(diagnosis, step)
@@ -739,6 +911,141 @@ FILE CONTENT (if relevant):
             logger.warning("Failed to apply debug fix: %s", e)
             return False
 
+    def _explore_alternatives(
+        self,
+        step: ContractStep,
+        original_result: StepResult,
+        intent: DiscoveredIntent,
+        act: Act,
+        state: ExecutionState,
+    ) -> StepResult | None:
+        """Try alternative approaches for a failed step.
+
+        Called when a step fails and debugging doesn't help. Generates
+        multiple alternative implementations and tries each one.
+
+        Args:
+            step: The step that failed.
+            original_result: Result from the failed attempt.
+            intent: The discovered intent for context.
+            act: The active Act.
+            state: Current execution state.
+
+        Returns:
+            StepResult if an alternative succeeded, None if all failed.
+        """
+        state.status = LoopStatus.EXPLORING
+        self._notify_phase_change(state.status)
+
+        # Get or create exploration state
+        exploration = self._exploration_states.get(step.id)
+        original_code = step.content or step.new_content or step.command or ""
+
+        if exploration is None:
+            # First time exploring this step - generate alternatives
+            alternatives = self._explorer.generate_alternatives(
+                step,
+                original_result.error or "Unknown error",
+                intent,
+                original_code=original_code,
+                n_alternatives=3,
+            )
+
+            if not alternatives:
+                logger.info("No alternatives generated for step %s", step.id)
+                return None
+
+            exploration = self._explorer.create_exploration_state(
+                step,
+                original_result.error or "Unknown error",
+                alternatives,
+            )
+            self._exploration_states[step.id] = exploration
+
+            # Notify observer of exploration start
+            self._notify_exploration_start(step, len(alternatives))
+
+        # Try each untried alternative
+        while exploration.current_alternative_idx < len(exploration.alternatives):
+            alt = exploration.alternatives[exploration.current_alternative_idx]
+
+            if alt.attempted and alt.debug_attempted:
+                # Already tried this alternative with debug, move on
+                exploration.current_alternative_idx += 1
+                continue
+
+            if not alt.attempted:
+                # First attempt at this alternative
+                alt.attempted = True
+                self._notify_alternative_start(step, alt, exploration.current_alternative_idx)
+
+                # Create a step from the alternative and execute it
+                alt_step = self._explorer.create_step_from_alternative(alt, step)
+                alt_result = self._execute_step(alt_step, intent, act, state)
+
+                if alt_result.success:
+                    # Alternative worked!
+                    alt.succeeded = True
+                    exploration.successful_approach = alt
+                    self._notify_alternative_result(alt, True)
+                    self._notify_exploration_complete(step, True)
+
+                    # Copy result to original step
+                    step.content = alt_step.content
+                    step.new_content = alt_step.new_content
+                    step.command = alt_step.command
+
+                    logger.info(
+                        "Alternative '%s' succeeded for step %s",
+                        alt.approach,
+                        step.id,
+                    )
+                    return alt_result
+
+                # Alternative failed - try debug once
+                alt.error = alt_result.error
+                self._notify_alternative_result(alt, False)
+
+            # Try debug on this alternative if not yet done
+            if not alt.debug_attempted:
+                alt.debug_attempted = True
+                self._notify_debug_start(1)
+
+                alt_step = self._explorer.create_step_from_alternative(alt, step)
+                debug_success = self._debug_failure(
+                    alt_step, state.current_contract, original_result, intent, act
+                )
+
+                if debug_success:
+                    # Debug fix applied - retry the alternative
+                    retry_result = self._execute_step(alt_step, intent, act, state)
+                    if retry_result.success:
+                        alt.succeeded = True
+                        exploration.successful_approach = alt
+                        self._notify_alternative_result(alt, True)
+                        self._notify_exploration_complete(step, True)
+
+                        # Copy result to original step
+                        step.content = alt_step.content
+                        step.new_content = alt_step.new_content
+                        step.command = alt_step.command
+
+                        logger.info(
+                            "Alternative '%s' succeeded after debug for step %s",
+                            alt.approach,
+                            step.id,
+                        )
+                        return retry_result
+
+            # Move to next alternative
+            exploration.current_alternative_idx += 1
+
+        # All alternatives exhausted
+        exploration.all_failed = True
+        self._notify_exploration_complete(step, False)
+        logger.warning("All alternatives exhausted for step %s", step.id)
+        return None
+
     def _collect_changed_files(self, state: ExecutionState) -> list[str]:
         """Collect all files changed during execution."""
         files = set()
@@ -779,3 +1086,293 @@ FILE CONTENT (if relevant):
             lines.append("")
 
         return "\n".join(lines)
+
+    # -------------------------------------------------------------------------
+    # Observer Notifications
+    # -------------------------------------------------------------------------
+
+    def _notify_phase_change(self, status: LoopStatus) -> None:
+        """Notify observer of phase change."""
+        if self._observer is not None:
+            self._observer.on_phase_change(status)
+
+    def _notify_iteration_start(self, iteration: int, max_iterations: int) -> None:
+        """Notify observer of iteration start."""
+        if self._observer is not None:
+            self._observer.on_iteration_start(iteration, max_iterations)
+
+    def _notify_contract_built(self, contract: Contract) -> None:
+        """Notify observer when contract is built."""
+        if self._observer is not None:
+            self._observer.on_contract_built(contract)
+
+    def _notify_step_start(self, step: ContractStep) -> None:
+        """Notify observer when step starts."""
+        if self._observer is not None:
+            self._observer.on_step_start(step)
+
+    def _notify_step_complete(self, step: ContractStep, success: bool, output: str = "") -> None:
+        """Notify observer when step completes."""
+        if self._observer is not None:
+            self._observer.on_step_complete(step, success, output)
+
+    def _notify_criterion_verified(self, criterion: AcceptanceCriterion) -> None:
+        """Notify observer when criterion is verified."""
+        if self._observer is not None:
+            self._observer.on_criterion_verified(criterion)
+
+    def _notify_debug_start(self, attempt: int) -> None:
+        """Notify observer when debug starts."""
+        if self._observer is not None:
+            self._observer.on_debug_start(attempt)
+
+    def _notify_debug_diagnosis(self, diagnosis: DebugDiagnosis) -> None:
+        """Notify observer of debug diagnosis."""
+        if self._observer is not None:
+            self._observer.on_debug_diagnosis(diagnosis)
+
+    def _notify_command_output(self, line: str) -> None:
+        """Notify observer of command output."""
+        if self._observer is not None:
+            self._observer.on_command_output(line)
+
+    def _notify_complete(self, result: ExecutionResult) -> None:
+        """Notify observer of completion."""
+        if self._observer is not None:
+            self._observer.on_complete(result)
+
+    def _notify_error(self, error: str) -> None:
+        """Notify observer of error."""
+        if self._observer is not None:
+            self._observer.on_error(error)
+
+    def _notify_exploration_start(self, step: ContractStep, n_alternatives: int) -> None:
+        """Notify observer when exploration starts."""
+        if self._observer is not None:
+            self._observer.on_exploration_start(step, n_alternatives)
+
+    def _notify_alternative_start(self, step: ContractStep, alt: StepAlternative, idx: int) -> None:
+        """Notify observer when trying an alternative."""
+        if self._observer is not None:
+            self._observer.on_alternative_start(step, alt, idx)
+
+    def _notify_alternative_result(self, alt: StepAlternative, success: bool) -> None:
+        """Notify observer of alternative result."""
+        if self._observer is not None:
+            self._observer.on_alternative_result(alt, success)
+
+    def _notify_exploration_complete(self, step: ContractStep, success: bool) -> None:
+        """Notify observer when exploration finishes."""
+        if self._observer is not None:
+            self._observer.on_exploration_complete(step, success)
+
+    # -------------------------------------------------------------------------
+    # Project Memory Integration
+    # -------------------------------------------------------------------------
+
+    def _record_session(
+        self,
+        state: ExecutionState,
+        act: Act,
+        result: ExecutionResult,
+    ) -> None:
+        """Record the coding session in project memory."""
+        if self._project_memory is None:
+            return
+
+        try:
+            outcome = "completed" if result.success else "failed"
+            if state.status == LoopStatus.AWAITING_APPROVAL:
+                outcome = "partial"
+
+            self._project_memory.record_session(
+                session_id=state.session_id,
+                repo_path=act.repo_path,
+                prompt_summary=state.prompt[:200],
+                started_at=state.started_at,
+                ended_at=state.completed_at or datetime.now(timezone.utc),
+                outcome=outcome,
+                files_changed=result.files_changed,
+                intent_summary=state.intent.goal if state.intent else "",
+                contract_fulfilled=result.success,
+                iteration_count=result.total_iterations,
+            )
+            logger.debug("Recorded session: %s", state.session_id)
+        except Exception as e:
+            logger.warning("Failed to record session: %s", e)
+
+    def _record_change(
+        self,
+        session_id: str,
+        act: Act,
+        file_path: str,
+        change_type: str,
+        new_content: str,
+        step_id: str | None = None,
+        old_content: str | None = None,
+        diff_summary: str = "",
+    ) -> None:
+        """Record a code change in project memory."""
+        if self._project_memory is None:
+            return
+
+        try:
+            import hashlib
+
+            new_hash = hashlib.sha256(new_content.encode()).hexdigest()[:16]
+            old_hash = None
+            if old_content:
+                old_hash = hashlib.sha256(old_content.encode()).hexdigest()[:16]
+
+            if not diff_summary:
+                diff_summary = f"{change_type.capitalize()}d file ({len(new_content)} bytes)"
+
+            self._project_memory.record_change(
+                repo_path=act.repo_path,
+                session_id=session_id,
+                file_path=file_path,
+                change_type=change_type,
+                diff_summary=diff_summary,
+                new_content_hash=new_hash,
+                old_content_hash=old_hash,
+                contract_step_id=step_id,
+            )
+        except Exception as e:
+            logger.debug("Failed to record change: %s", e)
+
+    def detect_corrections(
+        self,
+        session_id: str,
+        act: Act,
+    ) -> list[dict[str, Any]]:
+        """Detect user corrections by comparing generated vs current content.
+
+        Call this after a session to find where the user modified AI-generated code.
+        These corrections are learning opportunities.
+
+        Args:
+            session_id: The session ID to check corrections for.
+            act: The active Act with repository path.
+
+        Returns:
+            List of corrections found, each with:
+            - file_path: Path to the corrected file
+            - original_code: What was generated
+            - corrected_code: Current content
+            - correction_type: Inferred type of correction
+        """
+        corrections = []
+
+        for file_path, generated_content in self._generated_content.items():
+            try:
+                current_content = self.sandbox.read_file(file_path)
+
+                # Compare generated vs current
+                if current_content != generated_content:
+                    # User made changes - this is a correction
+                    correction_type = self._infer_correction_type(
+                        generated_content, current_content
+                    )
+
+                    correction = {
+                        "file_path": file_path,
+                        "original_code": generated_content,
+                        "corrected_code": current_content,
+                        "correction_type": correction_type,
+                    }
+                    corrections.append(correction)
+
+                    # Record in project memory if available
+                    if self._project_memory is not None:
+                        inferred_rule = self._infer_correction_rule(
+                            generated_content, current_content, correction_type
+                        )
+                        self._project_memory.record_correction(
+                            repo_path=act.repo_path,
+                            session_id=session_id,
+                            file_path=file_path,
+                            original_code=generated_content[:2000],
+                            corrected_code=current_content[:2000],
+                            correction_type=correction_type,
+                            inferred_rule=inferred_rule,
+                        )
+                        logger.info(
+                            "Detected correction in %s: %s",
+                            file_path,
+                            inferred_rule[:50] if inferred_rule else correction_type,
+                        )
+
+            except Exception as e:
+                logger.debug("Error checking corrections for %s: %s", file_path, e)
+
+        return corrections
+
+    def _infer_correction_type(
+        self,
+        original: str,
+        corrected: str,
+    ) -> str:
+        """Infer the type of correction from the difference."""
+        original_lines = original.splitlines()
+        corrected_lines = corrected.splitlines()
+
+        # Simple heuristics
+        if len(corrected_lines) > len(original_lines) * 1.2:
+            return "missing"  # User added significant content
+        if len(corrected_lines) < len(original_lines) * 0.8:
+            return "structure"  # User removed significant content
+
+        # Check for naming changes
+        import re
+        orig_names = set(re.findall(r'\b[a-z_][a-z0-9_]*\b', original.lower()))
+        corr_names = set(re.findall(r'\b[a-z_][a-z0-9_]*\b', corrected.lower()))
+        if len(orig_names - corr_names) > 3 or len(corr_names - orig_names) > 3:
+            return "naming"
+
+        # Default to style
+        return "style"
+
+    def _infer_correction_rule(
+        self,
+        original: str,
+        corrected: str,
+        correction_type: str,
+    ) -> str:
+        """Attempt to infer a rule from the correction.
+
+        This is a simple heuristic. For better results, use LLM.
+        """
+        if self._llm is None:
+            # Simple heuristic rules
+            if correction_type == "naming":
+                return "Prefer different naming conventions"
+            elif correction_type == "missing":
+                return "Include more comprehensive implementation"
+            elif correction_type == "structure":
+                return "Use simpler code structure"
+            return "Code style preference"
+
+        # Use LLM to infer rule
+        try:
+            prompt = f"""Analyze this code correction and infer a single rule:
+
+ORIGINAL (AI-generated):
+```
+{original[:1000]}
+```
+
+CORRECTED (by user):
+```
+{corrected[:1000]}
+```
+
+Output a single sentence rule like: "Use dataclasses instead of TypedDict"
+"""
+            response = self._llm.chat(
+                system="You analyze code corrections and infer coding rules. Output a single concise rule.",
+                user=prompt,
+                temperature=0.2,
+            )
+            return response.strip()[:200]
+        except Exception:
+            return f"Code {correction_type} preference"

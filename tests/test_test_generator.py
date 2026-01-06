@@ -126,14 +126,14 @@ class TestTestGeneratorInit:
         gen = TestGenerator(mock_sandbox)
 
         assert gen.sandbox == mock_sandbox
-        assert gen._ollama is None
+        assert gen._llm is None
 
     def test_create_with_ollama(self, mock_sandbox: MagicMock) -> None:
         """Should create with ollama client."""
         ollama = MagicMock()
-        gen = TestGenerator(mock_sandbox, ollama=ollama)
+        gen = TestGenerator(mock_sandbox, llm=ollama)
 
-        assert gen._ollama == ollama
+        assert gen._llm == ollama
 
 
 class TestTestGeneratorHeuristic:

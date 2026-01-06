@@ -51,6 +51,9 @@ import type {
   CompactPreviewResult,
   CompactApplyResult,
   ArchiveSaveResult,
+  CodeExecutionState,
+  CodeExecStartResult,
+  CodeExecCancelResult,
 } from './types';
 
 function buildUi() {
@@ -753,6 +756,356 @@ function buildUi() {
 
   // Flag to track if "The Play" view is active in the inspection panel
   let playInspectorActive = false;
+
+  // Code Mode execution tracking
+  let codeExecActive = false;
+  let activeCodeExecId: string | null = null;
+  let codeExecState: CodeExecutionState | null = null;
+  let codeExecPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  // Phase icons for progress visualization
+  const PHASE_ICONS: Record<string, string> = {
+    'pending': '⏳',
+    'intent': '🎯',
+    'contract': '📋',
+    'decompose': '🔧',
+    'build': '🔨',
+    'verify': '✓',
+    'debug': '🔧',
+    'exploring': '🔀',
+    'integrate': '📦',
+    'gap': '🔍',
+    'completed': '✅',
+    'failed': '❌',
+    'approval': '⏸️',
+  };
+
+  function renderCodeExecutionInspector() {
+    if (!codeExecState) return;
+
+    inspectionTitle.textContent = 'Code Execution';
+    inspectionBody.innerHTML = '';
+
+    const state = codeExecState;
+
+    // Header with cancel button
+    const headerRow = el('div');
+    headerRow.style.display = 'flex';
+    headerRow.style.justifyContent = 'space-between';
+    headerRow.style.alignItems = 'center';
+    headerRow.style.marginBottom = '12px';
+
+    const statusIcon = el('span');
+    statusIcon.textContent = PHASE_ICONS[state.status] || '⏳';
+    statusIcon.style.fontSize = '20px';
+    headerRow.appendChild(statusIcon);
+
+    if (!state.is_complete) {
+      const cancelBtn = smallButton('Cancel');
+      cancelBtn.style.background = 'rgba(239, 68, 68, 0.2)';
+      cancelBtn.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+      cancelBtn.addEventListener('click', () => {
+        void (async () => {
+          if (activeCodeExecId) {
+            await kernelRequest('code/exec/cancel', { execution_id: activeCodeExecId });
+          }
+        })();
+      });
+      headerRow.appendChild(cancelBtn);
+    }
+    inspectionBody.appendChild(headerRow);
+
+    // Phase progress bar
+    const progressSection = el('div');
+    progressSection.style.marginBottom = '16px';
+
+    const progressLabel = el('div');
+    progressLabel.style.fontSize = '12px';
+    progressLabel.style.marginBottom = '4px';
+    progressLabel.textContent = `${state.phase}: ${state.phase_description}`;
+    progressSection.appendChild(progressLabel);
+
+    const progressBar = el('div');
+    progressBar.style.cssText = `
+      height: 6px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 3px;
+      overflow: hidden;
+    `;
+    const progressFill = el('div');
+    const progressPercent = Math.min(100, (state.phase_index / 8) * 100);
+    progressFill.style.cssText = `
+      height: 100%;
+      width: ${progressPercent}%;
+      background: ${state.is_complete ? (state.success ? '#22c55e' : '#ef4444') : '#3b82f6'};
+      transition: width 0.3s ease;
+    `;
+    progressBar.appendChild(progressFill);
+    progressSection.appendChild(progressBar);
+
+    // Iteration info
+    const iterInfo = el('div');
+    iterInfo.style.fontSize = '11px';
+    iterInfo.style.opacity = '0.7';
+    iterInfo.style.marginTop = '4px';
+    iterInfo.textContent = `Iteration ${state.iteration}/${state.max_iterations} • ${state.elapsed_seconds.toFixed(1)}s`;
+    progressSection.appendChild(iterInfo);
+
+    inspectionBody.appendChild(progressSection);
+
+    // Current step
+    if (state.current_step) {
+      const stepSection = el('div');
+      stepSection.style.cssText = `
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 12px;
+        font-size: 12px;
+      `;
+
+      const stepHeader = el('div');
+      stepHeader.style.fontWeight = '600';
+      stepHeader.style.marginBottom = '4px';
+      stepHeader.textContent = `Step ${state.steps_completed + 1}/${state.steps_total}`;
+      stepSection.appendChild(stepHeader);
+
+      const stepDesc = el('div');
+      stepDesc.textContent = state.current_step.description;
+      stepSection.appendChild(stepDesc);
+
+      if (state.current_step.target_file) {
+        const targetFile = el('div');
+        targetFile.style.opacity = '0.7';
+        targetFile.style.marginTop = '4px';
+        targetFile.textContent = `📁 ${state.current_step.target_file}`;
+        stepSection.appendChild(targetFile);
+      }
+
+      inspectionBody.appendChild(stepSection);
+    }
+
+    // Debug diagnosis (if debugging)
+    if (state.status === 'debug' && state.debug_diagnosis) {
+      const debugSection = el('div');
+      debugSection.style.cssText = `
+        background: rgba(245, 158, 11, 0.1);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 12px;
+        font-size: 12px;
+      `;
+
+      const debugHeader = el('div');
+      debugHeader.style.fontWeight = '600';
+      debugHeader.style.marginBottom = '4px';
+      debugHeader.textContent = `🔧 Debug Attempt ${state.debug_attempt}`;
+      debugSection.appendChild(debugHeader);
+
+      const rootCause = el('div');
+      rootCause.textContent = state.debug_diagnosis.root_cause;
+      debugSection.appendChild(rootCause);
+
+      const confidence = el('div');
+      confidence.style.opacity = '0.7';
+      confidence.style.marginTop = '4px';
+      confidence.textContent = `Confidence: ${state.debug_diagnosis.confidence}`;
+      debugSection.appendChild(confidence);
+
+      inspectionBody.appendChild(debugSection);
+    }
+
+    // Exploration (multi-path alternatives)
+    if (state.is_exploring || state.exploration_results.length > 0) {
+      const exploreSection = el('div');
+      exploreSection.style.cssText = `
+        background: rgba(139, 92, 246, 0.1);
+        border: 1px solid rgba(139, 92, 246, 0.3);
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 12px;
+        font-size: 12px;
+      `;
+
+      const exploreHeader = el('div');
+      exploreHeader.style.fontWeight = '600';
+      exploreHeader.style.marginBottom = '8px';
+      exploreHeader.textContent = `🔀 Exploring Alternatives (${state.exploration_current_idx + 1}/${state.exploration_alternatives_total})`;
+      exploreSection.appendChild(exploreHeader);
+
+      // Show current alternative being tried
+      if (state.exploration_current_alternative) {
+        const currentAlt = el('div');
+        currentAlt.style.cssText = `
+          background: rgba(139, 92, 246, 0.15);
+          border-radius: 4px;
+          padding: 6px 8px;
+          margin-bottom: 8px;
+        `;
+        const altName = el('div');
+        altName.style.fontWeight = '500';
+        altName.textContent = `→ ${state.exploration_current_alternative.approach}`;
+        currentAlt.appendChild(altName);
+
+        const altScore = el('div');
+        altScore.style.fontSize = '10px';
+        altScore.style.opacity = '0.7';
+        altScore.textContent = `Score: ${(state.exploration_current_alternative.score * 100).toFixed(0)}%`;
+        currentAlt.appendChild(altScore);
+
+        exploreSection.appendChild(currentAlt);
+      }
+
+      // Show results of tried alternatives
+      if (state.exploration_results.length > 0) {
+        const resultsList = el('div');
+        resultsList.style.marginTop = '4px';
+        for (const result of state.exploration_results) {
+          const resultItem = el('div');
+          resultItem.style.fontSize = '11px';
+          resultItem.style.opacity = '0.8';
+          const icon = result.success ? '✓' : '✗';
+          resultItem.textContent = `${icon} ${result.approach}`;
+          resultItem.style.color = result.success ? '#22c55e' : '#ef4444';
+          resultsList.appendChild(resultItem);
+        }
+        exploreSection.appendChild(resultsList);
+      }
+
+      inspectionBody.appendChild(exploreSection);
+    }
+
+    // Output panel
+    const outputSection = el('div');
+    outputSection.style.marginBottom = '12px';
+
+    const outputHeader = el('div');
+    outputHeader.style.fontSize = '12px';
+    outputHeader.style.fontWeight = '600';
+    outputHeader.style.marginBottom = '4px';
+    outputHeader.textContent = '📄 Output';
+    outputSection.appendChild(outputHeader);
+
+    const outputBox = el('div');
+    outputBox.style.cssText = `
+      background: rgba(0,0,0,0.3);
+      border-radius: 6px;
+      padding: 8px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 11px;
+      max-height: 150px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    `;
+    outputBox.textContent = state.output_lines.slice(-20).join('\n') || '(no output yet)';
+    outputSection.appendChild(outputBox);
+
+    inspectionBody.appendChild(outputSection);
+
+    // Files changed
+    if (state.files_changed.length > 0) {
+      const filesSection = el('div');
+
+      const filesHeader = el('div');
+      filesHeader.style.fontSize = '12px';
+      filesHeader.style.fontWeight = '600';
+      filesHeader.style.marginBottom = '4px';
+      filesHeader.textContent = '📂 Files Changed';
+      filesSection.appendChild(filesHeader);
+
+      const filesList = el('div');
+      filesList.style.fontSize = '11px';
+      for (const f of state.files_changed) {
+        const fileItem = el('div');
+        fileItem.style.opacity = '0.8';
+        fileItem.textContent = `• ${f}`;
+        filesList.appendChild(fileItem);
+      }
+      filesSection.appendChild(filesList);
+
+      inspectionBody.appendChild(filesSection);
+    }
+
+    // Completion summary
+    if (state.is_complete) {
+      const completeSection = el('div');
+      completeSection.style.cssText = `
+        background: ${state.success ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)'};
+        border: 1px solid ${state.success ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'};
+        border-radius: 8px;
+        padding: 10px;
+        margin-top: 12px;
+        font-size: 12px;
+      `;
+
+      const completeHeader = el('div');
+      completeHeader.style.fontWeight = '600';
+      completeHeader.textContent = state.success ? '✅ Complete' : '❌ Failed';
+      completeSection.appendChild(completeHeader);
+
+      if (state.result_message) {
+        const msg = el('div');
+        msg.style.marginTop = '4px';
+        msg.textContent = state.result_message;
+        completeSection.appendChild(msg);
+      }
+
+      if (state.error) {
+        const errMsg = el('div');
+        errMsg.style.color = '#ef4444';
+        errMsg.style.marginTop = '4px';
+        errMsg.textContent = state.error;
+        completeSection.appendChild(errMsg);
+      }
+
+      const criteriaInfo = el('div');
+      criteriaInfo.style.opacity = '0.7';
+      criteriaInfo.style.marginTop = '4px';
+      criteriaInfo.textContent = `${state.criteria_fulfilled}/${state.criteria_total} criteria fulfilled`;
+      completeSection.appendChild(criteriaInfo);
+
+      inspectionBody.appendChild(completeSection);
+    }
+  }
+
+  function startCodeExecPolling(executionId: string) {
+    activeCodeExecId = executionId;
+    codeExecActive = true;
+    playInspectorActive = false;
+
+    // Poll every 500ms
+    codeExecPollInterval = setInterval(() => {
+      void (async () => {
+        try {
+          const state = await kernelRequest('code/exec/state', { execution_id: executionId }) as CodeExecutionState;
+          codeExecState = state;
+          renderCodeExecutionInspector();
+
+          // Stop polling when complete
+          if (state.is_complete) {
+            stopCodeExecPolling();
+          }
+        } catch (e) {
+          console.error('Code exec poll error:', e);
+          stopCodeExecPolling();
+        }
+      })();
+    }, 500);
+
+    // Initial render
+    renderCodeExecutionInspector();
+  }
+
+  function stopCodeExecPolling() {
+    if (codeExecPollInterval) {
+      clearInterval(codeExecPollInterval);
+      codeExecPollInterval = null;
+    }
+    // Keep codeExecActive true so inspector stays visible
+  }
 
   function showJsonInInspector(title: string, obj: unknown) {
     inspectionTitle.textContent = title;

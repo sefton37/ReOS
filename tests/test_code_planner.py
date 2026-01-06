@@ -29,9 +29,9 @@ class TestCodePlannerInit:
     def test_init_without_ollama(self, temp_git_repo: Path) -> None:
         """Should work without Ollama client."""
         sandbox = CodeSandbox(temp_git_repo)
-        planner = CodePlanner(sandbox=sandbox, ollama=None)
+        planner = CodePlanner(sandbox=sandbox, llm=None)
 
-        assert planner._ollama is None
+        assert planner._llm is None
 
 
 class TestCreatePlan:
@@ -40,7 +40,7 @@ class TestCreatePlan:
     def test_creates_plan_without_llm(self, temp_git_repo: Path) -> None:
         """Should create exploration plan without LLM."""
         sandbox = CodeSandbox(temp_git_repo)
-        planner = CodePlanner(sandbox=sandbox, ollama=None)
+        planner = CodePlanner(sandbox=sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -79,7 +79,7 @@ class TestCreatePlan:
     def test_exploration_plan_has_read_step(self, temp_git_repo: Path) -> None:
         """Exploration plan should include file reading step."""
         sandbox = CodeSandbox(temp_git_repo)
-        planner = CodePlanner(sandbox=sandbox, ollama=None)
+        planner = CodePlanner(sandbox=sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -95,7 +95,7 @@ class TestCreatePlan:
     def test_exploration_plan_has_analyze_step(self, temp_git_repo: Path) -> None:
         """Exploration plan should include analysis step."""
         sandbox = CodeSandbox(temp_git_repo)
-        planner = CodePlanner(sandbox=sandbox, ollama=None)
+        planner = CodePlanner(sandbox=sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -251,7 +251,7 @@ class TestImpactLevel:
     def test_default_impact_is_minor(self, temp_git_repo: Path) -> None:
         """Default impact should be minor for exploration plans."""
         sandbox = CodeSandbox(temp_git_repo)
-        planner = CodePlanner(sandbox=sandbox, ollama=None)
+        planner = CodePlanner(sandbox=sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",

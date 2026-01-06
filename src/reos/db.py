@@ -304,6 +304,125 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_repo_embeddings_symbol ON repo_embeddings(symbol_id)"
         )
 
+        # -------------------------------------------------------------------------
+        # Project Memory tables (Code Mode - long-term learning)
+        # -------------------------------------------------------------------------
+
+        # Project decisions: preferences and choices that guide future work
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS project_decisions (
+                id TEXT PRIMARY KEY,
+                repo_path TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                rationale TEXT,
+                scope TEXT NOT NULL,
+                keywords TEXT NOT NULL,
+                source TEXT NOT NULL,
+                confidence REAL DEFAULT 1.0,
+                superseded_by TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_decisions_repo ON project_decisions(repo_path)"
+        )
+
+        # Project patterns: recurring code patterns to follow
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS project_patterns (
+                id TEXT PRIMARY KEY,
+                repo_path TEXT NOT NULL,
+                pattern_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                applies_to TEXT NOT NULL,
+                example_code TEXT,
+                source TEXT NOT NULL,
+                occurrence_count INTEGER DEFAULT 1,
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patterns_repo ON project_patterns(repo_path)"
+        )
+
+        # User corrections: modifications user made to AI-generated code
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_corrections (
+                id TEXT PRIMARY KEY,
+                repo_path TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                original_code TEXT NOT NULL,
+                corrected_code TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                correction_type TEXT NOT NULL,
+                inferred_rule TEXT NOT NULL,
+                promoted_to_decision TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_corrections_repo ON user_corrections(repo_path)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_corrections_session ON user_corrections(session_id)"
+        )
+
+        # Coding sessions: history of Code Mode sessions
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS coding_sessions (
+                id TEXT PRIMARY KEY,
+                repo_path TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                prompt_summary TEXT NOT NULL,
+                outcome TEXT,
+                files_changed TEXT,
+                intent_summary TEXT,
+                lessons_learned TEXT,
+                contract_fulfilled INTEGER DEFAULT 0,
+                iteration_count INTEGER DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_coding_sessions_repo ON coding_sessions(repo_path)"
+        )
+
+        # Code changes: record of file modifications
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS code_changes (
+                id TEXT PRIMARY KEY,
+                repo_path TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                change_type TEXT NOT NULL,
+                diff_summary TEXT,
+                old_content_hash TEXT,
+                new_content_hash TEXT NOT NULL,
+                changed_at TEXT NOT NULL,
+                contract_step_id TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_code_changes_repo ON code_changes(repo_path)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_code_changes_session ON code_changes(session_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_code_changes_file ON code_changes(file_path)"
+        )
+
         conn.commit()
 
     def set_active_persona_id(self, *, persona_id: str | None) -> None:

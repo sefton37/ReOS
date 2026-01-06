@@ -86,7 +86,7 @@ class TestChatAgentRespond:
             tool_plan_json='{"tool_calls": []}',
             answer_text="No tools needed for this response.",
         )
-        agent = ChatAgent(db=get_db(), ollama=ollama)
+        agent = ChatAgent(db=get_db(), llm=ollama)
         result = agent.respond("What is Linux?")
 
         assert result.answer == "No tools needed for this response."
@@ -121,7 +121,7 @@ class TestChatAgentRespond:
             tool_plan_json=json.dumps(tool_plan),
             answer_text="System info retrieved.",
         )
-        agent = ChatAgent(db=get_db(), ollama=ollama)
+        agent = ChatAgent(db=get_db(), llm=ollama)
         result = agent.respond("What is my system info?")
 
         assert len(calls) == 1
@@ -152,7 +152,7 @@ class TestChatAgentRespond:
             tool_plan_json=json.dumps(tool_plan),
             answer_text="Sorry, there was an error.",
         )
-        agent = ChatAgent(db=get_db(), ollama=ollama)
+        agent = ChatAgent(db=get_db(), llm=ollama)
         result = agent.respond("Run a test command")
 
         # Should still get a response even with tool error
@@ -181,7 +181,7 @@ class TestChatAgentRespond:
             tool_plan_json='{"tool_calls": "not a list"}',
             answer_text="Handled gracefully.",
         )
-        agent = ChatAgent(db=get_db(), ollama=ollama)
+        agent = ChatAgent(db=get_db(), llm=ollama)
         result = agent.respond("Do something")
 
         # Should not crash, no tools called
@@ -209,7 +209,7 @@ class TestChatAgentRespond:
             tool_plan_json="not valid json at all",
             answer_text="Fallback response.",
         )
-        agent = ChatAgent(db=get_db(), ollama=ollama)
+        agent = ChatAgent(db=get_db(), llm=ollama)
         result = agent.respond("Hello")
 
         # When JSON is invalid, agent should NOT call any tools (safe fallback)
@@ -324,7 +324,7 @@ class TestChatAgentToolSelection:
             tool_plan_json='{"tool_calls": []}',
             answer_text="Done.",
         )
-        agent = ChatAgent(db=get_db(), ollama=ollama)
+        agent = ChatAgent(db=get_db(), llm=ollama)
         agent.respond("List files")
 
         # Check that tool specs were included in the tool selection call
@@ -370,7 +370,7 @@ class TestChatAgentToolSelection:
             tool_plan_json=json.dumps(tool_plan),
             answer_text="Done.",
         )
-        agent = ChatAgent(db=db, ollama=ollama)
+        agent = ChatAgent(db=db, llm=ollama)
         agent.respond("Run many tools")
 
         # Should be capped at 6
@@ -511,7 +511,7 @@ class TestChatAgentAnswerGeneration:
             tool_plan_json=json.dumps(tool_plan),
             answer_text="Final answer.",
         )
-        agent = ChatAgent(db=get_db(), ollama=ollama)
+        agent = ChatAgent(db=get_db(), llm=ollama)
         agent.respond("Run test tool")
 
         # Check that tool results were included
@@ -548,7 +548,7 @@ class TestChatAgentAnswerGeneration:
             tool_plan_json='{"tool_calls": []}',
             answer_text="Done.",
         )
-        agent = ChatAgent(db=db, ollama=ollama)
+        agent = ChatAgent(db=db, llm=ollama)
         agent.respond("Hello")
 
         # Check temperature was passed

@@ -10,9 +10,13 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from ..ollama import OllamaClient, OllamaError
+from ..providers import LLMProvider, LLMError
+from ..providers.ollama import OllamaProvider
+
+if TYPE_CHECKING:
+    pass  # For future type hints
 
 logger = logging.getLogger(__name__)
 
@@ -45,25 +49,25 @@ class PlanStep:
 class LLMPlanner:
     """LLM-powered planning for understanding intent and generating plans.
 
-    Uses local Ollama to:
+    Uses LLM provider to:
     1. Parse user intent from natural language
     2. Match targets against system context
     3. Generate actionable steps to accomplish goals
     """
 
-    def __init__(self, ollama: OllamaClient | None = None) -> None:
+    def __init__(self, llm: LLMProvider | None = None) -> None:
         """Initialize the LLM planner.
 
         Args:
-            ollama: OllamaClient instance. If None, creates default.
+            llm: LLM provider instance. If None, creates default OllamaProvider.
         """
-        self._ollama = ollama
+        self._llm = llm
 
-    def _get_ollama(self) -> OllamaClient:
-        """Get or create Ollama client."""
-        if self._ollama is None:
-            self._ollama = OllamaClient()
-        return self._ollama
+    def _get_llm(self) -> LLMProvider:
+        """Get or create LLM provider."""
+        if self._llm is None:
+            self._llm = OllamaProvider()
+        return self._llm
 
     def parse_intent(
         self,
@@ -138,7 +142,7 @@ Available system context:
 Return the structured intent as JSON:"""
 
         try:
-            ollama = self._get_ollama()
+            ollama = self._get_llm()
             response = ollama.chat_json(
                 system=system_prompt,
                 user=user_prompt,
@@ -156,7 +160,7 @@ Return the structured intent as JSON:"""
                 explanation=data.get("explanation", ""),
             )
 
-        except (OllamaError, json.JSONDecodeError) as e:
+        except (LLMError, json.JSONDecodeError) as e:
             logger.warning("LLM intent parsing failed: %s", e)
             # Return low-confidence fallback
             return ParsedIntent(
@@ -255,7 +259,7 @@ For action "{intent.action}", create the appropriate steps for each one.
 Return the step-by-step plan as JSON array:"""
 
         try:
-            ollama = self._get_ollama()
+            ollama = self._get_llm()
             response = ollama.chat_json(
                 system=system_prompt,
                 user=user_prompt,
@@ -298,7 +302,7 @@ Return the step-by-step plan as JSON array:"""
                 ))
             return steps
 
-        except (OllamaError, json.JSONDecodeError) as e:
+        except (LLMError, json.JSONDecodeError) as e:
             logger.warning("LLM plan generation failed: %s", e)
             return []
 
@@ -433,7 +437,7 @@ Return the step-by-step plan as JSON array:"""
         return "\n".join(parts) if parts else "No specific resources matched"
 
 
-def create_llm_planner_callback(ollama: OllamaClient | None = None):
+def create_llm_planner_callback(llm: LLMProvider | None = None):
     """Create a callback function for TaskPlanner.llm_planner.
 
     This bridges the LLMPlanner to the existing TaskPlanner interface.
@@ -444,7 +448,7 @@ def create_llm_planner_callback(ollama: OllamaClient | None = None):
 
     This avoids LLM unreliability in generating correct step arrays.
     """
-    planner = LLMPlanner(ollama)
+    planner = LLMPlanner(llm)
 
     def llm_plan_callback(request: str, context: dict[str, Any]) -> list[dict]:
         """Generate plan steps for a request.

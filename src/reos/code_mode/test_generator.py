@@ -18,7 +18,7 @@ from reos.code_mode.contract import TestSpecification
 if TYPE_CHECKING:
     from reos.code_mode.intent import DiscoveredIntent
     from reos.code_mode.sandbox import CodeSandbox
-    from reos.ollama import OllamaClient
+    from reos.providers import LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -185,17 +185,17 @@ class TestGenerator:
 
     def __init__(
         self,
-        sandbox: CodeSandbox,
-        ollama: OllamaClient | None = None,
+        sandbox: "CodeSandbox",
+        llm: "LLMProvider | None" = None,
     ) -> None:
         """Initialize test generator.
 
         Args:
             sandbox: Code sandbox for file access
-            ollama: Optional Ollama client for LLM generation
+            llm: Optional LLM provider for LLM generation
         """
         self.sandbox = sandbox
-        self._ollama = ollama
+        self._llm = llm
 
     def generate(self, intent: DiscoveredIntent) -> TestSpecification:
         """Generate test code from intent.
@@ -206,7 +206,7 @@ class TestGenerator:
         Returns:
             TestSpecification with generated test code
         """
-        if self._ollama is not None:
+        if self._llm is not None:
             try:
                 return self._generate_with_llm(intent)
             except Exception as e:
@@ -219,7 +219,7 @@ class TestGenerator:
         # Build context for LLM
         context = self._build_llm_context(intent)
 
-        response = self._ollama.chat_json(  # type: ignore
+        response = self._llm.chat_json(  # type: ignore
             system=LLM_SYSTEM_PROMPT,
             user=context,
             temperature=0.2,

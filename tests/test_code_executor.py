@@ -29,7 +29,7 @@ class TestPerspectives:
 
     def test_shift_to_phase(self) -> None:
         """Should shift to phase perspective."""
-        manager = PerspectiveManager(ollama=None)
+        manager = PerspectiveManager(llm=None)
 
         perspective = manager.shift_to(Phase.INTENT)
 
@@ -38,7 +38,7 @@ class TestPerspectives:
 
     def test_get_perspective_without_shift(self) -> None:
         """Should get perspective without changing current."""
-        manager = PerspectiveManager(ollama=None)
+        manager = PerspectiveManager(llm=None)
         manager.shift_to(Phase.INTENT)
 
         perspective = manager.get_perspective(Phase.BUILD)
@@ -48,7 +48,7 @@ class TestPerspectives:
 
     def test_phase_perspectives_mapping(self) -> None:
         """Should have correct phase-perspective mapping."""
-        manager = PerspectiveManager(ollama=None)
+        manager = PerspectiveManager(llm=None)
 
         assert manager.get_perspective(Phase.INTENT) == ANALYST
         assert manager.get_perspective(Phase.CONTRACT) == ARCHITECT
@@ -72,7 +72,7 @@ class TestPerspectives:
 
     def test_phase_debug_maps_to_debugger(self) -> None:
         """Phase.DEBUG should map to DEBUGGER perspective."""
-        manager = PerspectiveManager(ollama=None)
+        manager = PerspectiveManager(llm=None)
         perspective = manager.get_perspective(Phase.DEBUG)
         assert perspective == DEBUGGER
 
@@ -87,14 +87,14 @@ class TestCodeExecutor:
     def test_init(self, temp_git_repo: Path) -> None:
         """Should initialize executor."""
         sandbox = CodeSandbox(temp_git_repo)
-        executor = CodeExecutor(sandbox, ollama=None)
+        executor = CodeExecutor(sandbox, llm=None)
 
         assert executor.sandbox == sandbox
 
     def test_execute_creates_state(self, temp_git_repo: Path) -> None:
         """Execute should create execution state."""
         sandbox = CodeSandbox(temp_git_repo)
-        executor = CodeExecutor(sandbox, ollama=None)
+        executor = CodeExecutor(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -114,7 +114,7 @@ class TestCodeExecutor:
     def test_execute_discovers_intent(self, temp_git_repo: Path) -> None:
         """Execute should discover intent."""
         sandbox = CodeSandbox(temp_git_repo)
-        executor = CodeExecutor(sandbox, ollama=None)
+        executor = CodeExecutor(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -133,7 +133,7 @@ class TestCodeExecutor:
     def test_execute_builds_contract(self, temp_git_repo: Path) -> None:
         """Execute should build contract."""
         sandbox = CodeSandbox(temp_git_repo)
-        executor = CodeExecutor(sandbox, ollama=None)
+        executor = CodeExecutor(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -153,7 +153,7 @@ class TestCodeExecutor:
     def test_execute_respects_max_iterations(self, temp_git_repo: Path) -> None:
         """Execute should stop at max iterations."""
         sandbox = CodeSandbox(temp_git_repo)
-        executor = CodeExecutor(sandbox, ollama=None)
+        executor = CodeExecutor(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -172,7 +172,7 @@ class TestCodeExecutor:
     def test_execute_tracks_iterations(self, temp_git_repo: Path) -> None:
         """Execute should track iteration history."""
         sandbox = CodeSandbox(temp_git_repo)
-        executor = CodeExecutor(sandbox, ollama=None)
+        executor = CodeExecutor(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -219,7 +219,7 @@ class TestExecutionResult:
     def test_result_message(self, temp_git_repo: Path) -> None:
         """Result should have message."""
         sandbox = CodeSandbox(temp_git_repo)
-        executor = CodeExecutor(sandbox, ollama=None)
+        executor = CodeExecutor(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -239,7 +239,7 @@ class TestExecutionResult:
     def test_result_has_iteration_count(self, temp_git_repo: Path) -> None:
         """Result should have iteration count."""
         sandbox = CodeSandbox(temp_git_repo)
-        executor = CodeExecutor(sandbox, ollama=None)
+        executor = CodeExecutor(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -262,7 +262,7 @@ class TestPreviewPlan:
     def test_preview_includes_intent(self, temp_git_repo: Path) -> None:
         """Preview should include intent summary."""
         sandbox = CodeSandbox(temp_git_repo)
-        executor = CodeExecutor(sandbox, ollama=None)
+        executor = CodeExecutor(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -283,7 +283,7 @@ class TestPreviewPlan:
     def test_preview_includes_contract(self, temp_git_repo: Path) -> None:
         """Preview should include contract summary."""
         sandbox = CodeSandbox(temp_git_repo)
-        executor = CodeExecutor(sandbox, ollama=None)
+        executor = CodeExecutor(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",

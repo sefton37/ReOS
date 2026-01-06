@@ -10,7 +10,7 @@ from typing import Any
 
 from .db import Database
 from .mcp_tools import Tool, ToolError, call_tool, list_tools, render_tool_result
-from .ollama import OllamaClient
+from .providers import LLMProvider, get_provider
 from .play_fs import list_acts as play_list_acts
 from .play_fs import read_me_markdown as play_read_me_markdown
 from .play_fs import Act
@@ -106,9 +106,9 @@ class ChatAgent:
     - Simple tasks go direct, complex tasks get planned.
     """
 
-    def __init__(self, *, db: Database, ollama: OllamaClient | None = None) -> None:
+    def __init__(self, *, db: Database, llm: LLMProvider | None = None) -> None:
         self._db = db
-        self._ollama_override = ollama
+        self._llm_override = llm
 
         # Initialize steady state collector for system knowledge (RAG)
         # This provides grounded facts about the machine
@@ -128,7 +128,7 @@ class ChatAgent:
 
         # Create LLM planner callback for intelligent intent parsing
         # This replaces rigid regex patterns with LLM-based understanding
-        llm_planner = create_llm_planner_callback(ollama)
+        llm_planner = create_llm_planner_callback(llm)
 
         # Initialize reasoning engine for complex tasks
         self._reasoning_engine = ReasoningEngine(
@@ -153,7 +153,7 @@ class ChatAgent:
         self._restore_pending_plan()
 
         # Initialize Code Mode router for repo-based coding tasks
-        self._code_router = CodeModeRouter(ollama=ollama)
+        self._code_router = CodeModeRouter(llm=llm)
         self._code_planner: CodePlanner | None = None
         self._pending_code_plan: CodeTaskPlan | None = None
 
@@ -230,8 +230,8 @@ class ChatAgent:
             # Initialize sandbox and planner for this Act's repo
             repo_path = Path(active_act.repo_path)  # type: ignore[arg-type]
             sandbox = CodeSandbox(repo_path)
-            ollama = self._get_ollama_client()
-            planner = CodePlanner(sandbox=sandbox, ollama=ollama)
+            llm = self._get_provider()
+            planner = CodePlanner(sandbox=sandbox, llm=llm)
 
             # Create a plan for the code task
             plan = planner.create_plan(request=user_text, act=active_act)
@@ -379,16 +379,15 @@ class ChatAgent:
             "tool_call_limit": 5,
         }
 
-    def _get_ollama_client(self) -> OllamaClient:
-        if self._ollama_override is not None:
-            return self._ollama_override
+    def _get_provider(self) -> LLMProvider:
+        """Get the configured LLM provider.
 
-        url = self._db.get_state(key="ollama_url")
-        model = self._db.get_state(key="ollama_model")
-        return OllamaClient(
-            url=url if isinstance(url, str) and url else None,
-            model=model if isinstance(model, str) and model else None,
-        )
+        Returns the override if set (for testing), otherwise uses
+        the provider factory to get the user's configured provider.
+        """
+        if self._llm_override is not None:
+            return self._llm_override
+        return get_provider(self._db)
 
     def respond(
         self,
@@ -500,7 +499,7 @@ class ChatAgent:
         if conversation_context:
             persona_prefix = persona_prefix + "\n\n" + conversation_context
 
-        ollama = self._get_ollama_client()
+        llm = self._get_provider()
 
         wants_diff = self._user_opted_into_diff(user_text)
 
@@ -509,7 +508,7 @@ class ChatAgent:
             tools=tools,
             wants_diff=wants_diff,
             persona_prefix=persona_prefix,
-            ollama=ollama,
+            llm=llm,
             temperature=temperature,
             top_p=top_p,
             tool_call_limit=tool_call_limit,
@@ -553,7 +552,7 @@ class ChatAgent:
             tool_results=tool_results,
             wants_diff=wants_diff,
             persona_prefix=persona_prefix,
-            ollama=ollama,
+            llm=llm,
             temperature=temperature,
             top_p=top_p,
         )
@@ -1057,7 +1056,7 @@ class ChatAgent:
         tools: list[Tool],
         wants_diff: bool,
         persona_prefix: str,
-        ollama: OllamaClient,
+        llm: LLMProvider,
         temperature: float,
         top_p: float,
         tool_call_limit: int,
@@ -1103,7 +1102,7 @@ class ChatAgent:
             f"USER_OPTED_INTO_DIFF: {wants_diff}\n"
         )
 
-        raw = ollama.chat_json(system=system, user=user, temperature=temperature, top_p=top_p)
+        raw = llm.chat_json(system=system, user=user, temperature=temperature, top_p=top_p)
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
@@ -1165,7 +1164,7 @@ class ChatAgent:
         tool_results: list[dict[str, Any]],
         wants_diff: bool,
         persona_prefix: str,
-        ollama: OllamaClient,
+        llm: LLMProvider,
         temperature: float,
         top_p: float,
     ) -> tuple[str, list[str]]:
@@ -1222,7 +1221,7 @@ class ChatAgent:
             "TOOL_RESULTS:\n" + json.dumps(tool_dump, indent=2, ensure_ascii=False)
         )
 
-        raw = ollama.chat_text(system=system, user=user, temperature=temperature, top_p=top_p)
+        raw = llm.chat_text(system=system, user=user, temperature=temperature, top_p=top_p)
         return self._parse_thinking_answer(raw)
 
     def _parse_thinking_answer(self, raw: str) -> tuple[str, list[str]]:

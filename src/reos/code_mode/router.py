@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from reos.play_fs import Act
-    from reos.ollama import OllamaClient
+    from reos.providers import LLMProvider
 
 
 class RequestType(Enum):
@@ -135,14 +135,14 @@ class CodeModeRouter:
     the standard sysadmin tools.
     """
 
-    def __init__(self, ollama: OllamaClient | None = None) -> None:
+    def __init__(self, llm: "LLMProvider | None" = None) -> None:
         """Initialize router.
 
         Args:
-            ollama: Optional Ollama client for LLM-based classification
-                   of ambiguous requests.
+            llm: Optional LLM provider for LLM-based classification
+                 of ambiguous requests.
         """
-        self._ollama = ollama
+        self._llm = llm
 
     def should_use_code_mode(
         self,
@@ -195,7 +195,7 @@ class CodeModeRouter:
             )
 
         # Ambiguous - try LLM classification if available
-        if self._ollama is not None:
+        if self._llm is not None:
             llm_decision = self._classify_with_llm(request, active_act)
             if llm_decision is not None:
                 return llm_decision
@@ -248,7 +248,7 @@ class CodeModeRouter:
         Returns:
             RoutingDecision if classification succeeded, None otherwise.
         """
-        if self._ollama is None:
+        if self._llm is None:
             return None
 
         system_prompt = """You classify user requests as either CODE or SYSADMIN.
@@ -274,7 +274,7 @@ Artifact type: {artifact_type}
 Respond with ONLY one word: CODE or SYSADMIN"""
 
         try:
-            response = self._ollama.chat_text(
+            response = self._llm.chat_text(
                 system=system_prompt.format(
                     repo_path=active_act.repo_path or "unknown",
                     artifact_type=active_act.artifact_type or "unknown",

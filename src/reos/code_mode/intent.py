@@ -19,9 +19,11 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from reos.code_mode.api_docs import APIDocumentation, APIDocumentationLookup
+    from reos.code_mode.project_memory import ProjectMemoryStore
     from reos.code_mode.repo_map import RepoMap
     from reos.code_mode.sandbox import CodeSandbox
-    from reos.ollama import OllamaClient
+    from reos.providers import LLMProvider
     from reos.play_fs import Act
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,8 @@ class CodebaseIntent:
     # RepoMap-enhanced fields
     relevant_symbols: list[str] = field(default_factory=list)  # Symbol names from repo map
     symbol_context: str = ""  # Formatted context from repo map
+    # API Documentation (prevents hallucination)
+    api_documentation: list["APIDocumentation"] = field(default_factory=list)
 
 
 @dataclass
@@ -134,17 +138,26 @@ class IntentDiscoverer:
     - Finding related files via symbol search
     - Getting relevant context within token budget
     - Understanding dependencies between files
+
+    When a ProjectMemoryStore is provided, recalls project-specific:
+    - Decisions ("We use dataclasses, not TypedDict")
+    - Patterns ("Tests go in tests/, named test_*.py")
+    - Corrections (learned preferences from past sessions)
     """
 
     def __init__(
         self,
-        sandbox: CodeSandbox,
-        ollama: OllamaClient | None = None,
-        repo_map: RepoMap | None = None,
+        sandbox: "CodeSandbox",
+        llm: "LLMProvider | None" = None,
+        repo_map: "RepoMap | None" = None,
+        project_memory: "ProjectMemoryStore | None" = None,
+        api_lookup: "APIDocumentationLookup | None" = None,
     ) -> None:
         self.sandbox = sandbox
-        self._ollama = ollama
+        self._llm = llm
         self._repo_map = repo_map
+        self._project_memory = project_memory
+        self._api_lookup = api_lookup
 
     def discover(
         self,
@@ -167,6 +180,12 @@ class IntentDiscoverer:
         play_intent = self._analyze_play_context(act, knowledge_context)
         codebase_intent = self._analyze_codebase(prompt)
 
+        # Phase 1.5: Inject project memory context
+        if self._project_memory is not None:
+            self._inject_project_memory(
+                prompt, act.repo_path, play_intent, codebase_intent
+            )
+
         # Phase 2: Synthesize into unified intent
         return self._synthesize_intent(
             prompt=prompt,
@@ -177,7 +196,7 @@ class IntentDiscoverer:
 
     def _analyze_prompt(self, prompt: str) -> PromptIntent:
         """Extract intent from the user's explicit prompt."""
-        if self._ollama is not None:
+        if self._llm is not None:
             return self._analyze_prompt_with_llm(prompt)
         return self._analyze_prompt_heuristic(prompt)
 
@@ -218,7 +237,7 @@ Output JSON with these fields:
 }"""
 
         try:
-            response = self._ollama.chat_json(  # type: ignore
+            response = self._llm.chat_json(  # type: ignore
                 system=system,
                 user=prompt,
                 temperature=0.1,
@@ -275,6 +294,61 @@ Output JSON with these fields:
             knowledge_hints=knowledge_hints,
         )
 
+    def _inject_project_memory(
+        self,
+        prompt: str,
+        repo_path: str,
+        play_intent: PlayIntent,
+        codebase_intent: CodebaseIntent,
+    ) -> None:
+        """Inject project memory context into intent.
+
+        Retrieves relevant memories and injects them into:
+        - play_intent.knowledge_hints (decisions, learned corrections)
+        - codebase_intent.existing_patterns (project patterns)
+        - codebase_intent.conventions (inferred from decisions)
+        """
+        if self._project_memory is None:
+            return
+
+        try:
+            memory_context = self._project_memory.get_relevant_context(
+                repo_path=repo_path,
+                prompt=prompt,
+                file_paths=codebase_intent.related_files if codebase_intent.related_files else None,
+            )
+
+            if memory_context.is_empty():
+                return
+
+            # Inject decisions as knowledge hints
+            for decision in memory_context.relevant_decisions:
+                hint = f"PROJECT DECISION: {decision.decision}"
+                if hint not in play_intent.knowledge_hints:
+                    play_intent.knowledge_hints.append(hint)
+
+            # Inject patterns into codebase conventions/patterns
+            for pattern in memory_context.applicable_patterns:
+                if pattern.description not in codebase_intent.existing_patterns:
+                    codebase_intent.existing_patterns.append(pattern.description)
+
+            # Inject learned corrections as knowledge hints
+            for correction in memory_context.recent_corrections:
+                if correction.inferred_rule:
+                    hint = f"LEARNED: {correction.inferred_rule}"
+                    if hint not in play_intent.knowledge_hints:
+                        play_intent.knowledge_hints.append(hint)
+
+            logger.debug(
+                "Injected project memory: %d decisions, %d patterns, %d corrections",
+                len(memory_context.relevant_decisions),
+                len(memory_context.applicable_patterns),
+                len(memory_context.recent_corrections),
+            )
+
+        except Exception as e:
+            logger.warning("Failed to inject project memory: %s", e)
+
     def _analyze_codebase(self, prompt: str) -> CodebaseIntent:
         """Extract intent from codebase analysis.
 
@@ -318,6 +392,36 @@ Output JSON with these fields:
             except Exception as e:
                 logger.debug("RepoMap analysis failed: %s", e)
 
+        # Look up API documentation to prevent hallucination
+        api_documentation: list["APIDocumentation"] = []
+        if self._api_lookup is not None:
+            try:
+                # Extract symbols from prompt
+                prompt_symbols = self._api_lookup.extract_symbols_from_prompt(prompt)
+
+                # Also extract from related files
+                for file_path in related[:3]:  # Limit to avoid slowdown
+                    try:
+                        content = self.sandbox.read_file(file_path)
+                        code_symbols = self._api_lookup.extract_symbols_from_code(
+                            content, language
+                        )
+                        prompt_symbols.extend(code_symbols)
+                    except Exception:
+                        pass
+
+                # Deduplicate and lookup
+                unique_symbols = list(set(prompt_symbols))[:15]
+                api_documentation = self._api_lookup.get_documentation_batch(
+                    unique_symbols, language
+                )
+                logger.debug(
+                    "Found API documentation for %d symbols",
+                    len(api_documentation),
+                )
+            except Exception as e:
+                logger.debug("API documentation lookup failed: %s", e)
+
         return CodebaseIntent(
             language=language,
             architecture_style=architecture,
@@ -327,6 +431,7 @@ Output JSON with these fields:
             test_patterns=test_patterns,
             relevant_symbols=relevant_symbols,
             symbol_context=symbol_context,
+            api_documentation=api_documentation,
         )
 
     def _detect_language(self) -> str:
@@ -577,7 +682,7 @@ Output JSON with these fields:
         codebase_intent: CodebaseIntent,
     ) -> DiscoveredIntent:
         """Synthesize all intents into unified understanding."""
-        if self._ollama is not None:
+        if self._llm is not None:
             return self._synthesize_with_llm(
                 prompt, prompt_intent, play_intent, codebase_intent
             )
@@ -682,7 +787,7 @@ CODEBASE CONTEXT:
 {symbol_section}"""
 
         try:
-            response = self._ollama.chat_json(  # type: ignore
+            response = self._llm.chat_json(  # type: ignore
                 system=system,
                 user=context,
                 temperature=0.2,

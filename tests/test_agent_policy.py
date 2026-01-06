@@ -66,7 +66,7 @@ def test_agent_strips_include_diff_when_not_opted_in(
         ]
     }
 
-    agent = ChatAgent(db=get_db(), ollama=FakeOllama(tool_plan_json=json.dumps(tool_plan)))
+    agent = ChatAgent(db=get_db(), llm=FakeOllama(tool_plan_json=json.dumps(tool_plan)))
     # Disable reasoning engine for this test - we're testing tool policy, not reasoning
     monkeypatch.setattr(agent, "_try_reasoning", lambda *args, **kwargs: None)
     _answer = agent.respond("How is my system?")
@@ -99,7 +99,7 @@ def test_agent_passes_arguments_to_tools(
         ]
     }
 
-    agent = ChatAgent(db=get_db(), ollama=FakeOllama(tool_plan_json=json.dumps(tool_plan)))
+    agent = ChatAgent(db=get_db(), llm=FakeOllama(tool_plan_json=json.dumps(tool_plan)))
     # Disable reasoning engine for this test - we're testing tool policy, not reasoning
     monkeypatch.setattr(agent, "_try_reasoning", lambda *args, **kwargs: None)
     _answer = agent.respond("Check disk usage for /home")
@@ -131,7 +131,7 @@ def test_agent_respects_tool_call_limit(
         ]
     }
 
-    agent = ChatAgent(db=get_db(), ollama=FakeOllama(tool_plan_json=json.dumps(tool_plan)))
+    agent = ChatAgent(db=get_db(), llm=FakeOllama(tool_plan_json=json.dumps(tool_plan)))
     # Disable reasoning engine for this test - we're testing tool policy, not reasoning
     monkeypatch.setattr(agent, "_try_reasoning", lambda *args, **kwargs: None)
     _answer = agent.respond("What tools do you need?")
@@ -155,7 +155,7 @@ def test_agent_falls_back_on_invalid_json_tool_plan(
 
     monkeypatch.setattr(agent_mod, "call_tool", fake_call_tool)
 
-    agent = ChatAgent(db=get_db(), ollama=FakeOllama(tool_plan_json="not json"))
+    agent = ChatAgent(db=get_db(), llm=FakeOllama(tool_plan_json="not json"))
     # Disable reasoning engine for this test - we're testing tool policy, not reasoning
     monkeypatch.setattr(agent, "_try_reasoning", lambda *args, **kwargs: None)
     _answer = agent.respond("Hello")

@@ -81,6 +81,47 @@ interface PullStartResult {
   model: string;
 }
 
+// Provider Types
+interface ProviderInfo {
+  id: string;
+  name: string;
+  description: string;
+  is_local: boolean;
+  requires_api_key: boolean;
+  has_api_key?: boolean | null;
+}
+
+interface ProvidersListResult {
+  current_provider: string;
+  available_providers: ProviderInfo[];
+  keyring_available: boolean;
+}
+
+interface AnthropicModel {
+  name: string;
+  context_length: number;
+  capabilities: string[];
+  description: string;
+}
+
+interface AnthropicStatus {
+  has_api_key: boolean;
+  keyring_available: boolean;
+  model: string;
+  available_models: AnthropicModel[];
+  health: {
+    reachable: boolean;
+    model_count?: number;
+    error?: string | null;
+    current_model?: string | null;
+  };
+}
+
+interface OllamaInstallStatus {
+  installed: boolean;
+  install_command: string;
+}
+
 /**
  * Download a model with progress tracking.
  * @param modelName Model to download
@@ -139,6 +180,11 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
   let personas: PersonaData[] = [];
   let activePersonaId: string | null = null;
   let customContext: string = '';
+
+  // Provider state
+  let providersInfo: ProvidersListResult | null = null;
+  let anthropicStatus: AnthropicStatus | null = null;
+  let ollamaInstallStatus: OllamaInstallStatus | null = null;
 
   // Create overlay container
   const overlay = el('div');
@@ -271,8 +317,21 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
   }
 
   async function loadData() {
+    // Load provider info first
     try {
-      // Load Ollama status
+      providersInfo = await kernelRequest('providers/list', {}) as ProvidersListResult;
+    } catch {
+      providersInfo = {
+        current_provider: 'ollama',
+        available_providers: [
+          { id: 'ollama', name: 'Ollama (Local)', description: 'Private, runs on your machine', is_local: true, requires_api_key: false },
+        ],
+        keyring_available: false,
+      };
+    }
+
+    // Load Ollama status (always, since it's the default)
+    try {
       ollamaStatus = await kernelRequest('ollama/status', {}) as OllamaStatus;
 
       // Load model info for selected model
@@ -308,6 +367,20 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
       };
     }
 
+    // Load Ollama install status
+    try {
+      ollamaInstallStatus = await kernelRequest('ollama/check_installed', {}) as OllamaInstallStatus;
+    } catch {
+      ollamaInstallStatus = { installed: false, install_command: '' };
+    }
+
+    // Load Anthropic status if available
+    try {
+      anthropicStatus = await kernelRequest('anthropic/status', {}) as AnthropicStatus;
+    } catch {
+      anthropicStatus = null;
+    }
+
     try {
       // Load personas
       const personasResult = await kernelRequest('personas/list', {}) as {
@@ -340,6 +413,254 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
   }
 
   function renderLLMTab() {
+    const currentProvider = providersInfo?.current_provider || 'ollama';
+
+    // Provider Selection Section
+    const providerSection = createSection('Provider');
+
+    const providerRow = el('div');
+    providerRow.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    `;
+
+    const providerSelect = el('select') as HTMLSelectElement;
+    providerSelect.style.cssText = `
+      flex: 1;
+      padding: 10px 14px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    `;
+
+    for (const p of providersInfo?.available_providers || []) {
+      const option = el('option') as HTMLOptionElement;
+      option.value = p.id;
+      option.textContent = p.name;
+      if (p.id === currentProvider) option.selected = true;
+      providerSelect.appendChild(option);
+    }
+
+    providerSelect.addEventListener('change', async () => {
+      try {
+        await kernelRequest('providers/set', { provider: providerSelect.value });
+        await loadData();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        alert('Failed to switch provider: ' + msg);
+        await loadData();
+      }
+    });
+
+    const providerDesc = el('div');
+    const currentProviderInfo = providersInfo?.available_providers.find(p => p.id === currentProvider);
+    providerDesc.innerHTML = currentProviderInfo
+      ? `<span style="color: rgba(255,255,255,0.6); font-size: 12px;">${currentProviderInfo.description}</span>`
+      : '';
+
+    providerRow.appendChild(providerSelect);
+    providerSection.appendChild(providerRow);
+    providerSection.appendChild(providerDesc);
+    content.appendChild(providerSection);
+
+    // Render provider-specific settings
+    if (currentProvider === 'anthropic') {
+      renderAnthropicSettings();
+    } else {
+      renderOllamaSettings();
+    }
+  }
+
+  function renderAnthropicSettings() {
+    // Status Section
+    const statusSection = createSection('Anthropic Status');
+
+    const statusBox = el('div');
+    statusBox.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      margin-bottom: 16px;
+    `;
+
+    const isConnected = anthropicStatus?.health?.reachable || false;
+    const statusIndicator = el('div');
+    statusIndicator.style.cssText = `
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: ${isConnected ? '#22c55e' : anthropicStatus?.has_api_key ? '#f59e0b' : '#ef4444'};
+    `;
+
+    const statusText = el('div');
+    if (isConnected) {
+      statusText.innerHTML = `<strong style="color: #22c55e;">Connected</strong> <span style="color: rgba(255,255,255,0.7);">- ${anthropicStatus?.model || 'claude-sonnet-4-20250514'}</span>`;
+    } else if (anthropicStatus?.has_api_key) {
+      statusText.innerHTML = `<strong style="color: #f59e0b;">API Key Set</strong> <span style="color: rgba(255,255,255,0.7);">- ${anthropicStatus.health?.error || 'Not tested'}</span>`;
+    } else {
+      statusText.innerHTML = `<strong style="color: #ef4444;">Not Configured</strong> <span style="color: rgba(255,255,255,0.7);">- Add your API key below</span>`;
+    }
+    statusText.style.cssText = 'flex: 1;';
+
+    statusBox.appendChild(statusIndicator);
+    statusBox.appendChild(statusText);
+    statusSection.appendChild(statusBox);
+
+    // Keyring status
+    if (!providersInfo?.keyring_available) {
+      const keyringWarning = el('div');
+      keyringWarning.innerHTML = `<span style="color: #f59e0b;">⚠️ System keyring not available. API keys cannot be stored securely.</span>`;
+      keyringWarning.style.cssText = 'font-size: 12px; margin-bottom: 16px;';
+      statusSection.appendChild(keyringWarning);
+    }
+
+    // API Key Input
+    const apiKeyRow = createSettingRow('API Key', 'Your Anthropic API key (stored in system keyring)');
+    const apiKeyInput = el('input') as HTMLInputElement;
+    apiKeyInput.type = 'password';
+    apiKeyInput.placeholder = anthropicStatus?.has_api_key ? '••••••••••••••••' : 'sk-ant-...';
+    apiKeyInput.style.cssText = `
+      flex: 1;
+      padding: 8px 12px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid #444;
+      border-radius: 4px;
+      color: #fff;
+      font-family: monospace;
+      font-size: 13px;
+    `;
+
+    const saveKeyBtn = el('button');
+    saveKeyBtn.textContent = anthropicStatus?.has_api_key ? 'Update' : 'Save';
+    saveKeyBtn.style.cssText = `
+      padding: 8px 16px;
+      background: #3b82f6;
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+    `;
+    saveKeyBtn.addEventListener('click', async () => {
+      if (!apiKeyInput.value) {
+        alert('Please enter an API key');
+        return;
+      }
+      saveKeyBtn.textContent = 'Saving...';
+      saveKeyBtn.style.opacity = '0.6';
+      try {
+        await kernelRequest('anthropic/set_key', { api_key: apiKeyInput.value });
+        apiKeyInput.value = '';
+        await loadData();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        alert('Failed to save API key: ' + msg);
+      }
+      saveKeyBtn.style.opacity = '1';
+      saveKeyBtn.textContent = 'Save';
+    });
+
+    apiKeyRow.appendChild(apiKeyInput);
+    apiKeyRow.appendChild(saveKeyBtn);
+
+    // Delete key button (if key exists)
+    if (anthropicStatus?.has_api_key) {
+      const deleteKeyBtn = el('button');
+      deleteKeyBtn.textContent = 'Delete';
+      deleteKeyBtn.style.cssText = `
+        padding: 8px 16px;
+        background: rgba(239, 68, 68, 0.2);
+        border: 1px solid rgba(239, 68, 68, 0.4);
+        border-radius: 4px;
+        color: #ef4444;
+        cursor: pointer;
+        font-size: 13px;
+        margin-left: 8px;
+      `;
+      deleteKeyBtn.addEventListener('click', async () => {
+        if (!confirm('Delete your Anthropic API key?')) return;
+        try {
+          await kernelRequest('anthropic/delete_key', {});
+          await loadData();
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          alert('Failed to delete API key: ' + msg);
+        }
+      });
+      apiKeyRow.appendChild(deleteKeyBtn);
+    }
+
+    statusSection.appendChild(apiKeyRow);
+    content.appendChild(statusSection);
+
+    // Model Selection Section
+    const modelSection = createSection('Model');
+
+    const modelRow = el('div');
+    modelRow.style.cssText = `
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    `;
+
+    const currentModel = anthropicStatus?.model || 'claude-sonnet-4-20250514';
+    for (const model of anthropicStatus?.available_models || []) {
+      const modelBtn = el('button');
+      const isSelected = model.name === currentModel;
+      modelBtn.innerHTML = `
+        <strong>${model.name.replace('claude-', '').replace(/-20\d+$/, '')}</strong>
+        <span style="font-size: 11px; opacity: 0.7; display: block;">${model.description}</span>
+      `;
+      modelBtn.style.cssText = `
+        padding: 12px 16px;
+        background: ${isSelected ? 'rgba(59, 130, 246, 0.3)' : 'rgba(0,0,0,0.2)'};
+        border: 1px solid ${isSelected ? '#3b82f6' : '#444'};
+        border-radius: 8px;
+        color: #fff;
+        cursor: pointer;
+        text-align: left;
+        min-width: 180px;
+      `;
+      modelBtn.addEventListener('click', async () => {
+        try {
+          await kernelRequest('anthropic/set_model', { model: model.name });
+          await loadData();
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          alert('Failed to set model: ' + msg);
+        }
+      });
+      modelRow.appendChild(modelBtn);
+    }
+
+    modelSection.appendChild(modelRow);
+    content.appendChild(modelSection);
+
+    // Info section
+    const infoSection = createSection('About Anthropic');
+    const infoText = el('div');
+    infoText.innerHTML = `
+      <p style="margin: 0 0 8px 0; color: rgba(255,255,255,0.7);">
+        Anthropic's Claude models are accessed via cloud API. Your prompts are sent to Anthropic's servers.
+      </p>
+      <p style="margin: 0; color: rgba(255,255,255,0.5); font-size: 12px;">
+        Get your API key at <a href="https://console.anthropic.com" target="_blank" style="color: #3b82f6;">console.anthropic.com</a>
+      </p>
+    `;
+    infoSection.appendChild(infoText);
+    content.appendChild(infoSection);
+  }
+
+  function renderOllamaSettings() {
     // Connection Status Section
     const statusSection = createSection('Connection Status');
 
@@ -410,6 +731,56 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
     statusBox.appendChild(statusText);
     statusBox.appendChild(testBtn);
     statusSection.appendChild(statusBox);
+
+    // Show install prompt if Ollama not installed
+    if (ollamaInstallStatus && !ollamaInstallStatus.installed) {
+      const installBox = el('div');
+      installBox.style.cssText = `
+        padding: 16px;
+        background: rgba(245, 158, 11, 0.1);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        border-radius: 8px;
+        margin-bottom: 16px;
+      `;
+      installBox.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="font-size: 24px;">⚠️</span>
+          <div style="flex: 1;">
+            <strong style="color: #f59e0b;">Ollama Not Installed</strong>
+            <p style="margin: 4px 0 0 0; color: rgba(255,255,255,0.7); font-size: 13px;">
+              Install Ollama for local AI inference. Your data stays on your machine.
+            </p>
+          </div>
+        </div>
+        <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+          <code style="flex: 1; padding: 8px 12px; background: rgba(0,0,0,0.3); border-radius: 4px; font-size: 12px; color: #a5f3fc;">
+            ${ollamaInstallStatus.install_command}
+          </code>
+          <button id="copyOllamaInstallCmd" style="padding: 8px 12px; background: #3b82f6; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px; white-space: nowrap;">
+            Copy
+          </button>
+        </div>
+      `;
+      statusSection.appendChild(installBox);
+
+      // Wire up copy button
+      const copyBtn = document.getElementById('copyOllamaInstallCmd');
+      const installCmd = ollamaInstallStatus.install_command;
+      if (copyBtn && installCmd) {
+        copyBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(installCmd);
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+          } catch {
+            copyBtn.textContent = 'Failed';
+            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+          }
+        });
+      }
+    }
+
+    content.appendChild(statusSection);
 
 
     // URL Setting

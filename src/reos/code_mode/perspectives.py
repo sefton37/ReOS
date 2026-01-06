@@ -18,7 +18,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from reos.ollama import OllamaClient
+    from reos.providers import LLMProvider
 
 
 class Phase(Enum):
@@ -302,8 +302,8 @@ class PerspectiveManager:
     ensuring the LLM approaches each task with the right mindset.
     """
 
-    def __init__(self, ollama: OllamaClient | None = None) -> None:
-        self._ollama = ollama
+    def __init__(self, llm: "LLMProvider | None" = None) -> None:
+        self._llm = llm
         self._current_phase: Phase | None = None
         self._current_perspective: Perspective | None = None
 
@@ -345,7 +345,7 @@ class PerspectiveManager:
         Returns:
             The LLM response.
         """
-        if self._ollama is None:
+        if self._llm is None:
             return f"[{phase.value}] No LLM available"
 
         perspective = self.shift_to(phase)
@@ -354,7 +354,7 @@ class PerspectiveManager:
         if context:
             system = f"{system}\n\nCONTEXT:\n{context}"
 
-        response = self._ollama.chat_text(
+        response = self._llm.chat_text(
             system=system,
             user=user_prompt,
             temperature=perspective.temperature,
@@ -378,7 +378,7 @@ class PerspectiveManager:
         Returns:
             The LLM JSON response.
         """
-        if self._ollama is None:
+        if self._llm is None:
             return "{}"
 
         perspective = self.shift_to(phase)
@@ -387,7 +387,7 @@ class PerspectiveManager:
         if context:
             system = f"{system}\n\nCONTEXT:\n{context}"
 
-        response = self._ollama.chat_json(
+        response = self._llm.chat_json(
             system=system,
             user=user_prompt,
             temperature=perspective.temperature,

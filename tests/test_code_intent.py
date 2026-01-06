@@ -29,7 +29,7 @@ class TestIntentDiscoverer:
     def test_discover_returns_intent(self, temp_git_repo: Path) -> None:
         """Should return DiscoveredIntent."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test Project",
@@ -53,7 +53,7 @@ class TestPromptIntentAnalysis:
     def test_extracts_action_verb(self, temp_git_repo: Path) -> None:
         """Should extract action verbs from prompts."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
 
         prompt_intent = discoverer._analyze_prompt("add a new function")
 
@@ -62,7 +62,7 @@ class TestPromptIntentAnalysis:
     def test_extracts_target(self, temp_git_repo: Path) -> None:
         """Should extract target from prompts."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
 
         prompt_intent = discoverer._analyze_prompt("create a class for users")
 
@@ -71,7 +71,7 @@ class TestPromptIntentAnalysis:
     def test_stores_raw_prompt(self, temp_git_repo: Path) -> None:
         """Should store the raw prompt."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
 
         prompt = "implement the login feature"
         prompt_intent = discoverer._analyze_prompt(prompt)
@@ -85,7 +85,7 @@ class TestPlayIntentAnalysis:
     def test_extracts_act_goal(self, temp_git_repo: Path) -> None:
         """Should extract Act goal."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Build User Auth",
@@ -100,7 +100,7 @@ class TestPlayIntentAnalysis:
     def test_extracts_artifact_type(self, temp_git_repo: Path) -> None:
         """Should extract artifact type."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -116,7 +116,7 @@ class TestPlayIntentAnalysis:
     def test_gets_recent_commits(self, temp_git_repo: Path) -> None:
         """Should get recent commit messages."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -136,7 +136,7 @@ class TestCodebaseIntentAnalysis:
     def test_detects_language(self, temp_git_repo: Path) -> None:
         """Should detect primary language."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
 
         codebase_intent = discoverer._analyze_codebase("add function")
 
@@ -146,7 +146,7 @@ class TestCodebaseIntentAnalysis:
     def test_detects_architecture(self, temp_git_repo: Path) -> None:
         """Should detect architecture style."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
 
         codebase_intent = discoverer._analyze_codebase("add function")
 
@@ -155,7 +155,7 @@ class TestCodebaseIntentAnalysis:
     def test_finds_related_files(self, temp_git_repo: Path) -> None:
         """Should find files related to prompt."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
 
         # Search for "hello" which exists in example.py
         codebase_intent = discoverer._analyze_codebase("hello function")
@@ -170,7 +170,7 @@ class TestIntentSynthesis:
     def test_synthesizes_goal(self, temp_git_repo: Path) -> None:
         """Should synthesize a clear goal."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test Project",
@@ -186,7 +186,7 @@ class TestIntentSynthesis:
     def test_includes_constraints(self, temp_git_repo: Path) -> None:
         """Should include constraints from codebase."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test Project",
@@ -202,7 +202,7 @@ class TestIntentSynthesis:
     def test_generates_summary(self, temp_git_repo: Path) -> None:
         """Should generate human-readable summary."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test Project",

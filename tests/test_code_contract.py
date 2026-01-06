@@ -283,8 +283,8 @@ class TestContractBuilder:
     def test_build_from_intent(self, temp_git_repo: Path) -> None:
         """Should build contract from intent."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
-        builder = ContractBuilder(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
+        builder = ContractBuilder(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -302,8 +302,8 @@ class TestContractBuilder:
     def test_contract_has_steps(self, temp_git_repo: Path) -> None:
         """Built contract should have steps."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
-        builder = ContractBuilder(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
+        builder = ContractBuilder(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -319,8 +319,8 @@ class TestContractBuilder:
     def test_contract_status_is_draft(self, temp_git_repo: Path) -> None:
         """New contract should be in draft status."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
-        builder = ContractBuilder(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
+        builder = ContractBuilder(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",
@@ -336,8 +336,8 @@ class TestContractBuilder:
     def test_build_gap_contract(self, temp_git_repo: Path) -> None:
         """Should build gap contract for unfulfilled criteria."""
         sandbox = CodeSandbox(temp_git_repo)
-        discoverer = IntentDiscoverer(sandbox, ollama=None)
-        builder = ContractBuilder(sandbox, ollama=None)
+        discoverer = IntentDiscoverer(sandbox, llm=None)
+        builder = ContractBuilder(sandbox, llm=None)
         act = Act(
             act_id="test",
             title="Test",

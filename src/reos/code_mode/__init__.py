@@ -131,6 +131,40 @@ from reos.code_mode.lsp_manager import (
     get_available_servers,
 )
 
+# Project Memory (Long-term learning)
+from reos.code_mode.project_memory import (
+    ProjectMemoryStore,
+    ProjectDecision,
+    ProjectPattern,
+    UserCorrection,
+    CodingSession,
+    CodeChange,
+    ProjectMemoryContext,
+)
+
+# Streaming (Real-time execution UI)
+from reos.code_mode.streaming import (
+    ExecutionStateSnapshot,
+    CodeExecutionContext,
+    ExecutionObserver,
+    ExecutionCancelledError,
+    create_execution_context,
+    PHASE_INFO,
+)
+
+# Multi-path Exploration
+from reos.code_mode.explorer import (
+    StepExplorer,
+    StepAlternative,
+    ExplorationState,
+)
+
+# API Documentation Lookup (prevent hallucination)
+from reos.code_mode.api_docs import (
+    APIDocumentation,
+    APIDocumentationLookup,
+)
+
 __all__ = [
     # Sandbox
     "CodeSandbox",
@@ -215,4 +249,26 @@ __all__ = [
     "DEFAULT_SERVERS",
     "check_lsp_server",
     "get_available_servers",
+    # Project Memory
+    "ProjectMemoryStore",
+    "ProjectDecision",
+    "ProjectPattern",
+    "UserCorrection",
+    "CodingSession",
+    "CodeChange",
+    "ProjectMemoryContext",
+    # Streaming
+    "ExecutionStateSnapshot",
+    "CodeExecutionContext",
+    "ExecutionObserver",
+    "ExecutionCancelledError",
+    "create_execution_context",
+    "PHASE_INFO",
+    # Multi-path Exploration
+    "StepExplorer",
+    "StepAlternative",
+    "ExplorationState",
+    # API Documentation Lookup
+    "APIDocumentation",
+    "APIDocumentationLookup",
 ]

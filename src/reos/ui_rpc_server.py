@@ -532,6 +532,10 @@ def _handle_approval_explain(
 _reasoning_engines: dict[str, Any] = {}
 _active_executions: dict[str, Any] = {}
 
+# Store active Code Mode streaming executions
+_active_code_executions: dict[str, Any] = {}
+_code_exec_lock = threading.Lock()
+
 
 def _get_reasoning_engine(conversation_id: str, db: Database) -> Any:
     """Get or create a reasoning engine for a conversation."""
@@ -1073,6 +1077,210 @@ def _handle_execution_kill(
     killed = executor.kill(execution_id)
 
     return {"ok": killed, "message": "Execution killed" if killed else "Execution not found or already complete"}
+
+
+# -------------------------------------------------------------------------
+# Code Mode Streaming Execution handlers
+# -------------------------------------------------------------------------
+
+
+def _handle_code_exec_start(
+    db: Database,
+    *,
+    session_id: str,
+    prompt: str,
+    repo_path: str,
+    max_iterations: int = 10,
+    auto_approve: bool = True,
+) -> dict[str, Any]:
+    """Start a Code Mode execution in a background thread.
+
+    Returns immediately with an execution_id that can be polled for state.
+    """
+    from pathlib import Path
+    from .code_mode import (
+        CodeSandbox,
+        CodeExecutor,
+        ExecutionObserver,
+        create_execution_context,
+    )
+    from .play_fs import load_play
+
+    # Create execution context
+    context = create_execution_context(
+        session_id=session_id,
+        prompt=prompt,
+        max_iterations=max_iterations,
+    )
+
+    # Create observer that updates the context
+    observer = ExecutionObserver(context)
+
+    # Create sandbox and executor
+    sandbox = CodeSandbox(Path(repo_path))
+
+    # Get Ollama client if configured
+    ollama = None
+    try:
+        from .ollama import OllamaClient
+        stored_url = db.get_state("ollama_url")
+        stored_model = db.get_state("ollama_model")
+        if stored_url and stored_model:
+            ollama = OllamaClient(base_url=stored_url, model=stored_model)
+    except Exception:
+        pass
+
+    # Get project memory if available
+    project_memory = None
+    try:
+        from .code_mode.project_memory import ProjectMemoryStore
+        project_memory = ProjectMemoryStore(db=db)
+    except Exception:
+        pass
+
+    executor = CodeExecutor(
+        sandbox=sandbox,
+        ollama=ollama,
+        project_memory=project_memory,
+        observer=observer,
+    )
+
+    # Load the Act for context
+    play = load_play(db)
+    act = play.get_active_act()
+
+    def run_execution() -> None:
+        """Run the execution in background thread."""
+        try:
+            result = executor.execute(
+                prompt=prompt,
+                act=act,
+                max_iterations=max_iterations,
+                auto_approve=auto_approve,
+            )
+            context.result = result
+            context.is_complete = True
+        except Exception as e:
+            context.error = str(e)
+            context.is_complete = True
+            observer.on_error(str(e))
+
+    # Start background thread
+    thread = threading.Thread(target=run_execution, daemon=True)
+    context.thread = thread
+
+    # Track the execution
+    with _code_exec_lock:
+        _active_code_executions[context.execution_id] = context
+
+    thread.start()
+
+    return {
+        "execution_id": context.execution_id,
+        "session_id": session_id,
+        "status": "started",
+    }
+
+
+def _handle_code_exec_state(
+    db: Database,
+    *,
+    execution_id: str,
+) -> dict[str, Any]:
+    """Get the current state of a Code Mode execution."""
+    with _code_exec_lock:
+        context = _active_code_executions.get(execution_id)
+
+    if not context:
+        raise RpcError(code=-32602, message=f"Code execution not found: {execution_id}")
+
+    # Get current output lines
+    output_lines = context.get_output_lines()
+
+    # Update state with latest output
+    if context.state:
+        context.state.output_lines = output_lines
+
+        # Return serialized state
+        return context.state.to_dict()
+
+    # Fallback if no state
+    return {
+        "execution_id": execution_id,
+        "status": "unknown",
+        "is_complete": context.is_complete,
+        "error": context.error,
+        "output_lines": output_lines,
+    }
+
+
+def _handle_code_exec_cancel(
+    db: Database,
+    *,
+    execution_id: str,
+) -> dict[str, Any]:
+    """Cancel a running Code Mode execution."""
+    with _code_exec_lock:
+        context = _active_code_executions.get(execution_id)
+
+    if not context:
+        raise RpcError(code=-32602, message=f"Code execution not found: {execution_id}")
+
+    if context.is_complete:
+        return {"ok": False, "message": "Execution already complete"}
+
+    # Request cancellation
+    context.request_cancel()
+
+    return {"ok": True, "message": "Cancellation requested"}
+
+
+def _handle_code_exec_list(
+    db: Database,
+) -> dict[str, Any]:
+    """List all active Code Mode executions."""
+    with _code_exec_lock:
+        executions = []
+        for exec_id, context in _active_code_executions.items():
+            executions.append({
+                "execution_id": exec_id,
+                "session_id": context.state.session_id if context.state else "",
+                "prompt": context.state.prompt[:100] if context.state else "",
+                "status": context.state.status if context.state else "unknown",
+                "is_complete": context.is_complete,
+            })
+
+    return {"executions": executions}
+
+
+def _handle_code_exec_cleanup(
+    db: Database,
+    *,
+    execution_id: str | None = None,
+) -> dict[str, Any]:
+    """Clean up completed Code Mode executions."""
+    with _code_exec_lock:
+        if execution_id:
+            # Clean up specific execution
+            if execution_id in _active_code_executions:
+                context = _active_code_executions[execution_id]
+                if context.is_complete:
+                    del _active_code_executions[execution_id]
+                    return {"ok": True, "cleaned": 1}
+                else:
+                    return {"ok": False, "message": "Execution still running"}
+            return {"ok": False, "message": "Execution not found"}
+
+        # Clean up all completed executions
+        to_remove = [
+            exec_id
+            for exec_id, context in _active_code_executions.items()
+            if context.is_complete
+        ]
+        for exec_id in to_remove:
+            del _active_code_executions[exec_id]
+
+        return {"ok": True, "cleaned": len(to_remove)}
 
 
 # -------------------------------------------------------------------------
@@ -1856,6 +2064,206 @@ def _handle_ollama_test_connection(db: Database, *, url: str | None = None) -> d
         "model_count": health.model_count,
         "error": health.error,
     }
+
+
+def _handle_ollama_check_installed(_db: Database) -> dict[str, Any]:
+    """Check if Ollama is installed on the system."""
+    from .providers import check_ollama_installed, get_ollama_install_command
+
+    return {
+        "installed": check_ollama_installed(),
+        "install_command": get_ollama_install_command(),
+    }
+
+
+# --- Provider Settings Handlers ---
+
+
+def _handle_providers_list(db: Database) -> dict[str, Any]:
+    """List available LLM providers and current selection."""
+    from .providers import (
+        list_providers,
+        get_current_provider_type,
+        check_keyring_available,
+        has_api_key,
+    )
+
+    current = get_current_provider_type(db)
+    providers = list_providers()
+
+    return {
+        "current_provider": current,
+        "available_providers": [
+            {
+                "id": p.id,
+                "name": p.name,
+                "description": p.description,
+                "is_local": p.is_local,
+                "requires_api_key": p.requires_api_key,
+                "has_api_key": has_api_key(p.id) if p.requires_api_key else None,
+            }
+            for p in providers
+        ],
+        "keyring_available": check_keyring_available(),
+    }
+
+
+def _handle_providers_set(db: Database, *, provider: str) -> dict[str, Any]:
+    """Set active LLM provider."""
+    from .providers import set_provider_type, get_provider_info, LLMError
+
+    info = get_provider_info(provider)
+    if not info:
+        raise RpcError(code=-32602, message=f"Unknown provider: {provider}")
+
+    try:
+        set_provider_type(db, provider)
+    except LLMError as e:
+        raise RpcError(code=-32010, message=str(e)) from e
+
+    return {"ok": True, "provider": provider}
+
+
+def _handle_providers_status(db: Database) -> dict[str, Any]:
+    """Get current provider status and health."""
+    from .providers import (
+        get_current_provider_type,
+        check_provider_health,
+        get_provider_or_none,
+    )
+    from dataclasses import asdict
+
+    provider_type = get_current_provider_type(db)
+    health = check_provider_health(db)
+    provider = get_provider_or_none(db)
+
+    result = {
+        "provider": provider_type,
+        "health": asdict(health),
+    }
+
+    # Add models if provider is available
+    if provider:
+        try:
+            models = provider.list_models()
+            result["models"] = [
+                {
+                    "name": m.name,
+                    "size_gb": m.size_gb,
+                    "context_length": m.context_length,
+                    "capabilities": m.capabilities,
+                    "description": m.description,
+                }
+                for m in models
+            ]
+        except Exception:
+            result["models"] = []
+
+    return result
+
+
+def _handle_anthropic_set_key(db: Database, *, api_key: str) -> dict[str, Any]:
+    """Store Anthropic API key in system keyring."""
+    from .providers import store_api_key, AnthropicProvider, check_keyring_available
+
+    if not api_key or len(api_key) < 10:
+        raise RpcError(code=-32602, message="Invalid API key format")
+
+    if not check_keyring_available():
+        raise RpcError(
+            code=-32010,
+            message="System keyring not available. Cannot securely store API key.",
+        )
+
+    # Test the key before storing
+    try:
+        provider = AnthropicProvider(api_key=api_key)
+        health = provider.check_health()
+        if not health.reachable:
+            raise RpcError(
+                code=-32010,
+                message=f"Invalid API key: {health.error or 'Connection failed'}",
+            )
+    except Exception as e:
+        if "RpcError" in str(type(e)):
+            raise
+        raise RpcError(code=-32010, message=f"API key validation failed: {e}") from e
+
+    # Store the key
+    store_api_key("anthropic", api_key)
+
+    return {"ok": True}
+
+
+def _handle_anthropic_delete_key(_db: Database) -> dict[str, Any]:
+    """Delete Anthropic API key from keyring."""
+    from .providers import delete_api_key
+
+    deleted = delete_api_key("anthropic")
+    return {"ok": deleted}
+
+
+def _handle_anthropic_set_model(db: Database, *, model: str) -> dict[str, Any]:
+    """Set Anthropic model preference."""
+    from .providers import CLAUDE_MODELS
+
+    valid_models = [m.name for m in CLAUDE_MODELS]
+    if model not in valid_models:
+        raise RpcError(
+            code=-32602,
+            message=f"Invalid model. Valid options: {', '.join(valid_models)}",
+        )
+
+    db.set_state(key="anthropic_model", value=model)
+    return {"ok": True, "model": model}
+
+
+def _handle_anthropic_status(db: Database) -> dict[str, Any]:
+    """Get Anthropic provider status."""
+    from .providers import (
+        AnthropicProvider,
+        get_api_key,
+        has_api_key,
+        check_keyring_available,
+        CLAUDE_MODELS,
+    )
+    from dataclasses import asdict
+
+    has_key = has_api_key("anthropic")
+    stored_model = db.get_state(key="anthropic_model")
+    model = stored_model if stored_model else "claude-sonnet-4-20250514"
+
+    result = {
+        "has_api_key": has_key,
+        "keyring_available": check_keyring_available(),
+        "model": model,
+        "available_models": [
+            {
+                "name": m.name,
+                "context_length": m.context_length,
+                "capabilities": m.capabilities,
+                "description": m.description,
+            }
+            for m in CLAUDE_MODELS
+        ],
+    }
+
+    # Test connection if key is available
+    if has_key:
+        try:
+            api_key = get_api_key("anthropic")
+            if api_key:
+                provider = AnthropicProvider(api_key=api_key, model=model)
+                health = provider.check_health()
+                result["health"] = asdict(health)
+            else:
+                result["health"] = {"reachable": False, "error": "No API key found"}
+        except Exception as e:
+            result["health"] = {"reachable": False, "error": str(e)}
+    else:
+        result["health"] = {"reachable": False, "error": "No API key configured"}
+
+    return result
 
 
 def _sha256_text(text: str) -> str:
@@ -3132,6 +3540,47 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
         if method == "system/hardware":
             return _jsonrpc_result(req_id=req_id, result=_handle_system_hardware(db))
 
+        if method == "ollama/check_installed":
+            return _jsonrpc_result(req_id=req_id, result=_handle_ollama_check_installed(db))
+
+        # --- Provider Settings Methods ---
+
+        if method == "providers/list":
+            return _jsonrpc_result(req_id=req_id, result=_handle_providers_list(db))
+
+        if method == "providers/set":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            provider = params.get("provider")
+            if not isinstance(provider, str) or not provider:
+                raise RpcError(code=-32602, message="provider is required")
+            return _jsonrpc_result(req_id=req_id, result=_handle_providers_set(db, provider=provider))
+
+        if method == "providers/status":
+            return _jsonrpc_result(req_id=req_id, result=_handle_providers_status(db))
+
+        if method == "anthropic/set_key":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            api_key = params.get("api_key")
+            if not isinstance(api_key, str) or not api_key:
+                raise RpcError(code=-32602, message="api_key is required")
+            return _jsonrpc_result(req_id=req_id, result=_handle_anthropic_set_key(db, api_key=api_key))
+
+        if method == "anthropic/delete_key":
+            return _jsonrpc_result(req_id=req_id, result=_handle_anthropic_delete_key(db))
+
+        if method == "anthropic/set_model":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            model = params.get("model")
+            if not isinstance(model, str) or not model:
+                raise RpcError(code=-32602, message="model is required")
+            return _jsonrpc_result(req_id=req_id, result=_handle_anthropic_set_model(db, model=model))
+
+        if method == "anthropic/status":
+            return _jsonrpc_result(req_id=req_id, result=_handle_anthropic_status(db))
+
         if method == "play/me/read":
             return _jsonrpc_result(req_id=req_id, result=_handle_play_me_read(db))
 
@@ -3870,6 +4319,73 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             return _jsonrpc_result(
                 req_id=req_id,
                 result=_handle_code_map_clear(db, session_id=session_id),
+            )
+
+        # -------------------------------------------------------------------------
+        # Code Mode Streaming Execution
+        # -------------------------------------------------------------------------
+
+        if method == "code/exec/start":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_id = params.get("session_id")
+            prompt = params.get("prompt")
+            repo_path = params.get("repo_path")
+            if not isinstance(session_id, str) or not session_id:
+                raise RpcError(code=-32602, message="session_id is required")
+            if not isinstance(prompt, str) or not prompt:
+                raise RpcError(code=-32602, message="prompt is required")
+            if not isinstance(repo_path, str) or not repo_path:
+                raise RpcError(code=-32602, message="repo_path is required")
+            max_iterations = params.get("max_iterations", 10)
+            auto_approve = params.get("auto_approve", True)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_exec_start(
+                    db,
+                    session_id=session_id,
+                    prompt=prompt,
+                    repo_path=repo_path,
+                    max_iterations=max_iterations,
+                    auto_approve=auto_approve,
+                ),
+            )
+
+        if method == "code/exec/state":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            execution_id = params.get("execution_id")
+            if not isinstance(execution_id, str) or not execution_id:
+                raise RpcError(code=-32602, message="execution_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_exec_state(db, execution_id=execution_id),
+            )
+
+        if method == "code/exec/cancel":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            execution_id = params.get("execution_id")
+            if not isinstance(execution_id, str) or not execution_id:
+                raise RpcError(code=-32602, message="execution_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_exec_cancel(db, execution_id=execution_id),
+            )
+
+        if method == "code/exec/list":
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_exec_list(db),
+            )
+
+        if method == "code/exec/cleanup":
+            if not isinstance(params, dict):
+                params = {}
+            execution_id = params.get("execution_id")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_code_exec_cleanup(db, execution_id=execution_id),
             )
 
         raise RpcError(code=-32601, message=f"Method not found: {method}")

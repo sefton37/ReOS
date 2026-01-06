@@ -493,3 +493,118 @@ export type CodeDiffRejectResult = {
 export type CodeDiffClearResult = {
   ok: boolean;
 };
+
+// Code Mode Streaming Execution types
+export type CodeExecutionStep = {
+  id: string;
+  description: string;
+  action: string;
+  target_file: string | null;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+};
+
+export type CodeExecutionCriterion = {
+  id: string;
+  description: string;
+  type: string;
+  verified: boolean;
+};
+
+export type CodeExecutionDiagnosis = {
+  root_cause: string;
+  failure_type: string;
+  confidence: 'high' | 'medium' | 'low';
+  needs_more_info: boolean;
+};
+
+export type CodeExecutionAlternative = {
+  id: string;
+  approach: string;
+  rationale: string;
+  score: number;
+};
+
+export type CodeExplorationResult = {
+  approach: string;
+  success: boolean;
+};
+
+export type CodeExecutionState = {
+  execution_id: string;
+  session_id: string;
+  prompt: string;
+
+  // Phase tracking
+  status: string;
+  phase: string;
+  phase_description: string;
+  phase_index: number;  // 0-8 for progress bar
+
+  // Progress metrics
+  iteration: number;
+  max_iterations: number;
+  steps_completed: number;
+  steps_total: number;
+  criteria_fulfilled: number;
+  criteria_total: number;
+
+  // Current activity
+  current_step: CodeExecutionStep | null;
+  current_criterion: CodeExecutionCriterion | null;
+
+  // Output (last N lines)
+  output_lines: string[];
+
+  // Debug info
+  debug_attempt: number;
+  debug_diagnosis: CodeExecutionDiagnosis | null;
+
+  // Exploration info (multi-path alternatives)
+  is_exploring: boolean;
+  exploration_alternatives_total: number;
+  exploration_current_idx: number;
+  exploration_current_alternative: CodeExecutionAlternative | null;
+  exploration_results: CodeExplorationResult[];
+
+  // Files changed
+  files_changed: string[];
+
+  // Completion
+  is_complete: boolean;
+  success: boolean | null;
+  error: string | null;
+  result_message: string | null;
+
+  // Timing
+  started_at: string;
+  elapsed_seconds: number;
+};
+
+export type CodeExecStartResult = {
+  execution_id: string;
+  session_id: string;
+  status: 'started';
+};
+
+export type CodeExecStateResult = CodeExecutionState;
+
+export type CodeExecCancelResult = {
+  ok: boolean;
+  message: string;
+};
+
+export type CodeExecListResult = {
+  executions: Array<{
+    execution_id: string;
+    session_id: string;
+    prompt: string;
+    status: string;
+    is_complete: boolean;
+  }>;
+};
+
+export type CodeExecCleanupResult = {
+  ok: boolean;
+  cleaned?: number;
+  message?: string;
+};
