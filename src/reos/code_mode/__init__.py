@@ -59,6 +59,7 @@ from reos.code_mode.perspectives import (
     ARCHITECT,
     ENGINEER,
     CRITIC,
+    DEBUGGER,
     INTEGRATOR,
     GAP_ANALYZER,
 )
@@ -71,6 +72,7 @@ from reos.code_mode.executor import (
     LoopStatus,
     LoopIteration,
     StepResult,
+    DebugDiagnosis,
 )
 
 __all__ = [
@@ -108,6 +110,7 @@ __all__ = [
     "ARCHITECT",
     "ENGINEER",
     "CRITIC",
+    "DEBUGGER",
     "INTEGRATOR",
     "GAP_ANALYZER",
     # Executor
@@ -117,4 +120,5 @@ __all__ = [
     "LoopStatus",
     "LoopIteration",
     "StepResult",
+    "DebugDiagnosis",
 ]

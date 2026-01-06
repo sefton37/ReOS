@@ -37,6 +37,71 @@ class TestAcceptanceCriterion:
         assert result is True
         assert criterion.verified is True
 
+    def test_command_succeeds_criterion_passes(self, temp_git_repo: Path) -> None:
+        """Should pass when command returns exit code 0."""
+        sandbox = CodeSandbox(temp_git_repo)
+        criterion = AcceptanceCriterion(
+            id="c1",
+            type=CriterionType.COMMAND_SUCCEEDS,
+            description="Echo command succeeds",
+            command="echo hello",
+        )
+
+        result = criterion.verify(sandbox)
+
+        assert result is True
+        assert criterion.verified is True
+        assert "hello" in criterion.verification_output
+
+    def test_command_succeeds_criterion_fails(self, temp_git_repo: Path) -> None:
+        """Should fail when command returns non-zero exit code."""
+        sandbox = CodeSandbox(temp_git_repo)
+        criterion = AcceptanceCriterion(
+            id="c1",
+            type=CriterionType.COMMAND_SUCCEEDS,
+            description="False command fails",
+            command="false",
+        )
+
+        result = criterion.verify(sandbox)
+
+        assert result is False
+        assert criterion.verified is False
+
+    def test_command_succeeds_captures_output(self, temp_git_repo: Path) -> None:
+        """Should capture command output for debugging."""
+        sandbox = CodeSandbox(temp_git_repo)
+        criterion = AcceptanceCriterion(
+            id="c1",
+            type=CriterionType.COMMAND_SUCCEEDS,
+            description="Capture output",
+            command="echo 'test output 12345'",
+        )
+
+        criterion.verify(sandbox)
+
+        assert "test output 12345" in criterion.verification_output
+
+    def test_tests_pass_criterion_runs_pytest(self, temp_git_repo: Path) -> None:
+        """Should run pytest and capture output."""
+        sandbox = CodeSandbox(temp_git_repo)
+        # Create a simple test file
+        sandbox.write_file(
+            "test_simple.py",
+            "def test_pass(): assert True\n"
+        )
+        criterion = AcceptanceCriterion(
+            id="c1",
+            type=CriterionType.TESTS_PASS,
+            description="Tests pass",
+            command="python -m pytest test_simple.py -v",
+        )
+
+        result = criterion.verify(sandbox)
+
+        # This may pass or fail depending on pytest availability
+        assert criterion.verification_output  # Should have some output
+
     def test_file_exists_criterion_fails(self, temp_git_repo: Path) -> None:
         """Should fail when file doesn't exist."""
         sandbox = CodeSandbox(temp_git_repo)

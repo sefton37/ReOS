@@ -50,6 +50,7 @@ class CriterionType(Enum):
     CODE_COMPILES = "code_compiles"       # Code must compile/lint
     FUNCTION_EXISTS = "function_exists"   # A function must exist
     CLASS_EXISTS = "class_exists"         # A class must exist
+    COMMAND_SUCCEEDS = "command_succeeds" # Arbitrary command returns 0
     CUSTOM = "custom"                     # Custom verification
 
 
@@ -87,6 +88,8 @@ class AcceptanceCriterion:
                 result = self._verify_function_exists(sandbox)
             elif self.type == CriterionType.CLASS_EXISTS:
                 result = self._verify_class_exists(sandbox)
+            elif self.type == CriterionType.COMMAND_SUCCEEDS:
+                result = self._verify_command_succeeds(sandbox)
             # else: Custom - cannot auto-verify, result stays False
         except Exception as e:
             self.verification_output = f"Error: {e}"
@@ -194,6 +197,17 @@ class AcceptanceCriterion:
             return True
         self.verification_output = f"Class '{self.pattern}' not found"
         return False
+
+    def _verify_command_succeeds(self, sandbox: CodeSandbox) -> bool:
+        """Verify an arbitrary command returns exit code 0."""
+        if not self.command:
+            self.verification_output = "No command specified"
+            return False
+        returncode, stdout, stderr = sandbox.run_command(self.command, timeout=120)
+        # Capture full output for debugging
+        output = stdout if stdout else stderr
+        self.verification_output = output[:2000] if output else f"Exit code: {returncode}"
+        return returncode == 0
 
 
 @dataclass

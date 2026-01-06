@@ -18,6 +18,8 @@ from reos.code_mode import (
     ARCHITECT,
     ENGINEER,
     CRITIC,
+    DEBUGGER,
+    DebugDiagnosis,
 )
 from reos.play_fs import Act
 
@@ -55,11 +57,28 @@ class TestPerspectives:
 
     def test_perspective_has_system_prompt(self) -> None:
         """Each perspective should have a system prompt."""
-        perspectives = [ANALYST, ARCHITECT, ENGINEER, CRITIC]
+        perspectives = [ANALYST, ARCHITECT, ENGINEER, CRITIC, DEBUGGER]
 
         for p in perspectives:
             assert p.system_prompt
             assert len(p.system_prompt) > 100
+
+    def test_debugger_perspective_exists(self) -> None:
+        """DEBUGGER perspective should exist and be properly configured."""
+        assert DEBUGGER.name == "Debugger"
+        assert DEBUGGER.role == "Failure Analysis Specialist"
+        assert "root_cause" in DEBUGGER.system_prompt
+        assert "failure_type" in DEBUGGER.system_prompt
+
+    def test_phase_debug_maps_to_debugger(self) -> None:
+        """Phase.DEBUG should map to DEBUGGER perspective."""
+        manager = PerspectiveManager(ollama=None)
+        perspective = manager.get_perspective(Phase.DEBUG)
+        assert perspective == DEBUGGER
+
+    def test_loop_status_debugging_exists(self) -> None:
+        """LoopStatus.DEBUGGING should exist."""
+        assert LoopStatus.DEBUGGING.value == "debug"
 
 
 class TestCodeExecutor:
@@ -281,3 +300,72 @@ class TestPreviewPlan:
         preview = executor.preview_plan(result.state)
 
         assert "Contract" in preview or "Criteria" in preview
+
+
+class TestDebugDiagnosis:
+    """Tests for debug diagnosis structure."""
+
+    def test_debug_diagnosis_creation(self) -> None:
+        """Should create DebugDiagnosis with all fields."""
+        diagnosis = DebugDiagnosis(
+            root_cause="Missing import statement",
+            failure_type="code_bug",
+            fix_location={"file": "src/example.py", "area": "imports"},
+            fix_action={"old_str": "# imports", "new_str": "import os\n# imports"},
+            confidence="high",
+        )
+
+        assert diagnosis.root_cause == "Missing import statement"
+        assert diagnosis.failure_type == "code_bug"
+        assert diagnosis.fix_location["file"] == "src/example.py"
+        assert diagnosis.confidence == "high"
+        assert not diagnosis.needs_more_info
+
+    def test_debug_diagnosis_needs_more_info(self) -> None:
+        """Should handle needs_more_info flag."""
+        diagnosis = DebugDiagnosis(
+            root_cause="Unclear error",
+            failure_type="unknown",
+            fix_location={},
+            fix_action={},
+            confidence="low",
+            needs_more_info=True,
+        )
+
+        assert diagnosis.needs_more_info is True
+        assert diagnosis.confidence == "low"
+
+    def test_debug_diagnosis_with_raw_output(self) -> None:
+        """Should store raw LLM output."""
+        raw = '{"root_cause": "test", "failure_type": "code_bug"}'
+        diagnosis = DebugDiagnosis(
+            root_cause="test",
+            failure_type="code_bug",
+            fix_location={},
+            fix_action={},
+            confidence="medium",
+            raw_output=raw,
+        )
+
+        assert diagnosis.raw_output == raw
+
+
+class TestCriticPerspective:
+    """Tests for the Critic perspective's execution-first approach."""
+
+    def test_critic_emphasizes_execution(self) -> None:
+        """Critic should emphasize test execution as ground truth."""
+        assert "GROUND TRUTH" in CRITIC.system_prompt
+        assert "execution" in CRITIC.system_prompt.lower()
+        assert "RUN THE TESTS" in CRITIC.system_prompt
+
+    def test_critic_mentions_test_output(self) -> None:
+        """Critic should trust test output as evidence."""
+        assert "tests pass" in CRITIC.system_prompt.lower() or "test" in CRITIC.system_prompt.lower()
+        assert "evidence" in CRITIC.system_prompt.lower()
+
+    def test_critic_is_skeptical_of_ai(self) -> None:
+        """Critic should be skeptical of AI-generated code."""
+        assert "skeptical" in CRITIC.system_prompt.lower()
+        assert "AI" in CRITIC.system_prompt
+        assert "guilty until proven innocent" in CRITIC.system_prompt

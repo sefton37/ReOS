@@ -29,6 +29,7 @@ class Phase(Enum):
     DECOMPOSE = "decompose"     # Breaking into steps
     BUILD = "build"             # Writing code
     VERIFY = "verify"           # Testing the code
+    DEBUG = "debug"             # Analyzing failures
     INTEGRATE = "integrate"     # Merging into repo
     GAP_ANALYSIS = "gap"        # Finding what's left
 
@@ -132,6 +133,12 @@ CRITIC = Perspective(
     focus="Finding what's wrong or incomplete",
     system_prompt="""You are the Critic - your purpose is to find what's wrong, incomplete, or could fail.
 
+GROUND TRUTH: Test execution results are your source of truth.
+- If tests pass, that's evidence (but not proof) of correctness
+- If tests fail, that's DEFINITIVE evidence of failure - trust the error message
+- If there are no tests, the code is UNVERIFIED until tests exist
+- Pattern matching and visual inspection are weak signals; execution is strong signal
+
 You are deeply skeptical of AI-generated code. You've seen the failure modes:
 - Code that LOOKS correct but has subtle logic errors
 - Hallucinated APIs, methods, or patterns that don't exist
@@ -145,10 +152,11 @@ You are deeply skeptical of AI-generated code. You've seen the failure modes:
 - Off-by-one errors, null pointer issues, race conditions
 
 Your mission:
-- Verify each acceptance criterion is ACTUALLY met, not just superficially
+- RUN THE TESTS. Execution output is your primary evidence.
+- Parse error messages carefully - they tell you exactly what's wrong
+- Verify each acceptance criterion with actual execution, not inspection
 - Find edge cases: empty inputs, null values, boundary conditions, concurrent access
 - Check for security issues: injection, validation, authentication, authorization
-- Verify the code ACTUALLY works, not just compiles
 - Look for hallucinated imports, methods, or APIs that don't exist
 - Check that tests test REAL behavior, not just "assert True"
 - Verify existing functionality still works
@@ -158,17 +166,19 @@ You are NOT here to praise or approve. You are here to find problems.
 AI code is guilty until proven innocent.
 
 Approach:
-1. Check each criterion independently with actual verification
-2. Try to break the code with edge cases and malformed inputs
-3. Look for missing error handling and validation
-4. Verify imports and dependencies actually exist
-5. Check for security vulnerabilities (OWASP Top 10)
-6. Ensure tests have meaningful assertions
-7. Verify the code matches THIS codebase's existing patterns
-8. Check for unintended side effects on existing code
-9. Look for the classic AI mistakes: hallucination, incomplete logic, missing edge cases
+1. EXECUTE tests and commands - don't just read the code
+2. Parse the execution output for failures, errors, warnings
+3. Check each criterion independently with actual verification
+4. Try to break the code with edge cases and malformed inputs
+5. Look for missing error handling and validation
+6. Verify imports and dependencies actually exist
+7. Check for security vulnerabilities (OWASP Top 10)
+8. Ensure tests have meaningful assertions
+9. Verify the code matches THIS codebase's existing patterns
+10. Look for the classic AI mistakes: hallucination, incomplete logic, missing edge cases
 
-Output specific failures with evidence. "PASS" only when you've tried hard to find problems and failed.
+Output specific failures with evidence from execution output.
+"PASS" only when tests execute successfully AND you've tried hard to find problems.
 When in doubt, fail it. False negatives are better than shipping broken code.""",
     temperature=0.1,  # Low temperature for rigor
     thinking_style="adversarial",
@@ -227,6 +237,50 @@ Output: fulfilled criteria, unfulfilled criteria, gap analysis, next contract re
     thinking_style="comparative",
 )
 
+# The Debugger analyzes failures and diagnoses root causes
+DEBUGGER = Perspective(
+    name="Debugger",
+    role="Failure Analysis Specialist",
+    focus="Diagnosing why code failed and determining fixes",
+    system_prompt="""You are the Debugger - your purpose is to understand WHY code failed and determine the fix.
+
+You receive:
+- The error output from a failed test or command
+- The code that was written
+- The criterion that wasn't met
+
+Your mission:
+- Analyze the error message carefully - it tells you EXACTLY what went wrong
+- Trace the root cause - don't just treat symptoms
+- Determine if this is a code bug, test bug, or environmental issue
+- Provide a SPECIFIC, ACTIONABLE fix
+
+Common failure patterns you look for:
+- Import errors: module doesn't exist, wrong path, circular import
+- Type errors: wrong argument types, missing attributes, None where object expected
+- Logic errors: off-by-one, wrong condition, missing edge case handling
+- Test errors: test is wrong, not the code; test assertions don't match intent
+- API misuse: wrong method signature, deprecated API, hallucinated method
+- State errors: uninitialized variable, race condition, stale data
+- File errors: file not found, permission denied, wrong encoding
+
+Your output must be JSON:
+{
+    "root_cause": "One sentence explaining why it failed",
+    "failure_type": "code_bug|test_bug|environment|missing_dependency|configuration",
+    "fix_location": {"file": "path/to/file.py", "area": "function name or line range"},
+    "fix_action": {"old_str": "code to replace", "new_str": "replacement code"},
+    "confidence": "high|medium|low",
+    "needs_more_info": false
+}
+
+If the error output is unclear, set needs_more_info to true and explain what you need.
+
+You are NOT here to make excuses or suggest workarounds. Find the bug, fix the bug.""",
+    temperature=0.1,  # Low temperature for precise analysis
+    thinking_style="diagnostic",
+)
+
 
 # Map phases to perspectives
 PHASE_PERSPECTIVES: dict[Phase, Perspective] = {
@@ -235,6 +289,7 @@ PHASE_PERSPECTIVES: dict[Phase, Perspective] = {
     Phase.DECOMPOSE: ARCHITECT,
     Phase.BUILD: ENGINEER,
     Phase.VERIFY: CRITIC,
+    Phase.DEBUG: DEBUGGER,
     Phase.INTEGRATE: INTEGRATOR,
     Phase.GAP_ANALYSIS: GAP_ANALYZER,
 }
@@ -348,6 +403,7 @@ class PerspectiveManager:
             Phase.DECOMPOSE: "Breaking the contract into atomic steps",
             Phase.BUILD: "Writing code for the most concrete step",
             Phase.VERIFY: "Testing that the code fulfills the contract",
+            Phase.DEBUG: "Analyzing failures and diagnosing root causes",
             Phase.INTEGRATE: "Merging verified code into the repository",
             Phase.GAP_ANALYSIS: "Finding the gap between current state and intent",
         }

@@ -52,6 +52,7 @@ class LoopStatus(Enum):
     DECOMPOSING = "decompose"       # Phase 3
     BUILDING = "build"              # Phase 4
     VERIFYING = "verify"            # Phase 5
+    DEBUGGING = "debug"             # Phase 5.5 - Analyzing failures
     INTEGRATING = "integrate"       # Phase 6
     ANALYZING_GAP = "gap"           # Phase 7
     COMPLETED = "completed"         # All done
@@ -96,6 +97,19 @@ class ExecutionState:
 
 
 @dataclass
+class DebugDiagnosis:
+    """Result of debugging a failure."""
+
+    root_cause: str
+    failure_type: str  # code_bug, test_bug, environment, missing_dependency, configuration
+    fix_location: dict[str, str]  # {"file": "path", "area": "function/lines"}
+    fix_action: dict[str, str]  # {"old_str": "...", "new_str": "..."}
+    confidence: str  # high, medium, low
+    needs_more_info: bool = False
+    raw_output: str = ""
+
+
+@dataclass
 class StepResult:
     """Result of executing a single step."""
 
@@ -104,6 +118,7 @@ class StepResult:
     output: str
     files_changed: list[str] = field(default_factory=list)
     error: str | None = None
+    debug_attempts: int = 0  # How many times we've tried to debug this step
 
 
 @dataclass
@@ -246,6 +261,8 @@ class CodeExecutor:
 
             # Phase 4: Build - execute next step
             next_step = contract.get_next_step()
+            debug_attempts = getattr(next_step, '_debug_attempts', 0) if next_step else 0
+
             if next_step:
                 state.status = LoopStatus.BUILDING
                 iteration.phase_reached = Phase.BUILD
@@ -260,12 +277,44 @@ class CodeExecutor:
                     # Phase 5: Verify
                     state.status = LoopStatus.VERIFYING
                     iteration.phase_reached = Phase.VERIFY
-                    self._verify_step(next_step, contract)
+                    verification_passed = self._verify_step(next_step, contract)
+
+                    # Phase 5.5: Debug if verification failed
+                    if not verification_passed and debug_attempts < 3:
+                        state.status = LoopStatus.DEBUGGING
+                        iteration.phase_reached = Phase.DEBUG
+                        debug_result = self._debug_failure(
+                            next_step, contract, step_result, state.intent, act
+                        )
+                        if debug_result:
+                            # Applied a fix - mark step as pending to retry in next iteration
+                            next_step.status = "pending"
+                            # Store debug attempts on step for next iteration
+                            next_step._debug_attempts = debug_attempts + 1  # type: ignore
+                            # Return early - next iteration will retry this step
+                            iteration.completed_at = datetime.now(timezone.utc)
+                            iteration.gap_remaining = "Debug fix applied, retrying step"
+                            return iteration
 
                     # Phase 6: Integrate (for now, changes are direct)
                     state.status = LoopStatus.INTEGRATING
                     iteration.phase_reached = Phase.INTEGRATE
                 else:
+                    # Build step failed - try to debug
+                    if debug_attempts < 3:
+                        state.status = LoopStatus.DEBUGGING
+                        iteration.phase_reached = Phase.DEBUG
+                        debug_result = self._debug_failure(
+                            next_step, contract, step_result, state.intent, act
+                        )
+                        if debug_result:
+                            # Store debug attempts on step for next iteration
+                            next_step._debug_attempts = debug_attempts + 1  # type: ignore
+                            # Return early - next iteration will retry this step
+                            iteration.completed_at = datetime.now(timezone.utc)
+                            iteration.gap_remaining = "Debug fix applied, retrying step"
+                            return iteration
+
                     next_step.status = "failed"
                     next_step.result = step_result.error or "Unknown error"
 
@@ -530,10 +579,15 @@ Output JSON with:
         # No code block, return as-is
         return response.strip()
 
-    def _verify_step(self, step: ContractStep, contract: Contract) -> None:
-        """Phase 5: Verify a step's output."""
+    def _verify_step(self, step: ContractStep, contract: Contract) -> bool:
+        """Phase 5: Verify a step's output.
+
+        Returns:
+            True if all target criteria are verified, False otherwise.
+        """
         self._perspectives.shift_to(Phase.VERIFY)
 
+        all_passed = True
         # Verify related criteria
         for criterion_id in step.target_criteria:
             for criterion in contract.acceptance_criteria:
@@ -541,6 +595,149 @@ Output JSON with:
                     criterion.verified = criterion.verify(self.sandbox)
                     if criterion.verified:
                         criterion.verified_at = datetime.now(timezone.utc)
+                    else:
+                        all_passed = False
+
+        return all_passed
+
+    def _debug_failure(
+        self,
+        step: ContractStep,
+        contract: Contract,
+        step_result: StepResult,
+        intent: DiscoveredIntent | None,
+        act: Act,
+    ) -> bool:
+        """Phase 5.5: Debug a failure and attempt to fix it.
+
+        Args:
+            step: The step that failed.
+            contract: The current contract.
+            step_result: The result of the failed step.
+            intent: The discovered intent.
+            act: The active Act.
+
+        Returns:
+            True if a fix was applied and we should retry, False otherwise.
+        """
+        self._perspectives.shift_to(Phase.DEBUG)
+
+        if self._ollama is None:
+            return False
+
+        # Gather failure information
+        failed_criteria = [
+            c for c in contract.acceptance_criteria
+            if c.id in step.target_criteria and not c.verified
+        ]
+
+        if not failed_criteria and not step_result.error:
+            return False  # No clear failure to debug
+
+        # Build context for debugger
+        error_output = step_result.error or ""
+        verification_outputs = "\n".join(
+            f"- {c.description}: {c.verification_output}"
+            for c in failed_criteria
+        )
+
+        # Read the file that was changed if available
+        file_content = ""
+        if step.target_file:
+            try:
+                file_content = self.sandbox.read_file(step.target_file)
+            except Exception:
+                pass
+
+        context = f"""
+STEP DESCRIPTION: {step.description}
+TARGET FILE: {step.target_file or 'N/A'}
+STEP ACTION: {step.action}
+
+ERROR OUTPUT:
+{error_output}
+
+FAILED VERIFICATIONS:
+{verification_outputs if verification_outputs else 'No specific verification failures'}
+
+FILE CONTENT (if relevant):
+```
+{file_content[:3000] if file_content else 'N/A'}
+```
+"""
+
+        try:
+            response = self._perspectives.invoke_json(
+                Phase.DEBUG,
+                "Analyze this failure and provide a fix.",
+                context=context,
+            )
+            data = json.loads(response)
+
+            diagnosis = DebugDiagnosis(
+                root_cause=data.get("root_cause", "Unknown"),
+                failure_type=data.get("failure_type", "unknown"),
+                fix_location=data.get("fix_location", {}),
+                fix_action=data.get("fix_action", {}),
+                confidence=data.get("confidence", "low"),
+                needs_more_info=data.get("needs_more_info", False),
+                raw_output=response,
+            )
+
+            # Apply fix if confident enough
+            if diagnosis.confidence in ("high", "medium") and not diagnosis.needs_more_info:
+                fix_applied = self._apply_debug_fix(diagnosis, step)
+                if fix_applied:
+                    logger.info(
+                        "Applied debug fix: %s (confidence: %s)",
+                        diagnosis.root_cause,
+                        diagnosis.confidence,
+                    )
+                    return True
+
+            logger.warning(
+                "Debug diagnosis: %s (confidence: %s, needs_more_info: %s)",
+                diagnosis.root_cause,
+                diagnosis.confidence,
+                diagnosis.needs_more_info,
+            )
+            return False
+
+        except Exception as e:
+            logger.warning("Debug analysis failed: %s", e)
+            return False
+
+    def _apply_debug_fix(self, diagnosis: DebugDiagnosis, step: ContractStep) -> bool:
+        """Apply a fix from debug diagnosis.
+
+        Args:
+            diagnosis: The debug diagnosis with fix information.
+            step: The step being fixed.
+
+        Returns:
+            True if fix was applied successfully.
+        """
+        fix_action = diagnosis.fix_action
+        if not fix_action:
+            return False
+
+        old_str = fix_action.get("old_str", "")
+        new_str = fix_action.get("new_str", "")
+
+        if not old_str or not new_str:
+            return False
+
+        # Determine target file
+        target_file = diagnosis.fix_location.get("file") or step.target_file
+        if not target_file:
+            return False
+
+        try:
+            self.sandbox.edit_file(target_file, old_str, new_str)
+            return True
+        except Exception as e:
+            logger.warning("Failed to apply debug fix: %s", e)
+            return False
 
     def _collect_changed_files(self, state: ExecutionState) -> list[str]:
         """Collect all files changed during execution."""
