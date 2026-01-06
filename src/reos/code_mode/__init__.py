@@ -48,7 +48,11 @@ from reos.code_mode.contract import (
     ContractStep,
     AcceptanceCriterion,
     CriterionType,
+    TestSpecification,
 )
+
+# Test Generator (Test-First Contracts)
+from reos.code_mode.test_generator import TestGenerator
 
 # Perspectives (Sprint 3)
 from reos.code_mode.perspectives import (
@@ -154,6 +158,9 @@ __all__ = [
     "ContractStep",
     "AcceptanceCriterion",
     "CriterionType",
+    "TestSpecification",
+    # Test Generator
+    "TestGenerator",
     # Perspectives
     "PerspectiveManager",
     "Perspective",

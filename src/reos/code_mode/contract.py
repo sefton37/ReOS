@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from reos.code_mode.intent import DiscoveredIntent
     from reos.code_mode.sandbox import CodeSandbox
+    from reos.code_mode.test_generator import TestGenerator
     from reos.ollama import OllamaClient
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,36 @@ class CriterionType(Enum):
     FUNCTION_EXISTS = "function_exists"   # A function must exist
     CLASS_EXISTS = "class_exists"         # A class must exist
     COMMAND_SUCCEEDS = "command_succeeds" # Arbitrary command returns 0
+    GENERATED_TEST_PASSES = "generated_test_passes"  # Generated test must pass
     CUSTOM = "custom"                     # Custom verification
+
+
+@dataclass
+class TestSpecification:
+    """Generated test code for a criterion.
+
+    This represents actual pytest test code that was generated from intent.
+    The test code serves as the acceptance criterion - when the test passes,
+    the feature is considered complete (test-first development).
+    """
+
+    test_code: str           # Full pytest test code including imports
+    test_file: str           # Path to test file (e.g., "tests/test_feature.py")
+    test_function: str       # Test function name (e.g., "test_add_user")
+    imports: list[str] = field(default_factory=list)  # Required imports
+    setup_code: str = ""     # Optional setup/fixtures
+    rationale: str = ""      # Why this test proves the feature works
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dictionary."""
+        return {
+            "test_code": self.test_code,
+            "test_file": self.test_file,
+            "test_function": self.test_function,
+            "imports": self.imports,
+            "setup_code": self.setup_code,
+            "rationale": self.rationale,
+        }
 
 
 @dataclass
@@ -65,6 +95,8 @@ class AcceptanceCriterion:
     target_file: str | None = None
     pattern: str | None = None
     command: str | None = None
+    # Generated test specification (for GENERATED_TEST_PASSES)
+    test_spec: TestSpecification | None = None
     # Status
     verified: bool = False
     verification_output: str = ""
@@ -90,6 +122,8 @@ class AcceptanceCriterion:
                 result = self._verify_class_exists(sandbox)
             elif self.type == CriterionType.COMMAND_SUCCEEDS:
                 result = self._verify_command_succeeds(sandbox)
+            elif self.type == CriterionType.GENERATED_TEST_PASSES:
+                result = self._verify_generated_test_passes(sandbox)
             # else: Custom - cannot auto-verify, result stays False
         except Exception as e:
             self.verification_output = f"Error: {e}"
@@ -209,6 +243,42 @@ class AcceptanceCriterion:
         self.verification_output = output[:2000] if output else f"Exit code: {returncode}"
         return returncode == 0
 
+    def _verify_generated_test_passes(self, sandbox: CodeSandbox) -> bool:
+        """Verify the generated test passes.
+
+        This method:
+        1. Ensures the test file exists (writes it if not)
+        2. Runs only the specific generated test function
+        3. Reports pass/fail with output
+        """
+        if not self.test_spec:
+            self.verification_output = "No test specification provided"
+            return False
+
+        test_file = self.test_spec.test_file
+        test_function = self.test_spec.test_function
+
+        # 1. Ensure test file exists - write it if not
+        try:
+            sandbox.read_file(test_file, start=1, end=1)
+        except FileNotFoundError:
+            # Write the generated test file
+            sandbox.write_file(test_file, self.test_spec.test_code)
+            self.verification_output = f"Created test file: {test_file}"
+
+        # 2. Run only the specific generated test
+        test_path = f"{test_file}::{test_function}"
+        returncode, stdout, stderr = sandbox.run_command(
+            f"pytest {test_path} -v --tb=short",
+            timeout=60,
+        )
+
+        # 3. Capture output
+        output = stdout if stdout else stderr
+        self.verification_output = output[:2000] if output else f"Exit code: {returncode}"
+
+        return returncode == 0
+
 
 @dataclass
 class ContractStep:
@@ -312,15 +382,22 @@ class ContractBuilder:
 
     The builder translates intent into explicit, testable criteria
     and decomposes the work into discrete steps.
+
+    With test_first=True (default), generates actual test code as
+    acceptance criteria - implementing test-first development.
     """
 
     def __init__(
         self,
         sandbox: CodeSandbox,
         ollama: OllamaClient | None = None,
+        test_generator: TestGenerator | None = None,
+        test_first: bool = True,
     ) -> None:
         self.sandbox = sandbox
         self._ollama = ollama
+        self._test_generator = test_generator
+        self._test_first = test_first
 
     def build_from_intent(self, intent: DiscoveredIntent) -> Contract:
         """Build a contract from discovered intent.
@@ -389,10 +466,41 @@ class ContractBuilder:
         self,
         intent: DiscoveredIntent,
     ) -> list[AcceptanceCriterion]:
-        """Generate acceptance criteria from intent."""
+        """Generate acceptance criteria from intent.
+
+        When test_first is enabled, generates actual test code as
+        the primary acceptance criterion.
+        """
+        criteria = []
+
+        # 1. Generate test specification if test_first is enabled
+        if self._test_first and self._test_generator is not None:
+            try:
+                test_spec = self._test_generator.generate(intent)
+                criteria.append(
+                    AcceptanceCriterion(
+                        id=_generate_id("criterion"),
+                        type=CriterionType.GENERATED_TEST_PASSES,
+                        description=f"Generated test passes: {test_spec.test_function}",
+                        target_file=test_spec.test_file,
+                        test_spec=test_spec,
+                    )
+                )
+                logger.info(
+                    "Generated test specification: %s::%s",
+                    test_spec.test_file,
+                    test_spec.test_function,
+                )
+            except Exception as e:
+                logger.warning("Test generation failed: %s, using standard criteria", e)
+
+        # 2. Add other criteria using LLM or heuristics
         if self._ollama is not None:
-            return self._generate_criteria_with_llm(intent)
-        return self._generate_criteria_heuristic(intent)
+            criteria.extend(self._generate_criteria_with_llm(intent))
+        else:
+            criteria.extend(self._generate_criteria_heuristic(intent))
+
+        return criteria
 
     def _generate_criteria_heuristic(
         self,
@@ -533,10 +641,37 @@ RELATED FILES: {', '.join(intent.codebase_intent.related_files[:5])}
         intent: DiscoveredIntent,
         criteria: list[AcceptanceCriterion],
     ) -> list[ContractStep]:
-        """Decompose the contract into discrete steps."""
+        """Decompose the contract into discrete steps.
+
+        When test_first is enabled, the first step creates the test file
+        (red state), followed by implementation steps.
+        """
+        steps = []
+
+        # 1. FIRST: Create test file for GENERATED_TEST_PASSES criteria
+        for criterion in criteria:
+            if (
+                criterion.type == CriterionType.GENERATED_TEST_PASSES
+                and criterion.test_spec is not None
+            ):
+                steps.append(
+                    ContractStep(
+                        id=_generate_id("step"),
+                        description=f"Write test: {criterion.test_spec.test_function}",
+                        target_criteria=[criterion.id],
+                        action="create_file",
+                        target_file=criterion.test_spec.test_file,
+                        content=criterion.test_spec.test_code,
+                    )
+                )
+
+        # 2. THEN: Implementation steps (from LLM or heuristics)
         if self._ollama is not None:
-            return self._decompose_with_llm(intent, criteria)
-        return self._decompose_heuristic(intent, criteria)
+            steps.extend(self._decompose_with_llm(intent, criteria))
+        else:
+            steps.extend(self._decompose_heuristic(intent, criteria))
+
+        return steps
 
     def _decompose_heuristic(
         self,
