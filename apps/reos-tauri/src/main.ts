@@ -346,7 +346,7 @@ function buildUi() {
   async function handleCairnMessage(message: string): Promise<void> {
     try {
       const result = await kernelRequest<ChatRespondResult>('chat/respond', {
-        message,
+        text: message,
         conversation_id: currentConversationId,
       });
       if (result.conversation_id) {
