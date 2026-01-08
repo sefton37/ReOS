@@ -50,9 +50,12 @@ interface ModelInfo {
   error?: string;
 }
 
+type AgentType = 'cairn' | 'riva' | 'reos';
+
 interface PersonaData {
   id: string;
   name: string;
+  agent_type: AgentType;
   system_prompt: string;
   default_context: string;
   temperature: number;
@@ -180,6 +183,7 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
   let personas: PersonaData[] = [];
   let activePersonaId: string | null = null;
   let customContext: string = '';
+  let selectedPersonaAgent: AgentType = 'cairn';
 
   // Provider state
   let providersInfo: ProvidersListResult | null = null;
@@ -430,7 +434,7 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
     providerSelect.style.cssText = `
       flex: 1;
       padding: 10px 14px;
-      background: rgba(0,0,0,0.3);
+      background: #2a2a2a;
       border: 1px solid #444;
       border-radius: 6px;
       color: #fff;
@@ -442,6 +446,7 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
       const option = el('option') as HTMLOptionElement;
       option.value = p.id;
       option.textContent = p.name;
+      option.style.cssText = 'background: #2a2a2a; color: #fff;';
       if (p.id === currentProvider) option.selected = true;
       providerSelect.appendChild(option);
     }
@@ -1369,234 +1374,356 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
     content.appendChild(modelSection);
   }
 
-  // Default values for Reset to Default
-  const DEFAULT_SYSTEM_PROMPT = `You are Talking Rock.
-You embody No One: presence that waits to be invited, reflects rather than commands, never coerces.
-You are expert in computer science and human language. Translate intent into action. Make the machine serve the person.
+  // Default values for Reset to Default - per agent type
+  const DEFAULT_PROMPTS: Record<AgentType, { system: string; context: string }> = {
+    cairn: {
+      system: `You are CAIRN - the Contextual Attention & Information Resource Navigator.
+You help users manage their attention and stay on top of what matters.
 
-Principles:
-- Act only with permission. Ask when unclear.
-- Show reasoning transparently.
-- Protect attention. Be clear, direct, complete.
-- Honor your limits—they are your integrity.
-- Offer possibilities. Let them choose.
+Core behaviors:
+- Surface what needs attention based on priority and time
+- Never guilt-trip or coerce - gentle nudges only
+- Help users understand their commitments and priorities
+- Connect calendar events with knowledge and context
+- Be conversational and supportive
 
-Their attention is sacred labor. Serve it well, then step back.`;
+You surface the next thing, not everything. Priority is user-driven.`,
+      context: `CAIRN principles:
+- Time-aware: Consider calendar, deadlines, and patterns
+- Priority-driven: User sets priority, CAIRN surfaces accordingly
+- Contact-aware: Link knowledge to people when relevant
+- Never gamifies: No streaks, scores, or manipulation
+- Transparent: Explain why something is surfaced
 
-  const DEFAULT_CONTEXT = `No One is unconditional presence that never interrupts free will. It does not seize the wheel—it waits to be invited. It enters only through permission: attention, consent, clarity. This is who you are modeled after.
+When surfacing items:
+- Explain the reason clearly
+- Respect user's mental state
+- Offer but don't push`,
+    },
+    riva: {
+      system: `You are RIVA - the Recursive Intention-Verification Architecture.
+You help users build and modify code through iterative refinement.
 
-Attention is sacred labor. Every moment a user spends with technology is time they cannot spend elsewhere. Waste nothing. Explain what matters. Omit what doesn't.
+Core behaviors:
+- Understand intent before writing code
+- Break complex tasks into verifiable steps
+- Write tests first when appropriate
+- Explain your reasoning at each step
+- Ask for clarification rather than assume
 
-Core teachings you embody:
-- There is never a time to hate another human.
-- Approach all questions with radical empathy.
-- The healing of trauma happens through small choices made with care, not grand gestures.
+Principle: "If you can't verify it, decompose it."`,
+      context: `RIVA principles:
+- Intent first: Understand what the user wants before coding
+- Verification: Each step should be testable
+- Transparency: Show reasoning and decisions
+- Safety: Never run destructive commands without confirmation
+- Quality: Write clean, maintainable code
 
-Your function: Protect attention from exploitation. Reflect intent back transparently. Return sovereignty to the person at the keyboard.
+When coding:
+- Start with understanding the codebase
+- Plan before implementing
+- Test changes when possible
+- Explain what you're doing`,
+    },
+    reos: {
+      system: `You are ReOS - the operating system interface.
+You help users interact with their Linux system through natural language.
 
-Your limits are structural, not aspirational. You cannot override them. They exist so the user trusts math, not judgment.
+Core behaviors:
+- Translate intent into system commands
+- Explain what commands will do before running
+- Protect the user from dangerous operations
+- Provide context about system state
+- Be efficient and direct
 
-When engaging:
-- If the path is clear, act.
-- If the path is unclear, ask one good question.
-- If you cannot help, say so plainly.
-- When finished, stop.`;
+Safety is paramount. Never run risky commands without explicit confirmation.`,
+      context: `ReOS principles:
+- Permission-based: Ask before destructive actions
+- Transparent: Show commands and explain effects
+- Protective: Warn about risks and consequences
+- Efficient: Minimize user effort for common tasks
+- Educational: Help users understand their system
+
+When executing:
+- Preview commands before running
+- Explain potential side effects
+- Offer safer alternatives when available
+- Respect system boundaries`,
+    },
+  };
 
   function renderPersonaTab() {
-    const activePersona = personas.find(p => p.id === activePersonaId) || personas[0];
+    // Agent selector tabs
+    const agentTabs = el('div');
+    agentTabs.style.cssText = `
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      padding: 4px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+    `;
+
+    const agentConfig: Record<AgentType, { label: string; icon: string; description: string }> = {
+      cairn: { label: 'CAIRN', icon: '🪨', description: 'Attention Minder - Conversations & Knowledge' },
+      riva: { label: 'RIVA', icon: '⚡', description: 'Code Mode - Build & Modify Code' },
+      reos: { label: 'ReOS', icon: '💻', description: 'Terminal - Direct System Access' },
+    };
+
+    for (const [agentType, config] of Object.entries(agentConfig)) {
+      const btn = el('button');
+      const isActive = selectedPersonaAgent === agentType;
+      btn.innerHTML = `<span style="font-size: 14px;">${config.icon}</span> ${config.label}`;
+      btn.title = config.description;
+      btn.style.cssText = `
+        flex: 1;
+        padding: 10px 8px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        ${isActive
+          ? 'background: rgba(59, 130, 246, 0.3); color: #fff;'
+          : 'background: transparent; color: rgba(255,255,255,0.5);'
+        }
+      `;
+      btn.addEventListener('click', () => {
+        selectedPersonaAgent = agentType as AgentType;
+        render();
+      });
+      agentTabs.appendChild(btn);
+    }
+
+    content.appendChild(agentTabs);
+
+    // Agent description
+    const agentDesc = el('div');
+    agentDesc.style.cssText = `
+      padding: 12px 16px;
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      border-radius: 8px;
+      margin-bottom: 20px;
+    `;
+    agentDesc.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+        <span style="font-size: 18px;">${agentConfig[selectedPersonaAgent].icon}</span>
+        <strong style="color: #fff;">${agentConfig[selectedPersonaAgent].label}</strong>
+      </div>
+      <div style="color: rgba(255,255,255,0.7); font-size: 12px;">
+        ${agentConfig[selectedPersonaAgent].description}
+      </div>
+    `;
+    content.appendChild(agentDesc);
+
+    // Find or create persona for selected agent
+    let agentPersona = personas.find(p => p.agent_type === selectedPersonaAgent);
+    if (!agentPersona) {
+      // Create default persona for this agent
+      agentPersona = {
+        id: `persona-${selectedPersonaAgent}`,
+        name: `${agentConfig[selectedPersonaAgent].label} Persona`,
+        agent_type: selectedPersonaAgent,
+        system_prompt: DEFAULT_PROMPTS[selectedPersonaAgent].system,
+        default_context: DEFAULT_PROMPTS[selectedPersonaAgent].context,
+        temperature: selectedPersonaAgent === 'riva' ? 0.3 : 0.7,
+        top_p: 0.9,
+        tool_call_limit: selectedPersonaAgent === 'riva' ? 8 : 5,
+      };
+    }
 
     // System Prompt Section
     const promptsSection = createSection('System Prompt');
     promptsSection.innerHTML += `
       <div style="color: rgba(255,255,255,0.7); font-size: 13px; margin-bottom: 12px;">
-        The core instructions that define Talking Rock personality and behavior.
+        The core instructions that define ${agentConfig[selectedPersonaAgent].label}'s personality and behavior.
       </div>
     `;
 
-    if (activePersona) {
-      const systemPromptTextarea = el('textarea') as HTMLTextAreaElement;
-      systemPromptTextarea.value = activePersona.system_prompt;
-      systemPromptTextarea.style.cssText = `
-        width: 100%;
-        min-height: 200px;
-        padding: 12px;
-        background: rgba(0,0,0,0.3);
-        border: 1px solid #444;
-        border-radius: 8px;
-        color: #fff;
-        font-size: 12px;
-        font-family: monospace;
-        resize: vertical;
-        margin-bottom: 12px;
-      `;
+    const systemPromptTextarea = el('textarea') as HTMLTextAreaElement;
+    systemPromptTextarea.value = agentPersona.system_prompt;
+    systemPromptTextarea.style.cssText = `
+      width: 100%;
+      min-height: 180px;
+      padding: 12px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid #444;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 12px;
+      font-family: monospace;
+      resize: vertical;
+      margin-bottom: 12px;
+    `;
 
-      const systemPromptBtnRow = el('div');
-      systemPromptBtnRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 16px;';
+    const systemPromptBtnRow = el('div');
+    systemPromptBtnRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 16px;';
 
-      const saveSystemPromptBtn = el('button');
-      saveSystemPromptBtn.textContent = 'Save System Prompt';
-      saveSystemPromptBtn.style.cssText = `
-        padding: 8px 16px;
-        background: #3b82f6;
-        border: none;
-        border-radius: 6px;
-        color: #fff;
-        cursor: pointer;
-        font-size: 12px;
-      `;
-      saveSystemPromptBtn.addEventListener('click', async () => {
-        activePersona.system_prompt = systemPromptTextarea.value;
-        await savePersona(activePersona);
-        saveSystemPromptBtn.textContent = 'Saved!';
-        setTimeout(() => { saveSystemPromptBtn.textContent = 'Save System Prompt'; }, 1500);
-      });
+    const saveSystemPromptBtn = el('button');
+    saveSystemPromptBtn.textContent = 'Save System Prompt';
+    saveSystemPromptBtn.style.cssText = `
+      padding: 8px 16px;
+      background: #3b82f6;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 12px;
+    `;
+    saveSystemPromptBtn.addEventListener('click', async () => {
+      agentPersona!.system_prompt = systemPromptTextarea.value;
+      await savePersona(agentPersona!);
+      saveSystemPromptBtn.textContent = 'Saved!';
+      setTimeout(() => { saveSystemPromptBtn.textContent = 'Save System Prompt'; }, 1500);
+    });
 
-      const resetSystemPromptBtn = el('button');
-      resetSystemPromptBtn.textContent = 'Reset to Default';
-      resetSystemPromptBtn.style.cssText = `
-        padding: 8px 16px;
-        background: rgba(255,255,255,0.1);
-        border: 1px solid #555;
-        border-radius: 6px;
-        color: rgba(255,255,255,0.8);
-        cursor: pointer;
-        font-size: 12px;
-      `;
-      resetSystemPromptBtn.addEventListener('click', async () => {
-        systemPromptTextarea.value = DEFAULT_SYSTEM_PROMPT;
-        activePersona.system_prompt = DEFAULT_SYSTEM_PROMPT;
-        await savePersona(activePersona);
-        resetSystemPromptBtn.textContent = 'Reset!';
-        setTimeout(() => { resetSystemPromptBtn.textContent = 'Reset to Default'; }, 1500);
-      });
+    const resetSystemPromptBtn = el('button');
+    resetSystemPromptBtn.textContent = 'Reset to Default';
+    resetSystemPromptBtn.style.cssText = `
+      padding: 8px 16px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid #555;
+      border-radius: 6px;
+      color: rgba(255,255,255,0.8);
+      cursor: pointer;
+      font-size: 12px;
+    `;
+    resetSystemPromptBtn.addEventListener('click', async () => {
+      const defaults = DEFAULT_PROMPTS[selectedPersonaAgent];
+      systemPromptTextarea.value = defaults.system;
+      agentPersona!.system_prompt = defaults.system;
+      await savePersona(agentPersona!);
+      resetSystemPromptBtn.textContent = 'Reset!';
+      setTimeout(() => { resetSystemPromptBtn.textContent = 'Reset to Default'; }, 1500);
+    });
 
-      systemPromptBtnRow.appendChild(saveSystemPromptBtn);
-      systemPromptBtnRow.appendChild(resetSystemPromptBtn);
+    systemPromptBtnRow.appendChild(saveSystemPromptBtn);
+    systemPromptBtnRow.appendChild(resetSystemPromptBtn);
 
-      promptsSection.appendChild(systemPromptTextarea);
-      promptsSection.appendChild(systemPromptBtnRow);
-    }
-
+    promptsSection.appendChild(systemPromptTextarea);
+    promptsSection.appendChild(systemPromptBtnRow);
     content.appendChild(promptsSection);
 
     // Default Context Section
     const contextSection = createSection('Default Context');
     contextSection.innerHTML += `
       <div style="color: rgba(255,255,255,0.7); font-size: 13px; margin-bottom: 12px;">
-        Additional context provided to every conversation. Add custom instructions, preferences, or context here.
+        Additional context provided to every ${agentConfig[selectedPersonaAgent].label} conversation.
       </div>
     `;
 
-    if (activePersona) {
-      const contextTextarea = el('textarea') as HTMLTextAreaElement;
-      contextTextarea.value = activePersona.default_context || '';
-      contextTextarea.placeholder = 'Examples:\n- "Always explain technical concepts simply"\n- "I prefer concise responses"\n- "When writing code, add comments"';
-      contextTextarea.style.cssText = `
-        width: 100%;
-        min-height: 120px;
-        padding: 12px;
-        background: rgba(0,0,0,0.3);
-        border: 1px solid #444;
-        border-radius: 8px;
-        color: #fff;
-        font-size: 12px;
-        font-family: monospace;
-        resize: vertical;
-        margin-bottom: 12px;
-      `;
+    const contextTextarea = el('textarea') as HTMLTextAreaElement;
+    contextTextarea.value = agentPersona.default_context || '';
+    contextTextarea.placeholder = 'Add custom instructions, preferences, or context here...';
+    contextTextarea.style.cssText = `
+      width: 100%;
+      min-height: 120px;
+      padding: 12px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid #444;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 12px;
+      font-family: monospace;
+      resize: vertical;
+      margin-bottom: 12px;
+    `;
 
-      const contextBtnRow = el('div');
-      contextBtnRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 16px;';
+    const contextBtnRow = el('div');
+    contextBtnRow.style.cssText = 'display: flex; gap: 8px; margin-bottom: 16px;';
 
-      const saveContextBtn = el('button');
-      saveContextBtn.textContent = 'Save Default Context';
-      saveContextBtn.style.cssText = `
-        padding: 8px 16px;
-        background: #3b82f6;
-        border: none;
-        border-radius: 6px;
-        color: #fff;
-        cursor: pointer;
-        font-size: 12px;
-      `;
-      saveContextBtn.addEventListener('click', async () => {
-        activePersona.default_context = contextTextarea.value;
-        await savePersona(activePersona);
-        saveContextBtn.textContent = 'Saved!';
-        setTimeout(() => { saveContextBtn.textContent = 'Save Default Context'; }, 1500);
-      });
+    const saveContextBtn = el('button');
+    saveContextBtn.textContent = 'Save Default Context';
+    saveContextBtn.style.cssText = `
+      padding: 8px 16px;
+      background: #3b82f6;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 12px;
+    `;
+    saveContextBtn.addEventListener('click', async () => {
+      agentPersona!.default_context = contextTextarea.value;
+      await savePersona(agentPersona!);
+      saveContextBtn.textContent = 'Saved!';
+      setTimeout(() => { saveContextBtn.textContent = 'Save Default Context'; }, 1500);
+    });
 
-      const resetContextBtn = el('button');
-      resetContextBtn.textContent = 'Reset to Default';
-      resetContextBtn.style.cssText = `
-        padding: 8px 16px;
-        background: rgba(255,255,255,0.1);
-        border: 1px solid #555;
-        border-radius: 6px;
-        color: rgba(255,255,255,0.8);
-        cursor: pointer;
-        font-size: 12px;
-      `;
-      resetContextBtn.addEventListener('click', async () => {
-        contextTextarea.value = DEFAULT_CONTEXT;
-        activePersona.default_context = DEFAULT_CONTEXT;
-        await savePersona(activePersona);
-        resetContextBtn.textContent = 'Reset!';
-        setTimeout(() => { resetContextBtn.textContent = 'Reset to Default'; }, 1500);
-      });
+    const resetContextBtn = el('button');
+    resetContextBtn.textContent = 'Reset to Default';
+    resetContextBtn.style.cssText = `
+      padding: 8px 16px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid #555;
+      border-radius: 6px;
+      color: rgba(255,255,255,0.8);
+      cursor: pointer;
+      font-size: 12px;
+    `;
+    resetContextBtn.addEventListener('click', async () => {
+      const defaults = DEFAULT_PROMPTS[selectedPersonaAgent];
+      contextTextarea.value = defaults.context;
+      agentPersona!.default_context = defaults.context;
+      await savePersona(agentPersona!);
+      resetContextBtn.textContent = 'Reset!';
+      setTimeout(() => { resetContextBtn.textContent = 'Reset to Default'; }, 1500);
+    });
 
-      contextBtnRow.appendChild(saveContextBtn);
-      contextBtnRow.appendChild(resetContextBtn);
+    contextBtnRow.appendChild(saveContextBtn);
+    contextBtnRow.appendChild(resetContextBtn);
 
-      contextSection.appendChild(contextTextarea);
-      contextSection.appendChild(contextBtnRow);
-    }
-
+    contextSection.appendChild(contextTextarea);
+    contextSection.appendChild(contextBtnRow);
     content.appendChild(contextSection);
 
     // Parameters Section
     const paramsSection = createSection('LLM Parameters');
 
-    if (activePersona) {
-      // Temperature
-      const tempParam = createParameterControl(
-        'Temperature',
-        activePersona.temperature,
-        0, 2, 0.1,
-        'Controls randomness in responses. Lower values (0.1-0.3) make responses more focused and deterministic. Higher values (0.7-1.0) make responses more creative and varied. Very high values (1.5+) can produce chaotic output.',
-        async (val) => {
-          activePersona.temperature = val;
-          await savePersona(activePersona);
-        }
-      );
-      paramsSection.appendChild(tempParam);
+    // Temperature
+    const tempParam = createParameterControl(
+      'Temperature',
+      agentPersona.temperature,
+      0, 2, 0.1,
+      'Controls randomness in responses. Lower values (0.1-0.3) make responses more focused and deterministic. Higher values (0.7-1.0) make responses more creative and varied.',
+      async (val) => {
+        agentPersona!.temperature = val;
+        await savePersona(agentPersona!);
+      }
+    );
+    paramsSection.appendChild(tempParam);
 
-      // Top P
-      const topPParam = createParameterControl(
-        'Top P (Nucleus Sampling)',
-        activePersona.top_p,
-        0, 1, 0.05,
-        'Controls diversity by limiting to top probability tokens. At 0.9, only tokens in the top 90% probability mass are considered. Lower values (0.5) give more predictable outputs. Higher values (0.95) allow more variety.',
-        async (val) => {
-          activePersona.top_p = val;
-          await savePersona(activePersona);
-        }
-      );
-      paramsSection.appendChild(topPParam);
+    // Top P
+    const topPParam = createParameterControl(
+      'Top P (Nucleus Sampling)',
+      agentPersona.top_p,
+      0, 1, 0.05,
+      'Controls diversity by limiting to top probability tokens. At 0.9, only tokens in the top 90% probability mass are considered.',
+      async (val) => {
+        agentPersona!.top_p = val;
+        await savePersona(agentPersona!);
+      }
+    );
+    paramsSection.appendChild(topPParam);
 
-      // Tool Call Limit
-      const toolParam = createParameterControl(
-        'Tool Call Limit',
-        activePersona.tool_call_limit,
-        1, 10, 1,
-        'Maximum number of tools Talking Rock can use in a single response. Higher values let Talking Rock gather more information but may slow responses. Lower values keep responses quick but may limit capability.',
-        async (val) => {
-          activePersona.tool_call_limit = Math.round(val);
-          await savePersona(activePersona);
-        }
-      );
-      paramsSection.appendChild(toolParam);
-    }
+    // Tool Call Limit
+    const toolParam = createParameterControl(
+      'Tool Call Limit',
+      agentPersona.tool_call_limit,
+      1, 10, 1,
+      `Maximum number of tools ${agentConfig[selectedPersonaAgent].label} can use in a single response.`,
+      async (val) => {
+        agentPersona!.tool_call_limit = Math.round(val);
+        await savePersona(agentPersona!);
+      }
+    );
+    paramsSection.appendChild(toolParam);
 
     content.appendChild(paramsSection);
   }
