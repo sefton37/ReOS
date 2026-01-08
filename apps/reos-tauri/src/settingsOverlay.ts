@@ -9,7 +9,7 @@
 import { kernelRequest } from './kernel';
 import { el } from './dom';
 
-type SettingsTab = 'llm' | 'persona';
+type SettingsTab = 'llm' | 'persona' | 'safety';
 
 interface OllamaStatus {
   url: string;
@@ -125,6 +125,30 @@ interface OllamaInstallStatus {
   install_command: string;
 }
 
+// Safety & Security Types
+interface RateLimitConfig {
+  max_requests: number;
+  window_seconds: number;
+  name: string;
+}
+
+interface SafetySettings {
+  // Rate limits
+  rate_limits: Record<string, RateLimitConfig>;
+  // Sudo escalation
+  max_sudo_escalations: number;
+  current_sudo_count: number;
+  // Command limits
+  max_command_length: number;
+  // Validation limits
+  max_service_name_length: number;
+  max_container_id_length: number;
+  max_package_name_length: number;
+  // Dangerous pattern count (readonly)
+  dangerous_pattern_count: number;
+  injection_pattern_count: number;
+}
+
 /**
  * Download a model with progress tracking.
  * @param modelName Model to download
@@ -189,6 +213,9 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
   let providersInfo: ProvidersListResult | null = null;
   let anthropicStatus: AnthropicStatus | null = null;
   let ollamaInstallStatus: OllamaInstallStatus | null = null;
+
+  // Safety state
+  let safetySettings: SafetySettings | null = null;
 
   // Create overlay container
   const overlay = el('div');
@@ -282,9 +309,11 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
 
   const llmTab = createTab('llm', 'LLM Provider', '🤖');
   const personaTab = createTab('persona', 'Agent Persona', '🎭');
+  const safetyTab = createTab('safety', 'Safety', '🛡️');
 
   tabsContainer.appendChild(llmTab);
   tabsContainer.appendChild(personaTab);
+  tabsContainer.appendChild(safetyTab);
 
   // Content area
   const content = el('div');
@@ -397,6 +426,31 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
       // Personas not loaded, continue with empty list
     }
 
+    // Load safety settings
+    try {
+      safetySettings = await kernelRequest('safety/settings', {}) as SafetySettings;
+    } catch {
+      // Default safety settings if endpoint not available
+      safetySettings = {
+        rate_limits: {
+          auth: { max_requests: 5, window_seconds: 60, name: 'Login attempts' },
+          sudo: { max_requests: 10, window_seconds: 60, name: 'Sudo commands' },
+          service: { max_requests: 20, window_seconds: 60, name: 'Service operations' },
+          container: { max_requests: 30, window_seconds: 60, name: 'Container operations' },
+          package: { max_requests: 5, window_seconds: 300, name: 'Package operations' },
+          approval: { max_requests: 20, window_seconds: 60, name: 'Approval actions' },
+        },
+        max_sudo_escalations: 3,
+        current_sudo_count: 0,
+        max_command_length: 4096,
+        max_service_name_length: 256,
+        max_container_id_length: 256,
+        max_package_name_length: 256,
+        dangerous_pattern_count: 18,
+        injection_pattern_count: 13,
+      };
+    }
+
     render();
   }
 
@@ -406,13 +460,17 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
     llmTab.style.borderBottomColor = activeTab === 'llm' ? '#3b82f6' : 'transparent';
     personaTab.style.color = activeTab === 'persona' ? '#fff' : 'rgba(255,255,255,0.6)';
     personaTab.style.borderBottomColor = activeTab === 'persona' ? '#3b82f6' : 'transparent';
+    safetyTab.style.color = activeTab === 'safety' ? '#fff' : 'rgba(255,255,255,0.6)';
+    safetyTab.style.borderBottomColor = activeTab === 'safety' ? '#3b82f6' : 'transparent';
 
     content.innerHTML = '';
 
     if (activeTab === 'llm') {
       renderLLMTab();
-    } else {
+    } else if (activeTab === 'persona') {
       renderPersonaTab();
+    } else {
+      renderSafetyTab();
     }
   }
 
@@ -1726,6 +1784,326 @@ When executing:
     paramsSection.appendChild(toolParam);
 
     content.appendChild(paramsSection);
+  }
+
+  function renderSafetyTab() {
+    // Header explanation
+    const headerInfo = el('div');
+    headerInfo.style.cssText = `
+      padding: 16px;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: 8px;
+      margin-bottom: 20px;
+    `;
+    headerInfo.innerHTML = `
+      <div style="display: flex; align-items: flex-start; gap: 12px;">
+        <span style="font-size: 24px;">🛡️</span>
+        <div>
+          <div style="font-weight: 600; color: #fff; margin-bottom: 4px;">Safety Circuit Breakers</div>
+          <div style="font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.5;">
+            These hard limits prevent runaway behavior and protect your system from the "paperclip problem" -
+            an AI optimizing without boundaries. These limits <strong>cannot be removed</strong>, but can be tuned
+            within safe ranges.
+          </div>
+        </div>
+      </div>
+    `;
+    content.appendChild(headerInfo);
+
+    if (!safetySettings) {
+      const loading = el('div');
+      loading.textContent = 'Loading safety settings...';
+      loading.style.cssText = 'color: rgba(255,255,255,0.6); text-align: center; padding: 20px;';
+      content.appendChild(loading);
+      return;
+    }
+
+    // ============ Rate Limits Section ============
+    const rateLimitsSection = createSection('Rate Limits');
+    rateLimitsSection.innerHTML += `
+      <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-bottom: 12px;">
+        Limits on how frequently certain operations can be performed. Prevents resource exhaustion and brute-force attacks.
+      </div>
+    `;
+
+    const rateLimitsGrid = el('div');
+    rateLimitsGrid.style.cssText = `
+      display: grid;
+      gap: 12px;
+    `;
+
+    for (const [key, config] of Object.entries(safetySettings.rate_limits)) {
+      const limitCard = el('div');
+      limitCard.style.cssText = `
+        padding: 12px;
+        background: rgba(0,0,0,0.2);
+        border-radius: 8px;
+        border-left: 3px solid #3b82f6;
+      `;
+
+      const windowLabel = config.window_seconds >= 60
+        ? `${config.window_seconds / 60} min`
+        : `${config.window_seconds}s`;
+
+      limitCard.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div>
+            <div style="font-weight: 500; color: #fff; font-size: 13px;">${config.name}</div>
+            <div style="font-size: 11px; color: rgba(255,255,255,0.5);">Category: ${key}</div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-family: monospace; color: #3b82f6; font-size: 14px;">
+              ${config.max_requests} / ${windowLabel}
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Slider for max_requests
+      const sliderRow = el('div');
+      sliderRow.style.cssText = 'display: flex; align-items: center; gap: 8px;';
+
+      const slider = el('input') as HTMLInputElement;
+      slider.type = 'range';
+      slider.min = '1';
+      slider.max = key === 'auth' ? '10' : '50';
+      slider.value = String(config.max_requests);
+      slider.style.cssText = 'flex: 1; accent-color: #3b82f6;';
+
+      const valueLabel = el('span');
+      valueLabel.textContent = String(config.max_requests);
+      valueLabel.style.cssText = 'font-family: monospace; color: #3b82f6; min-width: 30px; text-align: right;';
+
+      slider.addEventListener('input', () => {
+        valueLabel.textContent = slider.value;
+      });
+
+      slider.addEventListener('change', async () => {
+        try {
+          await kernelRequest('safety/set_rate_limit', {
+            category: key,
+            max_requests: parseInt(slider.value),
+            window_seconds: config.window_seconds,
+          });
+          config.max_requests = parseInt(slider.value);
+        } catch (e) {
+          console.error('Failed to update rate limit:', e);
+        }
+      });
+
+      sliderRow.appendChild(slider);
+      sliderRow.appendChild(valueLabel);
+      limitCard.appendChild(sliderRow);
+
+      rateLimitsGrid.appendChild(limitCard);
+    }
+
+    rateLimitsSection.appendChild(rateLimitsGrid);
+    content.appendChild(rateLimitsSection);
+
+    // ============ Sudo Escalation Section ============
+    const sudoSection = createSection('Sudo Escalation Limit');
+    sudoSection.innerHTML += `
+      <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-bottom: 12px;">
+        Maximum number of sudo commands allowed per session. Prevents privilege escalation spirals.
+      </div>
+    `;
+
+    const sudoCard = el('div');
+    sudoCard.style.cssText = `
+      padding: 16px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      border-left: 3px solid #f59e0b;
+    `;
+
+    sudoCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div>
+          <div style="font-weight: 500; color: #fff;">Max Sudo Escalations</div>
+          <div style="font-size: 11px; color: rgba(255,255,255,0.5);">
+            Current session: ${safetySettings.current_sudo_count} / ${safetySettings.max_sudo_escalations} used
+          </div>
+        </div>
+        <div id="sudo-value" style="font-family: monospace; font-size: 18px; color: #f59e0b;">
+          ${safetySettings.max_sudo_escalations}
+        </div>
+      </div>
+    `;
+
+    const sudoSlider = el('input') as HTMLInputElement;
+    sudoSlider.type = 'range';
+    sudoSlider.min = '1';
+    sudoSlider.max = '10';
+    sudoSlider.value = String(safetySettings.max_sudo_escalations);
+    sudoSlider.style.cssText = 'width: 100%; accent-color: #f59e0b;';
+
+    sudoSlider.addEventListener('input', () => {
+      const valueEl = sudoCard.querySelector('#sudo-value');
+      if (valueEl) valueEl.textContent = sudoSlider.value;
+    });
+
+    sudoSlider.addEventListener('change', async () => {
+      try {
+        await kernelRequest('safety/set_sudo_limit', {
+          max_escalations: parseInt(sudoSlider.value),
+        });
+        safetySettings!.max_sudo_escalations = parseInt(sudoSlider.value);
+      } catch (e) {
+        console.error('Failed to update sudo limit:', e);
+      }
+    });
+
+    sudoCard.appendChild(sudoSlider);
+    sudoSection.appendChild(sudoCard);
+    content.appendChild(sudoSection);
+
+    // ============ Command Length Section ============
+    const commandSection = createSection('Command Length Limit');
+    commandSection.innerHTML += `
+      <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-bottom: 12px;">
+        Maximum length of shell commands. Prevents buffer overflow attacks and command injection.
+      </div>
+    `;
+
+    const commandCard = el('div');
+    commandCard.style.cssText = `
+      padding: 16px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+    `;
+
+    commandCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="font-weight: 500; color: #fff;">Max Command Length</div>
+        <div id="cmd-value" style="font-family: monospace; font-size: 16px; color: #22c55e;">
+          ${safetySettings.max_command_length.toLocaleString()} chars
+        </div>
+      </div>
+    `;
+
+    const cmdSlider = el('input') as HTMLInputElement;
+    cmdSlider.type = 'range';
+    cmdSlider.min = '1024';
+    cmdSlider.max = '16384';
+    cmdSlider.step = '512';
+    cmdSlider.value = String(safetySettings.max_command_length);
+    cmdSlider.style.cssText = 'width: 100%; accent-color: #22c55e;';
+
+    cmdSlider.addEventListener('input', () => {
+      const valueEl = commandCard.querySelector('#cmd-value');
+      if (valueEl) valueEl.textContent = parseInt(cmdSlider.value).toLocaleString() + ' chars';
+    });
+
+    cmdSlider.addEventListener('change', async () => {
+      try {
+        await kernelRequest('safety/set_command_length', {
+          max_length: parseInt(cmdSlider.value),
+        });
+        safetySettings!.max_command_length = parseInt(cmdSlider.value);
+      } catch (e) {
+        console.error('Failed to update command length:', e);
+      }
+    });
+
+    commandCard.appendChild(cmdSlider);
+    commandSection.appendChild(commandCard);
+    content.appendChild(commandSection);
+
+    // ============ Pattern Detection (Read-only) ============
+    const patternsSection = createSection('Blocked Patterns (Read-only)');
+    patternsSection.innerHTML += `
+      <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-bottom: 12px;">
+        Hardcoded patterns that detect and block dangerous operations. These cannot be disabled.
+      </div>
+    `;
+
+    const patternsGrid = el('div');
+    patternsGrid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 12px;';
+
+    // Dangerous commands
+    const dangerousCard = el('div');
+    dangerousCard.style.cssText = `
+      padding: 16px;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: 8px;
+    `;
+    dangerousCard.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <span style="font-size: 18px;">🚫</span>
+        <div style="font-weight: 500; color: #ef4444;">Dangerous Commands</div>
+      </div>
+      <div style="font-size: 24px; font-weight: 600; color: #fff; margin-bottom: 4px;">
+        ${safetySettings.dangerous_pattern_count}
+      </div>
+      <div style="font-size: 11px; color: rgba(255,255,255,0.5);">
+        Patterns blocked (rm -rf, dd, fork bombs, etc.)
+      </div>
+    `;
+    patternsGrid.appendChild(dangerousCard);
+
+    // Injection detection
+    const injectionCard = el('div');
+    injectionCard.style.cssText = `
+      padding: 16px;
+      background: rgba(168, 85, 247, 0.1);
+      border: 1px solid rgba(168, 85, 247, 0.2);
+      border-radius: 8px;
+    `;
+    injectionCard.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <span style="font-size: 18px;">🔍</span>
+        <div style="font-weight: 500; color: #a855f7;">Prompt Injection</div>
+      </div>
+      <div style="font-size: 24px; font-weight: 600; color: #fff; margin-bottom: 4px;">
+        ${safetySettings.injection_pattern_count}
+      </div>
+      <div style="font-size: 11px; color: rgba(255,255,255,0.5);">
+        Patterns detected (jailbreaks, role changes, etc.)
+      </div>
+    `;
+    patternsGrid.appendChild(injectionCard);
+
+    patternsSection.appendChild(patternsGrid);
+    content.appendChild(patternsSection);
+
+    // ============ Input Validation (Read-only) ============
+    const validationSection = createSection('Input Validation Limits');
+    validationSection.innerHTML += `
+      <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-bottom: 12px;">
+        Maximum lengths for various input types. Prevents buffer-based attacks.
+      </div>
+    `;
+
+    const validationGrid = el('div');
+    validationGrid.style.cssText = 'display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;';
+
+    const validationLimits = [
+      { name: 'Service Name', value: safetySettings.max_service_name_length },
+      { name: 'Container ID', value: safetySettings.max_container_id_length },
+      { name: 'Package Name', value: safetySettings.max_package_name_length },
+    ];
+
+    for (const limit of validationLimits) {
+      const limitBox = el('div');
+      limitBox.style.cssText = `
+        padding: 12px;
+        background: rgba(0,0,0,0.2);
+        border-radius: 6px;
+        text-align: center;
+      `;
+      limitBox.innerHTML = `
+        <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 4px;">${limit.name}</div>
+        <div style="font-family: monospace; font-size: 16px; color: #fff;">${limit.value}</div>
+        <div style="font-size: 10px; color: rgba(255,255,255,0.4);">max chars</div>
+      `;
+      validationGrid.appendChild(limitBox);
+    }
+
+    validationSection.appendChild(validationGrid);
+    content.appendChild(validationSection);
   }
 
   function createSection(title: string): HTMLElement {

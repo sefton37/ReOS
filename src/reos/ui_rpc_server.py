@@ -42,6 +42,13 @@ from .security import (
     AuditEventType,
     get_auditor,
     configure_auditor,
+    get_rate_limiter,
+    DANGEROUS_PATTERNS,
+    INJECTION_PATTERNS,
+    MAX_COMMAND_LEN,
+    MAX_SERVICE_NAME_LEN,
+    MAX_CONTAINER_ID_LEN,
+    MAX_PACKAGE_NAME_LEN,
 )
 from .play_fs import add_attachment as play_add_attachment
 from .play_fs import create_act as play_create_act
@@ -3875,6 +3882,115 @@ def _handle_cairn_thunderbird_status(_db: Database) -> dict[str, Any]:
 
 
 # -------------------------------------------------------------------------
+# Safety & Security Settings
+# -------------------------------------------------------------------------
+
+def _handle_safety_settings(_db: Database) -> dict[str, Any]:
+    """Get current safety settings and limits."""
+    from . import linux_tools
+
+    rate_limiter = get_rate_limiter()
+    sudo_count, sudo_max = linux_tools.get_sudo_escalation_status()
+
+    # Build rate limits dict
+    rate_limits = {}
+    for category, config in rate_limiter._limits.items():
+        rate_limits[category] = {
+            "max_requests": config.max_requests,
+            "window_seconds": config.window_seconds,
+            "name": config.name,
+        }
+
+    return {
+        "rate_limits": rate_limits,
+        "max_sudo_escalations": sudo_max,
+        "current_sudo_count": sudo_count,
+        "max_command_length": MAX_COMMAND_LEN,
+        "max_service_name_length": MAX_SERVICE_NAME_LEN,
+        "max_container_id_length": MAX_CONTAINER_ID_LEN,
+        "max_package_name_length": MAX_PACKAGE_NAME_LEN,
+        "dangerous_pattern_count": len(DANGEROUS_PATTERNS),
+        "injection_pattern_count": len(INJECTION_PATTERNS),
+    }
+
+
+def _handle_safety_set_rate_limit(
+    _db: Database,
+    *,
+    category: str,
+    max_requests: int,
+    window_seconds: float,
+) -> dict[str, Any]:
+    """Update a rate limit configuration."""
+    rate_limiter = get_rate_limiter()
+
+    # Validate bounds
+    if max_requests < 1:
+        max_requests = 1
+    if max_requests > 100:
+        max_requests = 100
+    if window_seconds < 10:
+        window_seconds = 10
+    if window_seconds > 600:
+        window_seconds = 600
+
+    rate_limiter.configure(category, max_requests, window_seconds)
+
+    return {
+        "success": True,
+        "category": category,
+        "max_requests": max_requests,
+        "window_seconds": window_seconds,
+    }
+
+
+def _handle_safety_set_sudo_limit(
+    _db: Database,
+    *,
+    max_escalations: int,
+) -> dict[str, Any]:
+    """Update the sudo escalation limit."""
+    from . import linux_tools
+
+    # Validate bounds (1-20)
+    if max_escalations < 1:
+        max_escalations = 1
+    if max_escalations > 20:
+        max_escalations = 20
+
+    # Update the module-level constant
+    linux_tools._MAX_SUDO_ESCALATIONS = max_escalations
+
+    return {
+        "success": True,
+        "max_escalations": max_escalations,
+    }
+
+
+def _handle_safety_set_command_length(
+    _db: Database,
+    *,
+    max_length: int,
+) -> dict[str, Any]:
+    """Update the maximum command length."""
+    from . import security
+
+    # Validate bounds (512-32768)
+    if max_length < 512:
+        max_length = 512
+    if max_length > 32768:
+        max_length = 32768
+
+    # Update the module-level constant
+    security.MAX_COMMAND_LEN = max_length
+
+    return {
+        "success": True,
+        "max_length": max_length,
+    }
+
+
+# -------------------------------------------------------------------------
 # Handoff System (Talking Rock Multi-Agent)
 # -------------------------------------------------------------------------
 
@@ -5538,6 +5654,57 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
 
         if method == "cairn/thunderbird/status":
             return _jsonrpc_result(req_id=req_id, result=_handle_cairn_thunderbird_status(db))
+
+        # -------------------------------------------------------------------------
+        # Safety & Security Settings
+        # -------------------------------------------------------------------------
+
+        if method == "safety/settings":
+            return _jsonrpc_result(req_id=req_id, result=_handle_safety_settings(db))
+
+        if method == "safety/set_rate_limit":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            category = params.get("category")
+            max_requests = params.get("max_requests")
+            window_seconds = params.get("window_seconds")
+            if not isinstance(category, str) or not category:
+                raise RpcError(code=-32602, message="category is required")
+            if not isinstance(max_requests, int):
+                raise RpcError(code=-32602, message="max_requests must be an integer")
+            if not isinstance(window_seconds, (int, float)):
+                raise RpcError(code=-32602, message="window_seconds must be a number")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_safety_set_rate_limit(
+                    db,
+                    category=category,
+                    max_requests=max_requests,
+                    window_seconds=float(window_seconds),
+                ),
+            )
+
+        if method == "safety/set_sudo_limit":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            max_escalations = params.get("max_escalations")
+            if not isinstance(max_escalations, int):
+                raise RpcError(code=-32602, message="max_escalations must be an integer")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_safety_set_sudo_limit(db, max_escalations=max_escalations),
+            )
+
+        if method == "safety/set_command_length":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            max_length = params.get("max_length")
+            if not isinstance(max_length, int):
+                raise RpcError(code=-32602, message="max_length must be an integer")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_safety_set_command_length(db, max_length=max_length),
+            )
 
         # -------------------------------------------------------------------------
         # Handoff System (Talking Rock Multi-Agent)
