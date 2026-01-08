@@ -121,7 +121,11 @@ class SessionLogger:
             with open(self.log_file, "a") as f:
                 f.write(line + "\n")
         except Exception as e:
-            logger.warning("Failed to write to session log: %s", e)
+            # Critical: log persistence failure - use stderr as fallback
+            logger.error("CRITICAL: Failed to persist session log to disk: %s", e, exc_info=True)
+            import sys
+            print(f"ERROR: Session log write failed: {e}", file=sys.stderr)
+            print(f"  Line: {line[:200]}...", file=sys.stderr)
 
     def _add_entry(self, entry: LogEntry) -> None:
         """Add entry to memory and write to file."""
@@ -432,7 +436,16 @@ class SessionLogger:
             with open(self.json_file, "w") as f:
                 json.dump(summary, f, indent=2)
         except Exception as e:
-            logger.warning("Failed to write session JSON: %s", e)
+            # Critical: JSON summary persistence failure
+            logger.error("CRITICAL: Failed to write session JSON summary: %s", e, exc_info=True)
+            # Log summary to standard logger as fallback
+            logger.info(
+                "Session summary fallback: session_id=%s, prompt=%s, outcome=%s, entries=%d",
+                self.session_id,
+                self.prompt[:50] if self.prompt else "unknown",
+                outcome,
+                len(self.entries),
+            )
 
     def get_log_path(self) -> Path:
         """Get path to the log file."""
@@ -505,7 +518,8 @@ def get_session_log(session_id: str, log_dir: Path | None = None) -> dict[str, A
                 if log_file.exists():
                     data["raw_log"] = log_file.read_text()
                 return data
-        except Exception:
+        except Exception as e:
+            logger.debug("Skipped unreadable session file %s: %s", json_file.name, e)
             continue
 
     return None

@@ -24,6 +24,7 @@ from reos.code_mode.intention import (
     IntentionStatus,
     Judgment,
     Session,
+    UICheckpoint,
     WorkContext,
     can_verify_directly,
     decompose,
@@ -714,3 +715,137 @@ class TestRivaLogging:
         execute_action(action, ctx)
 
         mock_logger.log_error.assert_called()
+
+
+# ==============================================================================
+# UICheckpoint Tests
+# ==============================================================================
+
+class TestUICheckpoint:
+    """Test UICheckpoint class for human-in-the-loop mode."""
+
+    @pytest.fixture
+    def sandbox(self):
+        return MagicMock()
+
+    def test_judge_action_uses_callback(self, sandbox):
+        """Callback should be used when provided."""
+        def custom_judge(intention, cycle, auto_judgment):
+            # Override auto judgment
+            return Judgment.SUCCESS
+
+        checkpoint = UICheckpoint(sandbox, on_judge_action=custom_judge)
+        intention = Intention.create("Task", "Done")
+        action = Action(ActionType.COMMAND, "test", None)
+        cycle = Cycle("Try", action, "Error: something failed", Judgment.UNCLEAR)
+
+        # Auto would return FAILURE due to "Error" in result
+        result = checkpoint.judge_action(intention, cycle)
+
+        # But our callback overrides to SUCCESS
+        assert result == Judgment.SUCCESS
+
+    def test_judge_action_falls_back_to_auto(self, sandbox):
+        """Without callback, should use auto judgment."""
+        checkpoint = UICheckpoint(sandbox)  # No callback
+        intention = Intention.create("Task", "Done")
+        action = Action(ActionType.COMMAND, "test", None)
+        cycle = Cycle("Try", action, "Success!", Judgment.UNCLEAR)
+
+        result = checkpoint.judge_action(intention, cycle)
+
+        # Auto returns SUCCESS due to "Success" in result
+        assert result == Judgment.SUCCESS
+
+    def test_approve_decomposition_uses_callback(self, sandbox):
+        """Callback should be used when provided."""
+        def custom_approve(intention, children):
+            # Reject all decompositions
+            return False
+
+        checkpoint = UICheckpoint(sandbox, on_approve_decomposition=custom_approve)
+        parent = Intention.create("Parent", "Done")
+        children = [Intention.create("Child", "Done")]
+
+        # Auto would approve
+        result = checkpoint.approve_decomposition(parent, children)
+
+        # But our callback rejects
+        assert result is False
+
+    def test_approve_decomposition_falls_back_to_auto(self, sandbox):
+        """Without callback, should use auto approval."""
+        checkpoint = UICheckpoint(sandbox)
+        parent = Intention.create("Parent", "Done")
+        children = [Intention.create("Child for parent", "Done")]
+
+        result = checkpoint.approve_decomposition(parent, children)
+
+        # Auto approves non-empty decomposition
+        assert result is True
+
+    def test_verify_integration_uses_callback(self, sandbox):
+        """Callback should be used when provided."""
+        def custom_verify(intention):
+            # Always reject
+            return False
+
+        checkpoint = UICheckpoint(sandbox, on_verify_integration=custom_verify)
+        parent = Intention.create("Parent", "Done")
+        child = Intention.create("Child", "Done")
+        child.status = IntentionStatus.VERIFIED
+        parent.add_child(child)
+
+        # Auto would verify since child is verified
+        result = checkpoint.verify_integration(parent)
+
+        # But our callback rejects
+        assert result is False
+
+    def test_verify_integration_falls_back_to_auto(self, sandbox):
+        """Without callback, should use auto verification."""
+        checkpoint = UICheckpoint(sandbox)
+        parent = Intention.create("Parent", "Done")
+        child = Intention.create("Child", "Done")
+        child.status = IntentionStatus.VERIFIED
+        parent.add_child(child)
+
+        result = checkpoint.verify_integration(parent)
+
+        # Auto verifies since child is verified
+        assert result is True
+
+    def test_review_reflection_uses_callback(self, sandbox):
+        """Callback should be used when provided."""
+        def custom_review(intention, cycle):
+            # Reject the reflection
+            return False
+
+        checkpoint = UICheckpoint(sandbox, on_review_reflection=custom_review)
+        intention = Intention.create("Task", "Done")
+        action = Action(ActionType.COMMAND, "test", None)
+        cycle = Cycle("Try", action, "Failed", Judgment.FAILURE, "Need different approach")
+
+        # Auto would approve
+        result = checkpoint.review_reflection(intention, cycle)
+
+        # But our callback rejects
+        assert result is False
+
+    def test_callback_receives_auto_judgment(self, sandbox):
+        """Callback should receive the auto-computed judgment."""
+        received_auto = []
+
+        def capture_auto(intention, cycle, auto_judgment):
+            received_auto.append(auto_judgment)
+            return auto_judgment
+
+        checkpoint = UICheckpoint(sandbox, on_judge_action=capture_auto)
+        intention = Intention.create("Task", "Done")
+        action = Action(ActionType.COMMAND, "test", None)
+        cycle = Cycle("Try", action, "Error: failed", Judgment.UNCLEAR)
+
+        checkpoint.judge_action(intention, cycle)
+
+        # Should have received FAILURE auto-judgment
+        assert received_auto[0] == Judgment.FAILURE

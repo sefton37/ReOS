@@ -147,6 +147,7 @@ class AcceptanceCriterion:
                 result = self._verify_layer_appropriate(sandbox)
             # else: Custom - cannot auto-verify, result stays False
         except Exception as e:
+            logger.error("Criterion verification failed for '%s': %s", self.description[:50], e, exc_info=True)
             self.verification_output = f"Error: {e}"
             result = False
 
@@ -181,6 +182,7 @@ class AcceptanceCriterion:
             self.verification_output = f"Pattern not found in {self.target_file}"
             return False
         except Exception as e:
+            logger.error("Error searching for pattern in %s: %s", self.target_file, e, exc_info=True)
             self.verification_output = f"Error searching: {e}"
             return False
 
@@ -199,6 +201,7 @@ class AcceptanceCriterion:
             self.verification_output = f"Pattern incorrectly found in {self.target_file}"
             return False
         except Exception as e:
+            logger.error("Error checking pattern absence in %s: %s", self.target_file, e, exc_info=True)
             self.verification_output = f"Error searching: {e}"
             return False
 
@@ -664,8 +667,14 @@ class ContractBuilder:
                     test_spec.test_function,
                 )
             except Exception as e:
+                logger.error("Test generation failed: %s", e, exc_info=True)
                 self._notify(f"Test generation skipped: {str(e)[:50]}")
-                logger.warning("Test generation failed: %s, using standard criteria", e)
+                self._log("test_generation_failed",
+                    f"Test-first generation failed, using standard criteria: {e}", {
+                        "exception": str(e),
+                        "exception_type": type(e).__name__,
+                        "fallback": "standard_criteria",
+                    }, level="WARN")
 
         # 2. Add other criteria using LLM or heuristics
         if self._llm is not None:
@@ -920,7 +929,11 @@ PROJECT DECISIONS (must respect):
 {decisions}
 """
             except Exception as e:
-                logger.debug("Failed to get project decisions: %s", e)
+                logger.warning("Failed to retrieve project decisions: %s", e, exc_info=True)
+                self._log("project_decisions_retrieval_failed",
+                    f"Could not load project decisions for criteria generation: {e}", {
+                        "exception": str(e),
+                    }, level="WARN")
 
         # Build layer responsibilities section
         layer_section = ""

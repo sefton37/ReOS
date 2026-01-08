@@ -273,6 +273,23 @@ class HumanCheckpoint(Protocol):
 - Exit code detection
 - Child verification status
 
+**`UICheckpoint`** provides human-in-the-loop implementation:
+```python
+def ask_judgment(intention, cycle, auto_judgment):
+    # Show UI, get user input
+    return user_selected_judgment or auto_judgment
+
+checkpoint = UICheckpoint(
+    sandbox=sandbox,
+    on_judge_action=ask_judgment,
+    on_approve_decomposition=lambda i, c: show_decomposition_ui(i, c),
+    on_verify_integration=lambda i: show_integration_ui(i),
+    on_review_reflection=lambda i, c: show_reflection_ui(i, c),
+)
+```
+
+Callbacks receive context and return decisions. When a callback is not provided, UICheckpoint falls back to AutoCheckpoint behavior.
+
 ### Session Capture
 
 ```python

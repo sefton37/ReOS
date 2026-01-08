@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from reos.code_mode.sandbox import CodeSandbox
@@ -312,6 +312,87 @@ class AutoCheckpoint:
         return True
 
 
+class UICheckpoint:
+    """Human-in-the-loop checkpoint using UI callbacks.
+
+    This checkpoint implementation surfaces decisions to the user through
+    callback functions. Use this when you want explicit human approval
+    for RIVA decisions.
+
+    The callbacks follow a pattern:
+    - They receive context about the decision
+    - They return the human's decision (or a default if callback not provided)
+
+    Example:
+        def ask_judgment(intention, cycle, auto_judgment):
+            # Show UI, get user input
+            return user_selected_judgment or auto_judgment
+
+        checkpoint = UICheckpoint(
+            sandbox=sandbox,
+            on_judge_action=ask_judgment,
+        )
+    """
+
+    def __init__(
+        self,
+        sandbox: "CodeSandbox",
+        llm: "LLMProvider | None" = None,
+        on_judge_action: "Callable[[Intention, Cycle, Judgment], Judgment] | None" = None,
+        on_approve_decomposition: "Callable[[Intention, list[Intention]], bool] | None" = None,
+        on_verify_integration: "Callable[[Intention], bool] | None" = None,
+        on_review_reflection: "Callable[[Intention, Cycle], bool] | None" = None,
+    ):
+        """Initialize UICheckpoint.
+
+        Args:
+            sandbox: Code sandbox for file operations
+            llm: Optional LLM provider for generating suggestions
+            on_judge_action: Callback for action judgment.
+                            Receives (intention, cycle, auto_judgment) and returns final Judgment.
+            on_approve_decomposition: Callback for decomposition approval.
+                            Receives (intention, proposed_children) and returns bool.
+            on_verify_integration: Callback for integration verification.
+                            Receives (intention) and returns bool.
+            on_review_reflection: Callback for reflection review.
+                            Receives (intention, cycle) and returns bool.
+        """
+        self._auto = AutoCheckpoint(sandbox, llm)
+        self._on_judge_action = on_judge_action
+        self._on_approve_decomposition = on_approve_decomposition
+        self._on_verify_integration = on_verify_integration
+        self._on_review_reflection = on_review_reflection
+
+    def judge_action(self, intention: Intention, cycle: Cycle) -> Judgment:
+        """Judge action with human input.
+
+        First computes auto judgment, then optionally asks human for override.
+        """
+        auto_judgment = self._auto.judge_action(intention, cycle)
+
+        if self._on_judge_action:
+            return self._on_judge_action(intention, cycle, auto_judgment)
+        return auto_judgment
+
+    def approve_decomposition(self, intention: Intention, proposed_children: list[Intention]) -> bool:
+        """Approve decomposition with human input."""
+        if self._on_approve_decomposition:
+            return self._on_approve_decomposition(intention, proposed_children)
+        return self._auto.approve_decomposition(intention, proposed_children)
+
+    def verify_integration(self, intention: Intention) -> bool:
+        """Verify integration with human input."""
+        if self._on_verify_integration:
+            return self._on_verify_integration(intention)
+        return self._auto.verify_integration(intention)
+
+    def review_reflection(self, intention: Intention, cycle: Cycle) -> bool:
+        """Review reflection with human input."""
+        if self._on_review_reflection:
+            return self._on_review_reflection(intention, cycle)
+        return self._auto.review_reflection(intention, cycle)
+
+
 @dataclass
 class WorkContext:
     """Context for the recursive work algorithm.
@@ -496,9 +577,15 @@ Provide sub-intentions that are concrete and testable."""
             return _heuristic_decompose(intention, ctx)
 
     except Exception as e:
-        logger.warning("LLM decomposition failed: %s, using heuristic", e)
+        logger.error("LLM decomposition failed: %s, using heuristic fallback", e, exc_info=True)
         if ctx.session_logger:
-            ctx.session_logger.log_error("riva", "decompose_error", str(e))
+            ctx.session_logger.log_error("riva", "decompose_fallback",
+                f"LLM decomposition failed: {e}. Using heuristic fallback.", {
+                    "exception_type": type(e).__name__,
+                    "exception": str(e),
+                    "intention_what": intention.what[:100],
+                    "fallback": "heuristic_decompose",
+                })
         return _heuristic_decompose(intention, ctx)
 
 
@@ -606,7 +693,15 @@ What should we try next?"""
         return thought, action
 
     except Exception as e:
-        logger.warning("LLM action determination failed: %s", e)
+        logger.error("LLM action determination failed: %s, using heuristic", e, exc_info=True)
+        if ctx.session_logger:
+            ctx.session_logger.log_error("riva", "action_determination_fallback",
+                f"LLM action determination failed: {e}. Using heuristic.", {
+                    "exception_type": type(e).__name__,
+                    "exception": str(e),
+                    "intention_what": intention.what[:100],
+                    "fallback": "heuristic_action",
+                })
         return _heuristic_action(intention, ctx)
 
 
@@ -706,7 +801,7 @@ def execute_action(action: Action, ctx: WorkContext) -> str:
             matches = ctx.sandbox.grep(action.content, glob_pattern="**/*.py", max_results=10)
             if matches:
                 result = f"Found {len(matches)} matches:\n" + "\n".join(
-                    f"  {m.path}:{m.line_number}: {m.line[:60]}" for m in matches[:5]
+                    f"  {m.path}:{m.line_number}: {m.line_content[:60]}" for m in matches[:5]
                 )
                 if ctx.session_logger:
                     ctx.session_logger.log_info("riva", "query_result",
@@ -776,8 +871,15 @@ Why did this fail and what should we do?"""
         return response.strip()
 
     except Exception as e:
-        logger.warning("LLM reflection failed: %s", e)
-        return f"Reflection failed: {e}. Will retry."
+        logger.error("LLM reflection failed: %s", e, exc_info=True)
+        if ctx.session_logger:
+            ctx.session_logger.log_error("riva", "reflection_failed",
+                f"LLM reflection failed: {e}", {
+                    "exception_type": type(e).__name__,
+                    "exception": str(e),
+                    "cycle_judgment": cycle.judgment.value if cycle else "unknown",
+                })
+        return f"Unable to analyze failure (error: {type(e).__name__}). Retrying with different approach."
 
 
 def integrate(intention: Intention, ctx: WorkContext) -> bool:

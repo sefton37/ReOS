@@ -518,7 +518,12 @@ Output JSON with these fields:
             )
 
         except Exception as e:
-            logger.warning("Failed to inject project memory: %s", e)
+            logger.warning("Failed to inject project memory context: %s", e, exc_info=True)
+            self._log("project_memory_injection_failed",
+                f"Could not load project decisions: {e}", {
+                    "exception": str(e),
+                    "exception_type": type(e).__name__,
+                }, level="WARN")
 
     def _analyze_codebase(self, prompt: str) -> CodebaseIntent:
         """Extract intent from codebase analysis using grep-based search."""
@@ -794,7 +799,12 @@ Output JSON with these fields:
                 if layer_resp is not None:
                     return layer_resp
         except Exception as e:
-            logger.debug("Failed to read file %s for layer analysis: %s", file_path, e)
+            logger.warning("Failed to analyze layer responsibility for %s: %s", file_path, e, exc_info=True)
+            self._log("layer_analysis_failed",
+                f"Could not analyze {file_path}: {e}", {
+                    "file_path": file_path,
+                    "exception": str(e),
+                }, level="WARN")
 
         # Fall back to pattern-based inference
         file_lower = file_path.lower()

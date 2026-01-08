@@ -30,6 +30,15 @@ from reos.code_mode.contract import (
     ContractStep,
 )
 from reos.code_mode.intent import DiscoveredIntent, IntentDiscoverer
+from reos.code_mode.intention import (
+    AutoCheckpoint,
+    Cycle,
+    Intention,
+    IntentionStatus,
+    Session as RIVASession,
+    WorkContext,
+    work as riva_work,
+)
 from reos.code_mode.perspectives import (
     ENGINEER,
     Phase,
@@ -187,6 +196,7 @@ class CodeExecutor:
         max_iterations: int = 10,
         auto_approve: bool = False,
         plan_context: "CodeTaskPlan | None" = None,
+        use_riva: bool = False,
     ) -> ExecutionResult:
         """Execute the full code mode loop.
 
@@ -199,6 +209,8 @@ class CodeExecutor:
             plan_context: Optional pre-computed plan from CodePlanner.
                          When provided, reuses the plan's file analysis
                          instead of rediscovering from scratch.
+            use_riva: If True, use RIVA (Recursive Intention-Verification Architecture)
+                     instead of the standard contract-based loop.
 
         Returns:
             ExecutionResult with outcome and state.
@@ -244,7 +256,11 @@ class CodeExecutor:
                 assumptions=state.intent.assumptions,
             )
 
-            # Main loop
+            # Branch: Use RIVA or standard contract-based loop
+            if use_riva:
+                return self._execute_riva(state, act)
+
+            # Main loop (standard contract-based execution)
             while state.current_iteration < max_iterations:
                 # Notify iteration start
                 self._notify_iteration_start(state.current_iteration + 1, max_iterations)
@@ -373,6 +389,192 @@ class CodeExecutor:
         return self._intent_discoverer.discover(
             prompt, act, knowledge_context, plan_context=plan_context
         )
+
+    def _execute_riva(
+        self,
+        state: ExecutionState,
+        act: "Act",
+    ) -> ExecutionResult:
+        """Execute using RIVA (Recursive Intention-Verification Architecture).
+
+        RIVA uses a single recursive principle: "If you can't verify it, decompose it."
+        Instead of a fixed contract-based loop, RIVA dynamically builds an intention
+        tree, working each node until verified or decomposed.
+
+        Args:
+            state: Current execution state with discovered intent.
+            act: The active Act with context.
+
+        Returns:
+            ExecutionResult with outcome and state.
+        """
+        assert state.intent is not None, "Intent must be discovered before RIVA execution"
+        assert self._session_logger is not None, "Session logger must be initialized"
+
+        self._session_logger.log_info("executor", "riva_start",
+            "Starting RIVA execution mode", {
+                "goal": state.intent.goal[:100],
+                "confidence": state.intent.confidence,
+            })
+
+        # Create root intention from discovered intent
+        # Synthesize acceptance criteria from goal and constraints
+        if state.intent.how_constraints:
+            acceptance = f"Goal achieved: {state.intent.goal}. Constraints satisfied: {'; '.join(state.intent.how_constraints[:3])}"
+        else:
+            acceptance = f"Goal verified: {state.intent.goal}"
+
+        root_intention = Intention.create(
+            what=state.intent.goal,
+            acceptance=acceptance,
+        )
+
+        # Set up callbacks for UI integration
+        def on_intention_start(intention: Intention) -> None:
+            """Called when work begins on an intention."""
+            if self._observer:
+                self._observer.on_activity(
+                    f"Working on: {intention.what[:50]}...",
+                    module="RIVA"
+                )
+            self._session_logger.log_info("riva", "intention_start",
+                f"Starting: {intention.what[:50]}...", {
+                    "intention_id": intention.id,
+                    "acceptance": intention.acceptance[:100],
+                })
+
+        def on_intention_complete(intention: Intention) -> None:
+            """Called when an intention is complete (verified or failed)."""
+            if self._observer:
+                status_str = "verified" if intention.status == IntentionStatus.VERIFIED else "failed"
+                self._observer.on_activity(
+                    f"Intention {status_str}: {intention.what[:40]}...",
+                    module="RIVA"
+                )
+            self._session_logger.log_info("riva", "intention_complete",
+                f"Completed: {intention.what[:50]}...", {
+                    "intention_id": intention.id,
+                    "status": intention.status.value,
+                    "cycles": len(intention.trace),
+                    "children": len(intention._child_intentions),
+                })
+
+        def on_cycle_complete(intention: Intention, cycle: Cycle) -> None:
+            """Called after each action cycle."""
+            if self._observer:
+                self._observer.on_activity(
+                    f"Cycle: {cycle.action.type.value} → {cycle.judgment.value}",
+                    module="RIVA"
+                )
+            self._session_logger.log_info("riva", "cycle_complete",
+                f"Cycle: {cycle.action.type.value} → {cycle.judgment.value}", {
+                    "action_type": cycle.action.type.value,
+                    "judgment": cycle.judgment.value,
+                    "result_preview": cycle.result[:100],
+                })
+
+        def on_decomposition(intention: Intention, children: list[Intention]) -> None:
+            """Called when an intention is decomposed."""
+            if self._observer:
+                self._observer.on_activity(
+                    f"Decomposed into {len(children)} sub-tasks",
+                    module="RIVA"
+                )
+            self._session_logger.log_info("riva", "decomposition",
+                f"Decomposed: {intention.what[:40]}... → {len(children)} children", {
+                    "parent_id": intention.id,
+                    "children": [c.what[:50] for c in children],
+                })
+
+        # Create work context
+        checkpoint = AutoCheckpoint(self.sandbox, self._llm)
+        ctx = WorkContext(
+            sandbox=self.sandbox,
+            llm=self._llm,
+            checkpoint=checkpoint,
+            session_logger=self._session_logger,
+            max_cycles_per_intention=5,
+            max_depth=state.max_iterations,  # Use max_iterations as depth limit
+            on_intention_start=on_intention_start,
+            on_intention_complete=on_intention_complete,
+            on_cycle_complete=on_cycle_complete,
+            on_decomposition=on_decomposition,
+        )
+
+        # Notify UI of RIVA mode
+        state.status = LoopStatus.BUILDING
+        self._notify_phase_change(state.status)
+
+        try:
+            # Run RIVA
+            riva_work(root_intention, ctx)
+
+            # Capture session for training data
+            riva_session = RIVASession.create(root_intention)
+            riva_session.metadata["intent_goal"] = state.intent.goal
+            riva_session.metadata["intent_confidence"] = state.intent.confidence
+
+            # Save session
+            sessions_dir = Path(".reos-data/riva_sessions")
+            sessions_dir.mkdir(parents=True, exist_ok=True)
+            riva_session.save(sessions_dir / f"{riva_session.id}.json")
+
+            # Determine outcome
+            success = root_intention.status == IntentionStatus.VERIFIED
+            state.status = LoopStatus.COMPLETED if success else LoopStatus.FAILED
+            state.completed_at = datetime.now(timezone.utc)
+
+            # Collect changed files from all actions
+            files_changed = set()
+            def collect_files(intention: Intention) -> None:
+                for cycle in intention.trace:
+                    if cycle.action.target:
+                        files_changed.add(cycle.action.target)
+                for child in intention._child_intentions:
+                    collect_files(child)
+            collect_files(root_intention)
+
+            self._session_logger.log_info("riva", "complete",
+                f"RIVA execution complete: {root_intention.status.value}", {
+                    "success": success,
+                    "total_cycles": root_intention.get_total_cycles(),
+                    "max_depth": root_intention.get_depth(),
+                    "files_changed": list(files_changed),
+                })
+
+            # Close session logger
+            self._session_logger.close(
+                outcome="completed" if success else "failed",
+                final_message=f"RIVA {root_intention.status.value}: {root_intention.what[:100]}",
+            )
+
+            return ExecutionResult(
+                success=success,
+                message=f"RIVA {'verified' if success else 'failed'}: {root_intention.what[:100]}",
+                state=state,
+                files_changed=list(files_changed),
+                total_iterations=root_intention.get_total_cycles(),
+            )
+
+        except ExecutionCancelledError:
+            state.status = LoopStatus.FAILED
+            self._session_logger.log_warn("riva", "cancelled", "Execution cancelled by user")
+            self._session_logger.close(outcome="cancelled", final_message="User cancelled")
+            return ExecutionResult(
+                success=False,
+                message="Execution cancelled",
+                state=state,
+            )
+        except Exception as e:
+            state.status = LoopStatus.FAILED
+            self._session_logger.log_error("riva", "error", f"RIVA execution failed: {e}")
+            self._session_logger.close(outcome="failed", final_message=str(e))
+            logger.exception("RIVA execution failed")
+            return ExecutionResult(
+                success=False,
+                message=f"RIVA execution failed: {e}",
+                state=state,
+            )
 
     def _run_iteration(
         self,
@@ -684,6 +886,15 @@ class CodeExecutor:
         try:
             current_content = self.sandbox.read_file(step.target_file)
         except Exception as e:
+            logger.error("Failed to read file %s for editing: %s", step.target_file, e, exc_info=True)
+            if self._session_logger:
+                self._session_logger.log_error("executor", "file_read_failed",
+                    f"Could not read {step.target_file} for editing: {e}", {
+                        "target_file": step.target_file,
+                        "step_id": step.id,
+                        "step_description": step.description[:100],
+                        "exception_type": type(e).__name__,
+                    })
             return StepResult(
                 success=False,
                 step_id=step.id,
@@ -845,7 +1056,15 @@ Output JSON with:
             data = json.loads(response)
             return data.get("old_str"), data.get("new_str")
         except Exception as e:
-            logger.warning("Edit generation failed: %s", e)
+            logger.error("LLM edit generation failed: %s", e, exc_info=True)
+            if self._session_logger:
+                self._session_logger.log_error("executor", "edit_generation_failed",
+                    f"Failed to generate edit: {e}", {
+                        "target_file": step.target_file if step.target_file else "unknown",
+                        "step_description": step.description[:100],
+                        "exception_type": type(e).__name__,
+                        "exception": str(e),
+                    })
             return None
 
     def _extract_code(self, response: str) -> str:
@@ -1026,7 +1245,15 @@ FILE CONTENT (if relevant):
             self.sandbox.edit_file(target_file, old_str, new_str)
             return True
         except Exception as e:
-            logger.warning("Failed to apply debug fix: %s", e)
+            logger.error("Failed to apply debug fix to %s: %s", target_file, e, exc_info=True)
+            if self._session_logger:
+                self._session_logger.log_error("executor", "fix_application_failed",
+                    f"Could not apply recommended debug fix: {e}", {
+                        "target_file": target_file,
+                        "old_str_preview": old_str[:80] if old_str else "",
+                        "new_str_preview": new_str[:80] if new_str else "",
+                        "exception_type": type(e).__name__,
+                    })
             return False
 
     def _explore_alternatives(
@@ -1332,7 +1559,14 @@ FILE CONTENT (if relevant):
             )
             logger.debug("Recorded session: %s", state.session_id)
         except Exception as e:
-            logger.warning("Failed to record session: %s", e)
+            logger.error("Failed to record session %s: %s", state.session_id, e, exc_info=True)
+            if self._session_logger:
+                self._session_logger.log_error("executor", "session_record_failed",
+                    f"Failed to record session in project memory: {e}", {
+                        "session_id": state.session_id,
+                        "exception_type": type(e).__name__,
+                        "exception": str(e),
+                    })
 
     def _record_change(
         self,
@@ -1371,7 +1605,15 @@ FILE CONTENT (if relevant):
                 contract_step_id=step_id,
             )
         except Exception as e:
-            logger.debug("Failed to record change: %s", e)
+            logger.warning("Failed to record code change for %s: %s", file_path, e, exc_info=True)
+            if self._session_logger:
+                self._session_logger.log_warn("executor", "change_record_failed",
+                    f"Failed to record change for {file_path}: {e}", {
+                        "file_path": file_path,
+                        "session_id": session_id,
+                        "change_type": change_type,
+                        "exception": str(e),
+                    })
 
     def detect_corrections(
         self,
@@ -1436,7 +1678,14 @@ FILE CONTENT (if relevant):
                         )
 
             except Exception as e:
-                logger.debug("Error checking corrections for %s: %s", file_path, e)
+                logger.warning("Failed to analyze user correction for %s: %s", file_path, e, exc_info=True)
+                if self._session_logger:
+                    self._session_logger.log_warn("executor", "correction_analysis_failed",
+                        f"Could not analyze correction for {file_path}: {e}", {
+                            "file_path": file_path,
+                            "session_id": session_id,
+                            "exception": str(e),
+                        })
 
         return corrections
 
