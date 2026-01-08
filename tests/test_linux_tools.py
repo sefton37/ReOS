@@ -44,17 +44,17 @@ class TestCommandSafety:
         assert is_safe is False
         assert warning is not None
 
-    def test_dd_risky_warning(self) -> None:
-        """dd command should have a warning."""
+    def test_dd_risky_blocked(self) -> None:
+        """dd command should be blocked (risky operations require approval workflow)."""
         is_safe, warning = linux_tools.is_command_safe("dd if=/dev/sda of=backup.img")
-        assert is_safe is True  # Allowed but with warning
+        assert is_safe is False  # Now blocked, requires approval workflow
         assert warning is not None
-        assert "risky" in warning.lower()
+        assert "risky" in warning.lower() or "blocked" in warning.lower()
 
-    def test_shutdown_risky_warning(self) -> None:
-        """shutdown command should have a warning."""
+    def test_shutdown_risky_blocked(self) -> None:
+        """shutdown command should be blocked (risky operations require approval workflow)."""
         is_safe, warning = linux_tools.is_command_safe("shutdown -h now")
-        assert is_safe is True
+        assert is_safe is False  # Now blocked, requires approval workflow
         assert warning is not None
 
 

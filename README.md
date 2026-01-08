@@ -1,6 +1,6 @@
 # ReOS - Your AI, Your Hardware, Your Code
 
-**The open source, local-first AI that gives you everything the trillion-dollar tech companies charge perpetual rent for—but running on your own hardware, with your data never leaving your machine.**
+**The open source, local-first AI that gives you everything the trillion-dollar tech companies charge perpetual rent for—running on your own hardware, with your data staying private when you choose local models.**
 
 ReOS is two things:
 
@@ -24,9 +24,9 @@ ReOS proves there's another way:
 | Commercial Tools | ReOS |
 |-----------------|------|
 | Monthly subscription | One-time install, free forever |
-| Code sent to cloud | Everything runs locally |
+| Code sent to cloud | Local-first (Ollama) or cloud API—your choice |
 | Black box | Open source, auditable |
-| Their model, their rules | Your choice of model (Ollama, local llama.cpp, or API) |
+| Their model, their rules | Your choice of model (Ollama, local llama.cpp, or cloud API) |
 | Engagement-optimized | Sovereignty-optimized |
 
 **The goal isn't to be "good enough for free." The goal is to be the best—and also free.**
@@ -57,8 +57,8 @@ Proceed? [y/n]: y
 ```
 
 - **Deep system understanding**: ReOS knows YOUR containers, services, packages by name
-- **Transparent actions**: Every command is previewed before execution
-- **Safety first**: Dangerous commands are blocked, risky ones require confirmation
+- **Transparent actions**: Multi-step plans are previewed before execution
+- **Safety first**: Dangerous commands are blocked, risky ones flagged for review
 - **Capability transfer**: You learn the patterns through repeated exposure
 
 ### Code Mode: Agentic Coding
@@ -141,24 +141,25 @@ When you assign a repository to an Act, ReOS enters Code Mode for requests in th
 
 ### Circuit Breakers (The Paperclip Problem)
 
-Hard-coded limits that the AI cannot override:
+Built-in limits to prevent runaway operations:
 
-| Protection | Limit |
-|------------|-------|
-| Max operations per task | 25 |
-| Max execution time | 5 minutes |
-| Max sudo escalations | 3 |
-| Debug retry attempts | 3 |
-| Human checkpoint | After 2 automated recoveries |
+| Protection | Limit | Enforcement |
+|------------|-------|-------------|
+| Max operations per task | 25 | ✓ Enforced |
+| Max execution time | 5 minutes | ✓ Enforced |
+| Max sudo escalations | 3 | ✓ Enforced |
+| Debug retry attempts | 3 | ✓ Enforced |
+| Human checkpoint | After 2 automated recoveries | ✓ Enforced |
+| Rate limiting | Per-category (auth, service, package) | ✓ Enforced |
 
 If the AI tries to "fix" your nginx install by deleting system logs? **Blocked.** Tries to run 100 commands? **Stopped at 25.**
 
 ### Privacy
 
-- **100% local**: Code never leaves your machine
+- **Local-first**: With Ollama, code never leaves your machine
 - **No telemetry**: We don't know you exist
 - **Open source**: Audit everything
-- **Your model**: Use Ollama locally or any API you trust
+- **Your choice**: Use Ollama locally, or cloud APIs (Anthropic, OpenAI) if you prefer
 
 ---
 
@@ -301,15 +302,17 @@ npm run tauri:dev
 - [x] Circuit breakers (25 ops, 5 min, 3 sudo)
 - [x] Conversation persistence
 
-### Code Mode (Sprint 3 Complete)
+### Code Mode (Core Complete, Semantic Understanding Building)
 - [x] Repository assignment to Acts
 - [x] Code vs sysadmin request routing
-- [x] Intent discovery (prompt + Play + codebase)
+- [x] Intent discovery (prompt + Play + codebase patterns)
 - [x] Contract-based development (testable success criteria)
 - [x] Perspective shifting (Analyst → Architect → Engineer → Critic → Debugger)
 - [x] Self-debugging loop (analyze failures, apply fixes, retry)
 - [x] Execution-based verification (run tests, trust output)
 - [x] Gap analysis and iterative completion
+- [x] Quality tier tracking (transparency when LLM falls back to heuristics)
+- [ ] Semantic code understanding (dependency graphs, symbol tables) — *in progress*
 
 ### What's Next (See Roadmap)
 - [ ] Repository map (dependency graph, semantic search)
@@ -331,10 +334,10 @@ npm run tauri:dev
 | Self-debugging | Partial | ✗ | ✓ | ✓ |
 | Codebase awareness | ✓ | Partial | ✓ | Building |
 | Long-term memory | ✗ | ✗ | ✓ | Planned |
-| **100% Local** | ✗ | ✗ | ✗ | **✓** |
+| **Local-First Option** | ✗ | ✗ | ✗ | **✓** |
 | **Open Source** | ✗ | ✗ | ✗ | **✓** |
 | **No Subscription** | ✗ | ✗ | ✗ | **✓** |
-| **Your Data Stays Yours** | ✗ | ✗ | ✗ | **✓** |
+| **Data Privacy (with local)** | ✗ | ✗ | ✗ | **✓** |
 | Linux sysadmin | ✗ | ✗ | ✗ | **✓** |
 
 ---
@@ -346,7 +349,7 @@ Software is eating the world. AI is eating software. And a handful of companies 
 ReOS is the alternative:
 - **User sovereignty**: You control the AI, not the other way around
 - **Transparency**: See every decision, every step, every line of reasoning
-- **Privacy**: Your code, your ideas, your data—never leaving your machine
+- **Privacy**: With local models, your code and data stay on your machine
 - **Freedom**: No lock-in, no subscription, no "we changed our pricing"
 - **Community**: Open source means we all make it better together
 

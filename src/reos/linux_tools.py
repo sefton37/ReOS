@@ -23,9 +23,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .security import is_command_dangerous as security_is_command_dangerous, audit_log, AuditEventType
+from .security import (
+    is_command_dangerous as security_is_command_dangerous,
+    audit_log,
+    AuditEventType,
+    RateLimiter,
+    RateLimitExceeded,
+)
 
 logger = logging.getLogger(__name__)
+
+# Module-level rate limiter for tool-layer enforcement
+_rate_limiter = RateLimiter()
+
+# Sudo escalation counter (per-session, resets on module reload)
+_sudo_escalation_count = 0
+_MAX_SUDO_ESCALATIONS = 3
 
 # Dangerous commands that should never be executed (exact patterns)
 # These use regex to avoid false positives like "rm -rf /tmp/testdir"
@@ -181,7 +194,14 @@ def is_command_safe(command: str) -> tuple[bool, str | None]:
 
     Uses the security module's comprehensive pattern matching plus local patterns.
     Returns (is_safe, warning_message).
+
+    Safety levels:
+    - Dangerous: Blocked unconditionally (rm -rf /, fork bombs, etc.)
+    - Risky: Blocked by default, requires explicit approval workflow
+    - Normal: Allowed
     """
+    global _sudo_escalation_count
+
     cmd_stripped = command.strip()
 
     # SECURITY: Use the more comprehensive security module patterns first
@@ -202,12 +222,46 @@ def is_command_safe(command: str) -> tuple[bool, str | None]:
             })
             return False, f"Blocked dangerous command matching pattern: {pattern}"
 
-    # Check for risky patterns that need confirmation (warning only, still allowed)
+    # Check for sudo escalation limit
+    if cmd_stripped.startswith("sudo ") or " sudo " in cmd_stripped:
+        if _sudo_escalation_count >= _MAX_SUDO_ESCALATIONS:
+            audit_log(AuditEventType.COMMAND_BLOCKED, {
+                "command": command[:200],
+                "reason": "Sudo escalation limit reached",
+                "count": _sudo_escalation_count,
+                "max": _MAX_SUDO_ESCALATIONS,
+            })
+            return False, f"Sudo escalation limit reached ({_MAX_SUDO_ESCALATIONS} max per session)"
+        _sudo_escalation_count += 1
+        logger.info("Sudo escalation %d/%d: %s", _sudo_escalation_count, _MAX_SUDO_ESCALATIONS, command[:50])
+
+    # Check for risky patterns - now BLOCKED, not just warned
+    # These require explicit approval through the approval workflow, not direct execution
     for pattern in RISKY_PATTERNS:
         if re.search(pattern, command, re.IGNORECASE):
-            return True, "This command matches a risky pattern and could cause data loss"
+            audit_log(AuditEventType.COMMAND_BLOCKED, {
+                "command": command[:200],
+                "reason": f"Risky pattern requires approval: {pattern}",
+            })
+            return False, f"Risky command blocked: {pattern}. Use the approval workflow for destructive operations."
 
     return True, None
+
+
+def reset_sudo_escalation_count() -> None:
+    """Reset the sudo escalation counter. Called at session boundaries."""
+    global _sudo_escalation_count
+    _sudo_escalation_count = 0
+    logger.debug("Sudo escalation counter reset")
+
+
+def get_sudo_escalation_status() -> tuple[int, int]:
+    """Get current sudo escalation status.
+
+    Returns:
+        Tuple of (current_count, max_allowed)
+    """
+    return _sudo_escalation_count, _MAX_SUDO_ESCALATIONS
 
 
 def execute_command(
@@ -216,6 +270,7 @@ def execute_command(
     timeout: int = 30,
     cwd: str | None = None,
     env: dict[str, str] | None = None,
+    rate_limit_category: str | None = None,
 ) -> CommandResult:
     """Execute a shell command safely.
 
@@ -224,10 +279,43 @@ def execute_command(
         timeout: Maximum execution time in seconds
         cwd: Working directory
         env: Environment variables to add
+        rate_limit_category: Optional category for rate limiting (e.g., "sudo", "service")
 
     Returns:
         CommandResult with output and status
     """
+    # Check rate limit if category specified
+    if rate_limit_category:
+        try:
+            _rate_limiter.check(rate_limit_category)
+        except RateLimitExceeded as e:
+            audit_log(AuditEventType.COMMAND_BLOCKED, {
+                "command": command[:200],
+                "reason": f"Rate limit exceeded: {rate_limit_category}",
+            })
+            return CommandResult(
+                command=command,
+                returncode=-1,
+                stdout="",
+                stderr=str(e),
+                success=False,
+            )
+
+    # Auto-detect rate limit category from command if not specified
+    cmd_lower = command.lower().strip()
+    if rate_limit_category is None:
+        if cmd_lower.startswith("sudo "):
+            try:
+                _rate_limiter.check("sudo")
+            except RateLimitExceeded as e:
+                return CommandResult(
+                    command=command,
+                    returncode=-1,
+                    stdout="",
+                    stderr=str(e),
+                    success=False,
+                )
+
     is_safe, warning = is_command_safe(command)
     if not is_safe:
         return CommandResult(
@@ -296,6 +384,10 @@ def preview_command(command: str, cwd: str | None = None) -> CommandPreview:
     This allows users to see the effects before executing destructive commands.
     Supports the principle: "Mistakes are recoverable - you can say 'wait, undo that'"
 
+    The preview is used in the approval workflow to show users what a command
+    would do before they approve it. Even blocked commands get previewed so
+    users understand what they're being asked to approve.
+
     Args:
         command: The command to preview
         cwd: Working directory for resolving relative paths
@@ -316,16 +408,24 @@ def preview_command(command: str, cwd: str | None = None) -> CommandPreview:
     if warning:
         warnings.append(warning)
 
+    # Check for truly dangerous patterns that should never be previewed
+    # (these are catastrophic like rm -rf / or fork bombs)
+    cmd_stripped = command.strip()
+    for pattern in DANGEROUS_COMMAND_PATTERNS:
+        if re.search(pattern, cmd_stripped, re.IGNORECASE):
+            return CommandPreview(
+                command=command,
+                is_destructive=True,
+                description="BLOCKED: Dangerous command",
+                affected_paths=[],
+                warnings=warnings,
+                can_undo=False,
+                undo_command=None,
+            )
+
+    # For risky commands, continue with preview (approval workflow will handle)
     if not is_safe:
-        return CommandPreview(
-            command=command,
-            is_destructive=True,
-            description="BLOCKED: Dangerous command",
-            affected_paths=[],
-            warnings=warnings,
-            can_undo=False,
-            undo_command=None,
-        )
+        is_destructive = True  # Mark as destructive for approval workflow
 
     # Analyze rm commands
     rm_match = re.match(r'^rm\s+(.*)', command, re.IGNORECASE)
