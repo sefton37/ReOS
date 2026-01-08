@@ -344,17 +344,22 @@ function buildUi() {
 
   // Handle CAIRN chat messages (default conversational mode)
   async function handleCairnMessage(message: string): Promise<void> {
+    // Show thinking indicator while waiting for response
+    cairnView.showThinking();
     try {
-      const result = await kernelRequest<ChatRespondResult>('chat/respond', {
+      const result = (await kernelRequest('chat/respond', {
         text: message,
         conversation_id: currentConversationId,
         // No use_code_mode flag - CAIRN is the default conversational agent
-      });
+      })) as ChatRespondResult;
+      cairnView.hideThinking();
       if (result.conversation_id) {
         currentConversationId = result.conversation_id;
       }
-      cairnView.addChatMessage('assistant', result.answer);
+      // Use addAssistantMessage to include full response data (thinking steps, tool calls)
+      cairnView.addAssistantMessage(result);
     } catch (error) {
+      cairnView.hideThinking();
       cairnView.addChatMessage('assistant', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -388,7 +393,7 @@ function buildUi() {
   // Open terminal window
   async function openTerminal(): Promise<void> {
     try {
-      const result = await kernelRequest<{ success: boolean; terminal?: string; error?: string }>('system/open-terminal', {});
+      const result = (await kernelRequest('system/open-terminal', {})) as { success: boolean; terminal?: string; error?: string };
       if (!result.success) {
         console.error('Failed to open terminal:', result.error);
       }

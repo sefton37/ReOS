@@ -13,11 +13,29 @@ import type { ChatRespondResult } from './types';
 
 interface CairnViewCallbacks {
   onSendMessage: (message: string) => Promise<void>;
-  kernelRequest: <T>(method: string, params?: Record<string, unknown>) => Promise<T>;
+  kernelRequest: (method: string, params: unknown) => Promise<unknown>;
+}
+
+/** Full message data including LLM context for expandable details */
+interface MessageData {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+  // Assistant-only fields from ChatRespondResult
+  thinkingSteps?: string[];
+  toolCalls?: Array<{
+    name: string;
+    arguments: Record<string, unknown>;
+    ok: boolean;
+    result?: unknown;
+    error?: { code: string; message: string; data?: unknown };
+  }>;
+  messageId?: string;
+  messageType?: string;
 }
 
 interface CairnViewState {
-  chatMessages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  chatMessages: MessageData[];
   surfacedItems: Array<{ title: string; reason: string; urgency: string }>;
 }
 
@@ -29,6 +47,9 @@ export function createCairnView(
 ): {
   container: HTMLElement;
   addChatMessage: (role: 'user' | 'assistant', content: string) => void;
+  addAssistantMessage: (result: ChatRespondResult) => void;
+  showThinking: () => void;
+  hideThinking: () => void;
   clearChat: () => void;
   getChatInput: () => HTMLInputElement;
   updateSurfaced: (items: Array<{ title: string; reason: string; urgency: string }>) => void;
@@ -243,7 +264,7 @@ export function createCairnView(
   // Check Thunderbird status on load
   void (async () => {
     try {
-      const status = await callbacks.kernelRequest<{ available: boolean; message?: string }>('cairn/thunderbird/status', {});
+      const status = await callbacks.kernelRequest('cairn/thunderbird/status', {}) as { available: boolean; message?: string };
       if (!status.available) {
         thunderbirdPrompt.style.display = 'block';
       }
@@ -252,6 +273,38 @@ export function createCairnView(
       console.log('Thunderbird status check failed:', e);
     }
   })();
+
+  // Thinking indicator (animated dots)
+  const thinkingIndicator = el('div');
+  thinkingIndicator.className = 'thinking-indicator';
+  thinkingIndicator.style.cssText = `
+    display: none;
+    align-self: flex-start;
+    background: rgba(255,255,255,0.1);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-top: 8px;
+  `;
+  thinkingIndicator.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <div class="thinking-dots" style="display: flex; gap: 4px;">
+        <span class="dot" style="width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.6); animation: pulse 1.4s ease-in-out infinite;"></span>
+        <span class="dot" style="width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.6); animation: pulse 1.4s ease-in-out 0.2s infinite;"></span>
+        <span class="dot" style="width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.6); animation: pulse 1.4s ease-in-out 0.4s infinite;"></span>
+      </div>
+      <span style="color: rgba(255,255,255,0.5); font-size: 13px;">Thinking...</span>
+    </div>
+  `;
+  // Add CSS animation via style tag
+  const styleTag = document.createElement('style');
+  styleTag.textContent = `
+    @keyframes pulse {
+      0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+      40% { opacity: 1; transform: scale(1); }
+    }
+  `;
+  document.head.appendChild(styleTag);
+  chatMessages.appendChild(thinkingIndicator);
 
   // Chat input area
   const inputArea = el('div');
@@ -322,28 +375,146 @@ export function createCairnView(
 
   // ============ Functions ============
 
-  function renderChatMessage(role: 'user' | 'assistant', content: string): HTMLElement {
+  function renderChatMessage(data: MessageData): HTMLElement {
+    const { role, content, thinkingSteps, toolCalls } = data;
+    const hasDetails = role === 'assistant' && ((thinkingSteps && thinkingSteps.length > 0) || (toolCalls && toolCalls.length > 0));
+
+    const msgWrapper = el('div');
+    msgWrapper.style.cssText = `
+      max-width: 85%;
+      ${role === 'user' ? 'align-self: flex-end; margin-left: auto;' : 'align-self: flex-start;'}
+    `;
+
+    // Main message bubble
     const msgEl = el('div');
     msgEl.style.cssText = `
-      max-width: 85%;
       padding: 12px 16px;
       border-radius: 12px;
       font-size: 14px;
       line-height: 1.5;
       ${role === 'user'
-        ? 'background: #3b82f6; color: #fff; align-self: flex-end; margin-left: auto;'
-        : 'background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.9); align-self: flex-start;'
+        ? 'background: #3b82f6; color: #fff;'
+        : 'background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.9);'
       }
     `;
     msgEl.textContent = content;
-    return msgEl;
+    msgWrapper.appendChild(msgEl);
+
+    // Expandable details for assistant messages
+    if (hasDetails) {
+      const detailsToggle = el('button');
+      detailsToggle.textContent = 'Show details';
+      detailsToggle.style.cssText = `
+        background: none;
+        border: none;
+        color: rgba(255,255,255,0.4);
+        font-size: 11px;
+        padding: 4px 0;
+        cursor: pointer;
+        margin-top: 4px;
+      `;
+
+      const detailsPanel = el('div');
+      detailsPanel.style.cssText = `
+        display: none;
+        margin-top: 8px;
+        padding: 12px;
+        background: rgba(0,0,0,0.3);
+        border-radius: 8px;
+        font-size: 12px;
+        max-height: 300px;
+        overflow-y: auto;
+      `;
+
+      // Build details content
+      let detailsHTML = '';
+
+      if (thinkingSteps && thinkingSteps.length > 0) {
+        detailsHTML += `
+          <div style="margin-bottom: 12px;">
+            <div style="color: #60a5fa; font-weight: 600; margin-bottom: 6px;">Thinking Steps</div>
+            <div style="color: rgba(255,255,255,0.7); white-space: pre-wrap; font-family: monospace; font-size: 11px;">
+              ${thinkingSteps.map((step, i) => `${i + 1}. ${escapeHtml(step)}`).join('\n')}
+            </div>
+          </div>
+        `;
+      }
+
+      if (toolCalls && toolCalls.length > 0) {
+        detailsHTML += `
+          <div>
+            <div style="color: #60a5fa; font-weight: 600; margin-bottom: 6px;">Tool Calls</div>
+            ${toolCalls.map(tc => `
+              <div style="margin-bottom: 8px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px;">
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                  <span style="color: #f59e0b; font-weight: 500;">${escapeHtml(tc.name)}</span>
+                  <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; ${tc.ok ? 'background: rgba(34,197,94,0.2); color: #22c55e;' : 'background: rgba(239,68,68,0.2); color: #ef4444;'}">${tc.ok ? 'OK' : 'ERROR'}</span>
+                </div>
+                <div style="color: rgba(255,255,255,0.5); font-family: monospace; font-size: 10px; word-break: break-all;">
+                  Args: ${escapeHtml(JSON.stringify(tc.arguments, null, 2).substring(0, 200))}${JSON.stringify(tc.arguments).length > 200 ? '...' : ''}
+                </div>
+                ${tc.error ? `<div style="color: #ef4444; margin-top: 4px;">Error: ${escapeHtml(tc.error.message)}</div>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      detailsPanel.innerHTML = detailsHTML;
+
+      let expanded = false;
+      detailsToggle.addEventListener('click', () => {
+        expanded = !expanded;
+        detailsPanel.style.display = expanded ? 'block' : 'none';
+        detailsToggle.textContent = expanded ? 'Hide details' : 'Show details';
+      });
+
+      msgWrapper.appendChild(detailsToggle);
+      msgWrapper.appendChild(detailsPanel);
+    }
+
+    return msgWrapper;
+  }
+
+  function escapeHtml(text: string): string {
+    const div = el('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   function addChatMessage(role: 'user' | 'assistant', content: string): void {
-    state.chatMessages.push({ role, content });
-    const msgEl = renderChatMessage(role, content);
-    chatMessages.appendChild(msgEl);
+    const data: MessageData = { role, content, timestamp: new Date() };
+    state.chatMessages.push(data);
+    const msgEl = renderChatMessage(data);
+    // Insert before thinking indicator
+    chatMessages.insertBefore(msgEl, thinkingIndicator);
     chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function addAssistantMessage(result: ChatRespondResult): void {
+    const data: MessageData = {
+      role: 'assistant',
+      content: result.answer,
+      timestamp: new Date(),
+      thinkingSteps: result.thinking_steps,
+      toolCalls: result.tool_calls,
+      messageId: result.message_id,
+      messageType: result.message_type,
+    };
+    state.chatMessages.push(data);
+    const msgEl = renderChatMessage(data);
+    // Insert before thinking indicator
+    chatMessages.insertBefore(msgEl, thinkingIndicator);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function showThinking(): void {
+    thinkingIndicator.style.display = 'flex';
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function hideThinking(): void {
+    thinkingIndicator.style.display = 'none';
   }
 
   function clearChat(): void {
@@ -414,6 +585,9 @@ export function createCairnView(
   return {
     container,
     addChatMessage,
+    addAssistantMessage,
+    showThinking,
+    hideThinking,
     clearChat,
     getChatInput,
     updateSurfaced,
