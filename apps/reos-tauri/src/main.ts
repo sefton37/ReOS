@@ -26,6 +26,7 @@ import { createContextOverlay } from './contextOverlay';
 import { renderCollapsedDiffPreview } from './diffPreview';
 import { createDiffPreviewOverlay } from './diffPreviewOverlay';
 import { createCodeModeView } from './codeModeView';
+import { createCairnView } from './cairnView';
 import type {
   ChatRespondResult,
   SystemInfoResult,
@@ -88,10 +89,80 @@ function buildUi() {
   nav.style.overflow = 'auto';
 
   const navTitle = el('div');
-  navTitle.textContent = 'ReOS for Linux';
+  navTitle.textContent = 'Talking Rock for Linux';
   navTitle.style.fontWeight = '600';
   navTitle.style.fontSize = '16px';
   navTitle.style.marginBottom = '12px';
+
+  // ============ Agent Selector ============
+  type AgentType = 'cairn' | 'riva' | 'reos';
+  let currentAgent: AgentType = 'cairn';
+
+  const agentSelector = el('div');
+  agentSelector.className = 'agent-selector';
+  agentSelector.style.cssText = `
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    padding: 4px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+  `;
+
+  const agentButtons: Record<AgentType, HTMLButtonElement> = {
+    cairn: el('button') as HTMLButtonElement,
+    riva: el('button') as HTMLButtonElement,
+    reos: el('button') as HTMLButtonElement,
+  };
+
+  const agentConfig: Record<AgentType, { label: string; icon: string; tooltip: string }> = {
+    cairn: { label: 'CAIRN', icon: '🪨', tooltip: 'Attention Minder - Conversations & Knowledge' },
+    riva: { label: 'RIVA', icon: '⚡', tooltip: 'Code Mode - Build & Modify Code' },
+    reos: { label: 'ReOS', icon: '💻', tooltip: 'Terminal - Direct System Access' },
+  };
+
+  const updateAgentButtons = () => {
+    Object.entries(agentButtons).forEach(([agent, btn]) => {
+      const isActive = agent === currentAgent;
+      btn.style.cssText = `
+        flex: 1;
+        padding: 8px 4px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 500;
+        transition: all 0.2s;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        ${isActive
+          ? 'background: rgba(59, 130, 246, 0.3); color: #fff;'
+          : 'background: transparent; color: rgba(255,255,255,0.5);'
+        }
+      `;
+    });
+  };
+
+  Object.entries(agentConfig).forEach(([agent, config]) => {
+    const btn = agentButtons[agent as AgentType];
+    btn.innerHTML = `<span style="font-size: 16px;">${config.icon}</span><span>${config.label}</span>`;
+    btn.title = config.tooltip;
+    btn.addEventListener('click', () => {
+      if (agent === 'reos') {
+        // Open terminal window
+        openTerminal();
+      } else {
+        currentAgent = agent as AgentType;
+        updateAgentButtons();
+        switchAgentView(agent as AgentType);
+      }
+    });
+    agentSelector.appendChild(btn);
+  });
+
+  updateAgentButtons();
 
   // System Status Section
   const systemSection = el('div');
@@ -211,6 +282,7 @@ function buildUi() {
   navContent.style.cssText = 'flex: 1;';
 
   navContent.appendChild(navTitle);
+  navContent.appendChild(agentSelector);
   navContent.appendChild(systemSection);
   navContent.appendChild(dashboardBtn);
   navContent.appendChild(playSection);
@@ -247,8 +319,7 @@ function buildUi() {
   nav.appendChild(navContent);
   nav.appendChild(settingsBtn);
 
-  // ============ Code Mode View (main view) ============
-  // This replaces the old center+inspection layout with an execution panel + chat sidebar
+  // ============ RIVA View (Code Mode) ============
   const codeModeView = createCodeModeView({
     onSendMessage: async (message: string) => {
       // Will be wired up in onSend below
@@ -261,6 +332,68 @@ function buildUi() {
     },
     kernelRequest,
   });
+
+  // ============ CAIRN View (Conversational) ============
+  const cairnView = createCairnView({
+    onSendMessage: async (message: string) => {
+      return handleCairnMessage(message);
+    },
+    kernelRequest,
+  });
+
+  // Handle CAIRN chat messages
+  async function handleCairnMessage(message: string): Promise<void> {
+    try {
+      const result = await kernelRequest<ChatRespondResult>('chat/respond', {
+        message,
+        conversation_id: currentConversationId,
+      });
+      if (result.conversation_id) {
+        currentConversationId = result.conversation_id;
+      }
+      cairnView.addChatMessage('assistant', result.answer);
+    } catch (error) {
+      cairnView.addChatMessage('assistant', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // ============ Main View Container ============
+  const mainViewContainer = el('div');
+  mainViewContainer.className = 'main-view-container';
+  mainViewContainer.style.cssText = `
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  `;
+  mainViewContainer.appendChild(cairnView.container);
+  mainViewContainer.appendChild(codeModeView.container);
+
+  // Start with CAIRN view visible, RIVA hidden
+  cairnView.container.style.display = 'flex';
+  codeModeView.container.style.display = 'none';
+
+  // Switch between agent views
+  function switchAgentView(agent: AgentType): void {
+    if (agent === 'cairn') {
+      cairnView.container.style.display = 'flex';
+      codeModeView.container.style.display = 'none';
+    } else if (agent === 'riva') {
+      cairnView.container.style.display = 'none';
+      codeModeView.container.style.display = 'flex';
+    }
+  }
+
+  // Open terminal window
+  async function openTerminal(): Promise<void> {
+    try {
+      const result = await kernelRequest<{ success: boolean; terminal?: string; error?: string }>('system/open-terminal', {});
+      if (!result.success) {
+        console.error('Failed to open terminal:', result.error);
+      }
+    } catch (error) {
+      console.error('Failed to open terminal:', error);
+    }
+  }
 
   // Context state for the context meter
   let currentConversationId: string | null = null;
@@ -295,9 +428,9 @@ function buildUi() {
   let codeExecPollInterval: ReturnType<typeof setInterval> | null = null;
 
   // ============ Shell Assembly ============
-  // New layout: nav (280px) | codeModeView (execution panel + chat sidebar)
+  // New layout: nav (280px) | mainViewContainer (CAIRN or RIVA view)
   shell.appendChild(nav);
-  shell.appendChild(codeModeView.container);
+  shell.appendChild(mainViewContainer);
 
   root.appendChild(shell);
 

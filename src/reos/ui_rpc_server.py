@@ -2423,6 +2423,40 @@ def _handle_system_hardware(db: Database) -> dict[str, Any]:
     return _detect_system_hardware()
 
 
+def _handle_system_open_terminal(_db: Database) -> dict[str, Any]:
+    """Open a terminal emulator window."""
+    import shutil
+    import subprocess
+
+    # Try common Linux terminal emulators in order of preference
+    terminals = [
+        ["gnome-terminal"],
+        ["konsole"],
+        ["xfce4-terminal"],
+        ["mate-terminal"],
+        ["tilix"],
+        ["x-terminal-emulator"],
+        ["xterm"],
+    ]
+
+    for term_cmd in terminals:
+        if shutil.which(term_cmd[0]):
+            try:
+                # Spawn detached from parent process
+                subprocess.Popen(
+                    term_cmd,
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return {"success": True, "terminal": term_cmd[0]}
+            except Exception as e:
+                logger.warning(f"Failed to launch {term_cmd[0]}: {e}")
+                continue
+
+    return {"success": False, "error": "No terminal emulator found"}
+
+
 # --- Ollama Settings Handlers ---
 
 def _handle_ollama_status(db: Database) -> dict[str, Any]:
@@ -4490,6 +4524,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
 
         if method == "system/hardware":
             return _jsonrpc_result(req_id=req_id, result=_handle_system_hardware(db))
+
+        if method == "system/open-terminal":
+            return _jsonrpc_result(req_id=req_id, result=_handle_system_open_terminal(db))
 
         if method == "ollama/check_installed":
             return _jsonrpc_result(req_id=req_id, result=_handle_ollama_check_installed(db))
