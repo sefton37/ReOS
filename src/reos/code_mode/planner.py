@@ -6,7 +6,6 @@ reviewed and approved before execution.
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -14,6 +13,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
+
+from reos.code_mode.json_utils import parse_llm_json
 
 if TYPE_CHECKING:
     from reos.code_mode.sandbox import CodeSandbox
@@ -467,10 +468,10 @@ Rules:
                 temperature=0.3,
             )
 
-            plan_data = json.loads(response)
+            plan_data = parse_llm_json(response)
             return self._parse_llm_plan(plan_data)
 
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
+        except (ValueError, KeyError, TypeError) as e:
             logger.warning("Failed to parse LLM plan: %s", e)
             # Fall back to a sensible default for new projects
             if is_empty_repo:

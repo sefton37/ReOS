@@ -11,11 +11,12 @@ in concrete, observable reality.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
+
+from reos.code_mode.json_utils import parse_llm_json
 
 if TYPE_CHECKING:
     from reos.code_mode.planner import CodeTaskPlan
@@ -398,7 +399,7 @@ Output JSON with these fields:
                 "response": response,
             })
 
-            data = json.loads(response)
+            data = parse_llm_json(response)
             self._notify(f"  Parsed: action={data.get('action_verb')}, target={data.get('target')}")
 
             # Log parsed result
@@ -1035,7 +1036,7 @@ CODEBASE CONTEXT:
                 "response": response,
             })
 
-            data = json.loads(response)
+            data = parse_llm_json(response)
             self._notify(f"  Parsed goal: '{data.get('goal', '')[:50]}...'")
             self._notify(f"  Confidence: {data.get('confidence', 0.7):.0%}")
             if data.get("ambiguities"):

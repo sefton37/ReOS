@@ -14,7 +14,6 @@ Each phase uses a different perspective to ensure appropriate focus.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -22,6 +21,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from reos.code_mode.json_utils import parse_llm_json
 from reos.code_mode.contract import (
     AcceptanceCriterion,
     Contract,
@@ -73,7 +73,12 @@ class LoopStatus(Enum):
     ANALYZING_GAP = "gap"           # Phase 7
     COMPLETED = "completed"         # All done
     FAILED = "failed"               # Unrecoverable error
+    TIMEOUT = "timeout"             # Wall-clock timeout exceeded
     AWAITING_APPROVAL = "approval"  # Needs user input
+
+
+# Default timeout: 5 minutes for simple tasks
+DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS = 300
 
 
 @dataclass
@@ -197,6 +202,7 @@ class CodeExecutor:
         auto_approve: bool = False,
         plan_context: "CodeTaskPlan | None" = None,
         use_riva: bool = False,
+        max_wall_clock_seconds: float = DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS,
     ) -> ExecutionResult:
         """Execute the full code mode loop.
 
@@ -211,12 +217,17 @@ class CodeExecutor:
                          instead of rediscovering from scratch.
             use_riva: If True, use RIVA (Recursive Intention-Verification Architecture)
                      instead of the standard contract-based loop.
+            max_wall_clock_seconds: Maximum wall-clock time for execution.
+                                   Default is 5 minutes. This is a safety circuit
+                                   breaker to prevent runaway executions.
 
         Returns:
             ExecutionResult with outcome and state.
         """
+        import time
         import uuid
 
+        execution_start_time = time.monotonic()
         session_id = f"exec-{uuid.uuid4().hex[:8]}"
         state = ExecutionState(
             session_id=session_id,
@@ -262,6 +273,20 @@ class CodeExecutor:
 
             # Main loop (standard contract-based execution)
             while state.current_iteration < max_iterations:
+                # Check wall-clock timeout FIRST (safety circuit breaker)
+                elapsed = time.monotonic() - execution_start_time
+                if elapsed > max_wall_clock_seconds:
+                    timeout_msg = f"Wall-clock timeout: {elapsed:.1f}s exceeded limit of {max_wall_clock_seconds}s"
+                    logger.warning(timeout_msg)
+                    self._session_logger.log_error("executor", "timeout", timeout_msg, {
+                        "elapsed_seconds": elapsed,
+                        "limit_seconds": max_wall_clock_seconds,
+                        "iteration": state.current_iteration,
+                    })
+                    state.status = LoopStatus.TIMEOUT
+                    self._notify_phase_change(state.status)
+                    break
+
                 # Notify iteration start
                 self._notify_iteration_start(state.current_iteration + 1, max_iterations)
                 unfulfilled = state.current_contract.get_unfulfilled_criteria() if state.current_contract else []
@@ -302,7 +327,7 @@ class CodeExecutor:
                     break
 
             # If loop ended without completion (max iterations reached), mark as failed
-            if state.status not in (LoopStatus.COMPLETED, LoopStatus.FAILED):
+            if state.status not in (LoopStatus.COMPLETED, LoopStatus.FAILED, LoopStatus.TIMEOUT):
                 self._session_logger.log_warn("executor", "max_iterations", f"Max iterations ({max_iterations}) reached without completion")
                 state.status = LoopStatus.FAILED
                 self._notify_phase_change(state.status)
@@ -1053,7 +1078,7 @@ Output JSON with:
                 f"Generate the minimal edit for: {step.description}",
                 context=context,
             )
-            data = json.loads(response)
+            data = parse_llm_json(response)
             return data.get("old_str"), data.get("new_str")
         except Exception as e:
             logger.error("LLM edit generation failed: %s", e, exc_info=True)
@@ -1178,7 +1203,7 @@ FILE CONTENT (if relevant):
                 "Analyze this failure and provide a fix.",
                 context=context,
             )
-            data = json.loads(response)
+            data = parse_llm_json(response)
 
             diagnosis = DebugDiagnosis(
                 root_cause=data.get("root_cause", "Unknown"),
@@ -1407,6 +1432,11 @@ FILE CONTENT (if relevant):
             return (
                 f"Completed in {state.current_iteration} iteration(s).\n"
                 f"Files changed: {', '.join(files) if files else 'none'}"
+            )
+        elif state.status == LoopStatus.TIMEOUT:
+            return (
+                f"Timed out after {state.current_iteration} iteration(s). "
+                f"Execution exceeded wall-clock limit (safety circuit breaker)."
             )
         elif state.status == LoopStatus.FAILED:
             # Try to get a meaningful error message

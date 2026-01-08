@@ -57,6 +57,7 @@ from reos.code_mode.executor import (
     LoopIteration,
     StepResult,
     DebugDiagnosis,
+    DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS,
 )
 
 # Core - Streaming (UI state updates)
@@ -207,6 +208,7 @@ __all__ = [
     "LoopIteration",
     "StepResult",
     "DebugDiagnosis",
+    "DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS",
     "ExecutionStateSnapshot",
     "CodeExecutionContext",
     "ExecutionObserver",

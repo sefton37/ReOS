@@ -14,13 +14,14 @@ If it's in the contract, it must be verified.
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Any
+
+from reos.code_mode.json_utils import parse_llm_json
 
 if TYPE_CHECKING:
     from reos.code_mode.intent import DiscoveredIntent
@@ -981,7 +982,7 @@ RELATED FILES: {', '.join(intent.codebase_intent.related_files[:5])}
                 "response": response,
             })
 
-            data = json.loads(response)
+            data = parse_llm_json(response)
             self._notify(f"  Parsed {len(data.get('criteria', []))} criteria from LLM")
 
             criteria = []
@@ -1184,7 +1185,7 @@ MUST SATISFY:
                 "response": response,
             })
 
-            data = json.loads(response)
+            data = parse_llm_json(response)
             self._notify(f"  Parsed {len(data.get('steps', []))} steps from LLM")
 
             steps = []

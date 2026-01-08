@@ -1195,16 +1195,16 @@ def _handle_code_exec_start(
     # Create sandbox and executor
     sandbox = CodeSandbox(Path(repo_path))
 
-    # Get Ollama client if configured
-    ollama = None
+    # Get LLM provider if configured
+    llm = None
     try:
         from .ollama import OllamaClient
-        stored_url = db.get_state("ollama_url")
-        stored_model = db.get_state("ollama_model")
+        stored_url = db.get_state(key="ollama_url")
+        stored_model = db.get_state(key="ollama_model")
         if stored_url and stored_model:
-            ollama = OllamaClient(base_url=stored_url, model=stored_model)
+            llm = OllamaClient(url=stored_url, model=stored_model)
     except Exception as e:
-        logger.warning("Failed to initialize Ollama client for code execution: %s", e)
+        logger.warning("Failed to initialize LLM provider for code execution: %s", e)
 
     # Get project memory if available
     project_memory = None
@@ -1216,7 +1216,7 @@ def _handle_code_exec_start(
 
     executor = CodeExecutor(
         sandbox=sandbox,
-        ollama=ollama,
+        llm=llm,
         project_memory=project_memory,
         observer=observer,
     )

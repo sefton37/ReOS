@@ -7,12 +7,12 @@ when the tests pass, the feature is complete.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from reos.code_mode.json_utils import parse_llm_json
 from reos.code_mode.contract import TestSpecification
 
 if TYPE_CHECKING:
@@ -225,7 +225,7 @@ class TestGenerator:
             temperature=0.2,
         )
 
-        data = json.loads(response)
+        data = parse_llm_json(response)
 
         return TestSpecification(
             test_code=data.get("test_code", ""),

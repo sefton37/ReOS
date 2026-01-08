@@ -16,7 +16,6 @@ This module implements:
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -24,6 +23,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeVar
+
+from reos.code_mode.json_utils import parse_llm_json
 
 if TYPE_CHECKING:
     from reos.code_mode.sandbox import CodeSandbox
@@ -712,7 +713,7 @@ If creating multiple functions for one module, reference the SAME filename in ea
                 response=response,
             )
 
-        data = json.loads(response)
+        data = parse_llm_json(response)
         children = []
         for item in data:
             # Handle both dict format and string format
@@ -912,7 +913,7 @@ What should we try next? Remember: write COMPLETE working code, not placeholders
                 response=response,
             )
 
-        data = json.loads(response)
+        data = parse_llm_json(response)
         thought = data.get("thought", "Attempting action")
         action = Action(
             type=ActionType(data.get("action_type", "query")),

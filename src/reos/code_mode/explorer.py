@@ -10,11 +10,12 @@ contracts or intents.
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from reos.code_mode.json_utils import parse_llm_json
 
 # Runtime import - needed for instantiation
 from reos.code_mode.contract import ContractStep
@@ -235,7 +236,7 @@ class StepExplorer:
             )
 
             # Parse response
-            data = json.loads(response) if isinstance(response, str) else response
+            data = parse_llm_json(response) if isinstance(response, str) else response
             alternatives = self._parse_alternatives(data, step)
 
             # Sort by score descending
