@@ -20,6 +20,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from reos.config import SECURITY
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,11 +35,11 @@ SAFE_CONTAINER_ID = re.compile(r"^[a-zA-Z0-9_.-]+$")
 SAFE_PACKAGE_NAME = re.compile(r"^[a-zA-Z0-9_.+-]+$")
 SAFE_FILENAME = re.compile(r"^[a-zA-Z0-9_.-]+$")
 
-# Maximum lengths to prevent buffer-based attacks
-MAX_SERVICE_NAME_LEN = 256
-MAX_CONTAINER_ID_LEN = 256
-MAX_PACKAGE_NAME_LEN = 256
-MAX_COMMAND_LEN = 4096
+# Import limits from centralized config
+MAX_SERVICE_NAME_LEN = SECURITY.MAX_SERVICE_NAME_LEN
+MAX_CONTAINER_ID_LEN = SECURITY.MAX_CONTAINER_ID_LEN
+MAX_PACKAGE_NAME_LEN = SECURITY.MAX_PACKAGE_NAME_LEN
+MAX_COMMAND_LEN = SECURITY.MAX_COMMAND_LEN
 
 
 class ValidationError(Exception):

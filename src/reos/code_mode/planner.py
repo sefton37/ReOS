@@ -617,6 +617,16 @@ Rules:
             steps = [
                 CodeStep(
                     id=_generate_step_id(),
+                    type=CodeStepType.READ_FILES,
+                    description="Read existing files to understand context",
+                ),
+                CodeStep(
+                    id=_generate_step_id(),
+                    type=CodeStepType.ANALYZE,
+                    description="Analyze codebase structure and patterns",
+                ),
+                CodeStep(
+                    id=_generate_step_id(),
                     type=CodeStepType.CREATE_FILE,
                     description=f"Implement: {request[:100]}",
                     target_path="(to be determined during execution)",
@@ -627,9 +637,20 @@ Rules:
                     description="Verify implementation works correctly",
                 ),
             ]
+            impact = ImpactLevel.MODERATE
         else:
-            # For modification tasks
+            # For exploration/modification tasks - always read and analyze first
             steps = [
+                CodeStep(
+                    id=_generate_step_id(),
+                    type=CodeStepType.READ_FILES,
+                    description="Read relevant files to understand context",
+                ),
+                CodeStep(
+                    id=_generate_step_id(),
+                    type=CodeStepType.ANALYZE,
+                    description="Analyze code structure and identify changes needed",
+                ),
                 CodeStep(
                     id=_generate_step_id(),
                     type=CodeStepType.EDIT_FILE,
@@ -642,12 +663,14 @@ Rules:
                     description="Verify changes work correctly",
                 ),
             ]
+            # Exploration and simple modifications are low impact
+            impact = ImpactLevel.MINOR
 
         return CodeTaskPlan(
             id=_generate_plan_id(),
             goal=request,
             steps=steps,
-            estimated_impact=ImpactLevel.MODERATE,
+            estimated_impact=impact,
         )
 
     def _extract_file_references(self, error_output: str) -> list[str]:

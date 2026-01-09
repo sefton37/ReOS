@@ -257,3 +257,7 @@ class SurfacedItem:
     stale_days: int | None = None
     linked_contacts: list[str] = field(default_factory=list)
     linked_events: list[str] = field(default_factory=list)
+
+    # Coherence verification (from CAIRN Coherence Kernel)
+    coherence_score: float | None = None  # -1.0 to 1.0, None = not checked
+    coherence_recommendation: str | None = None  # "accept", "defer", "reject"

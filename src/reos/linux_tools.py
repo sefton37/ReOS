@@ -23,6 +23,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .config import SECURITY, TIMEOUTS
+from .types import (
+    ServiceStatus,
+    DiskUsageInfo,
+    DirectoryEntry,
+    LogFileResult,
+    EnvironmentInfo,
+    InterfaceInfo,
+    AddressInfo,
+)
 from .security import (
     is_command_dangerous as security_is_command_dangerous,
     audit_log,
@@ -38,7 +48,7 @@ _rate_limiter = RateLimiter()
 
 # Sudo escalation counter (per-session, resets on module reload)
 _sudo_escalation_count = 0
-_MAX_SUDO_ESCALATIONS = 3
+_MAX_SUDO_ESCALATIONS = SECURITY.MAX_SUDO_ESCALATIONS
 
 # Dangerous commands that should never be executed (exact patterns)
 # These use regex to avoid false positives like "rm -rf /tmp/testdir"
@@ -767,9 +777,9 @@ def list_services(filter_active: bool = False) -> list[ServiceInfo]:
     return services
 
 
-def get_service_status(service_name: str) -> dict[str, Any]:
+def get_service_status(service_name: str) -> ServiceStatus:
     """Get detailed status of a systemd service."""
-    result = {
+    result: ServiceStatus = {
         "name": service_name,
         "exists": False,
         "active": False,
@@ -1078,9 +1088,9 @@ def list_installed_packages(search: str | None = None) -> list[str]:
     return packages[:500]  # Limit output
 
 
-def get_disk_usage(path: str = "/") -> dict[str, Any]:
+def get_disk_usage(path: str = "/") -> DiskUsageInfo:
     """Get disk usage for a path."""
-    result = {"path": path, "total_gb": 0, "used_gb": 0, "free_gb": 0, "percent": 0}
+    result: DiskUsageInfo = {"path": path, "total_gb": 0.0, "used_gb": 0.0, "free_gb": 0.0, "percent": 0.0}
 
     try:
         stat = os.statvfs(path)
@@ -1100,9 +1110,9 @@ def list_directory(
     *,
     show_hidden: bool = False,
     details: bool = False,
-) -> list[dict[str, Any]]:
+) -> list[DirectoryEntry]:
     """List directory contents."""
-    entries = []
+    entries: list[DirectoryEntry] = []
     dir_path = Path(path).expanduser().resolve()
 
     if not dir_path.exists():
@@ -1191,9 +1201,9 @@ def read_log_file(
     *,
     lines: int = 100,
     filter_pattern: str | None = None,
-) -> dict[str, Any]:
+) -> LogFileResult:
     """Read and optionally filter a log file."""
-    result: dict[str, Any] = {"path": path, "lines": [], "total_lines": 0}
+    result: LogFileResult = {"path": path, "lines": [], "total_lines": 0}
     log_path = Path(path).expanduser().resolve()
 
     if not log_path.exists():

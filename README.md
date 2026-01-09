@@ -1,383 +1,398 @@
-# Talking Rock - Your AI, Your Hardware, Your Life
+# Talking Rock - Your AI, Your Rules
 
-**The open source, local-first AI that gives you everything the trillion-dollar tech companies charge perpetual rent for—running on your own hardware, with your data staying private when you choose local models.**
+**An AI assistant that lives on your computer, not in the cloud. Free forever. No subscriptions. No data harvesting. Just help when you need it.**
 
-Talking Rock is a three-agent system designed around how you actually live:
+---
 
-| Agent | Role | Domain |
-|-------|------|--------|
-| **CAIRN** | Attention Minder | Life organization, knowledge base, calendars, priorities |
-| **ReOS** | System Agent | Linux administration, terminal, services, packages |
-| **RIVA** | Code Agent | Software development, debugging, testing, git |
+## For Everyone (Even If You've Never Used Linux Before)
 
-All three share the same philosophy: **AI should be a tool you own, not a service you rent.**
+### What Is This?
+
+Talking Rock is like having a helpful friend who:
+- **Organizes your life** - Keeps track of your projects, todos, and what needs attention
+- **Manages your computer** - Helps you do things on your Linux computer through conversation
+- **Helps you code** - If you're a developer, it can write and fix code with you
+
+### Why Should You Care?
+
+Every major AI assistant (ChatGPT, Copilot, Claude) runs on someone else's servers. That means:
+- You pay monthly subscriptions forever
+- Your private conversations go to their computers
+- They can change the rules anytime
+- If they shut down, you lose access
+
+**Talking Rock is different:**
+- **It runs on YOUR computer** - Your data stays with you
+- **It's free** - No subscription, ever
+- **You own it** - Open source, can't be taken away
+- **It works offline** - No internet required for local models
+
+### Is This For Me?
+
+Talking Rock is for you if:
+- You want an AI assistant that respects your privacy
+- You're tired of subscription fatigue
+- You want to learn Linux with a patient helper
+- You're a developer who wants local AI coding assistance
+- You believe software should work for users, not advertisers
+
+### What Do I Need?
+
+**The basics:**
+- A computer running Linux (Ubuntu, Fedora, Mint, etc.)
+- At least 8GB of RAM (16GB recommended for better AI models)
+- About 10GB of free disk space
+
+**Never used Linux?** That's okay! Here's the simplest path:
+1. Install [Linux Mint](https://linuxmint.com/) - it's designed for beginners
+2. Follow our [Beginner's Setup Guide](docs/beginners-guide.md) (coming soon)
+
+---
+
+## How It Works
+
+Talking Rock has three specialized helpers (we call them "agents"):
+
+| Agent | What It Does | Example |
+|-------|--------------|---------|
+| **CAIRN** | Manages your attention and life | "What should I focus on today?" |
+| **ReOS** | Controls your computer | "What's using all my memory?" |
+| **RIVA** | Helps with coding | "Add login to my web app" |
+
+You talk to CAIRN by default. It automatically routes to the right helper:
+- Life question? CAIRN handles it
+- Computer question? Routes to ReOS (with your permission)
+- Code question? Routes to RIVA (with your permission)
 
 ---
 
 ## The Three Agents
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        TALKING ROCK                              │
-│                                                                  │
-│    ┌──────────────────────────────────────────────────────┐     │
-│    │                      CAIRN                            │     │
-│    │              (Default Entry Point)                    │     │
-│    │         Attention · Life · Knowledge Base             │     │
-│    │                                                       │     │
-│    │   "Is this a system thing? → ReOS"                   │     │
-│    │   "Is this a code thing? → RIVA"                     │     │
-│    │   "Is this a life/attention thing? → I handle it"    │     │
-│    └───────────────────┬──────────────────────────────────┘     │
-│                        │                                         │
-│            ┌───────────┴───────────┐                            │
-│            ▼                       ▼                            │
-│    ┌──────────────┐       ┌──────────────┐                      │
-│    │    ReOS      │       │    RIVA      │                      │
-│    │   (System)   │       │    (Code)    │                      │
-│    │              │       │              │                      │
-│    │  Terminal UI │       │ Code Mode UI │                      │
-│    └──────────────┘       └──────────────┘                      │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+                        TALKING ROCK
+
+    ┌──────────────────────────────────────────────────────┐
+    │                      CAIRN                            │
+    │              (Your Default Helper)                    │
+    │         Life · Attention · Knowledge Base             │
+    │                                                       │
+    │   "System problem?" → ReOS                           │
+    │   "Coding task?" → RIVA                              │
+    │   "Life/planning?" → I've got this                   │
+    └───────────────────┬──────────────────────────────────┘
+                        │
+            ┌───────────┴───────────┐
+            ▼                       ▼
+    ┌──────────────┐       ┌──────────────┐
+    │    ReOS      │       │    RIVA      │
+    │   (System)   │       │    (Code)    │
+    └──────────────┘       └──────────────┘
 ```
 
 ### CAIRN - The Attention Minder
 
-CAIRN embodies "No One" - calm, non-coercive, makes room rather than demands. It's your scrum master and air traffic controller for everything in your life.
+Your calm, non-judgmental life organizer. CAIRN helps you focus on what matters without making you feel guilty about what you haven't done yet.
 
-**Core Principles:**
-- Surfaces the **next thing**, not everything
-- Priority driven by **your decision**—CAIRN surfaces when decisions are needed
-- Time and calendar aware (integrates with Thunderbird)
-- **Never gamifies, never guilt-trips** ("waiting when you're ready" vs "you haven't touched this")
+**Core Philosophy:**
+- Shows you the **next thing**, not everything
+- **You decide priority** - CAIRN just helps you see when decisions are needed
+- Integrates with your calendar (Thunderbird)
+- **Never guilt-trips** - "Waiting when you're ready" instead of "You haven't touched this in 30 days!"
 
-**Capabilities:**
-- Knowledge base CRUD (todos, notes, projects, references)
-- Kanban states: Active → Backlog → Waiting → Someday → Done
-- Calendar integration (Thunderbird)
-- Contact knowledge graph (link people to projects)
-- Activity tracking (when you last touched things)
-- Smart surfacing (what needs attention today)
+**What It Can Do:**
+- Track projects, todos, and notes
+- Surface what needs attention today
+- Link people to projects (knows who's involved in what)
+- Keep track of what you're waiting on
+- Understand your identity and filter distractions (Coherence Kernel)
 
-### ReOS - The System Agent
+### ReOS - The System Helper
 
-ReOS controls your Linux system through conversation. Deep system understanding, transparent actions, safety-first.
-
-```bash
-$ reos "what's using all my memory"
-Top memory users:
-1. chrome (2.3 GB)
-2. docker (1.8 GB)
-3. code (890 MB)
-
-$ reos "stop all nextcloud containers"
-Plan:
-  1. Stop nextcloud-app
-  2. Stop nextcloud-redis
-  3. Stop nextcloud-db
-
-Proceed? [y/n]: y
-✓ All containers stopped.
-```
-
-**Capabilities:**
-- Process and memory monitoring
-- Service management (systemd)
-- Package management (apt/dnf/pacman)
-- Container management (Docker)
-- File operations
-- Shell command execution (with safety guardrails)
-
-### RIVA - The Code Agent
-
-RIVA (Recursive Intent Verification Architecture) is methodical: it verifies intent before acting, writes tests first, and trusts execution output over LLM claims.
+Talk to your Linux computer in plain English. ReOS understands your system deeply and explains what it's doing.
 
 ```
-You: Add user authentication to the API
+You: What's using all my memory?
 
-RIVA: [INTENT] Analyzing request...
-      - Action: Add new feature
-      - Target: API authentication
+ReOS: Here are the top memory users:
+      1. Chrome (2.3 GB)
+      2. Docker (1.8 GB)
+      3. VS Code (890 MB)
 
-      [CONTRACT] Success criteria:
+You: Stop all my Docker containers
+
+ReOS: I'll stop these containers:
+      - nextcloud-app
+      - nextcloud-redis
+      - nextcloud-db
+
+      Proceed? [y/n]: y
+      Done! All containers stopped.
+```
+
+**What It Can Do:**
+- Monitor processes and memory
+- Manage services (systemd)
+- Install and remove packages
+- Control Docker containers
+- Work with files
+- Run shell commands (with safety checks)
+
+### RIVA - The Code Helper
+
+A methodical coding assistant that verifies what you want before acting, writes tests first, and actually runs code to verify it works.
+
+```
+You: Add user login to my API
+
+RIVA: [Understanding your request...]
+      - You want: Authentication for your API
+      - I found: src/api/ with existing routes
+
+      [Here's how I'll verify it works:]
       ✓ test_login_valid_credentials passes
       ✓ test_login_invalid_password passes
       ✓ test_logout_clears_session passes
 
-      [PLAN] 4 steps:
+      [My plan:]
       1. Create src/auth.py
       2. Add routes to src/api/routes.py
       3. Create tests/test_auth.py
       4. Run tests to verify
 
-      [Showing diff preview...]
+      [Showing what I'll change...]
 
-      Approve changes? [y/n]
+      Approve? [y/n]
 ```
 
-**Capabilities:**
-- Intent discovery (prompt + project context + codebase patterns)
-- Contract-based development (testable success criteria)
-- Test-first approach (generates actual test code)
-- Self-debugging loop (analyze failures, apply fixes, retry)
-- Git operations
-- Multi-language support (Python, TypeScript, Rust, Go)
+**What It Can Do:**
+- Understand your project structure
+- Write code with tests first
+- Debug failures automatically
+- Work with Git
+- Support Python, TypeScript, Rust, Go
 
 ---
 
-## Handoff System
+## Safety First
 
-Agents seamlessly hand off to each other when a request falls outside their domain. **Switching is always user-gated**—you confirm or reject every handoff.
+### You're Always in Control
 
+- **Preview before changes** - See exactly what will change before any file is modified
+- **Approval required** - All changes need your OK
+- **Automatic backups** - Every modified file is backed up
+- **Undo anything** - Rollback any change
+
+### Built-in Limits
+
+Talking Rock has safety limits that can't be disabled:
+
+| Protection | Limit |
+|------------|-------|
+| Max operations per task | 25 |
+| Max run time | 5 minutes |
+| Sudo commands per session | 3 |
+| Debug retries | 3 |
+
+### Your Privacy
+
+- **Local by default** - With Ollama, everything stays on your machine
+- **No tracking** - We don't know you exist
+- **Open source** - Read every line of code
+- **Your choice** - Use local AI or cloud APIs
+
+---
+
+## Getting Started
+
+### Quick Install (Experienced Users)
+
+```bash
+# 1. Install Ollama (runs AI models locally)
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.2
+
+# 2. Clone and install Talking Rock
+git clone https://github.com/sefton37/ReOS
+cd ReOS
+pip install -e .
+
+# 3. Run the app
+cd apps/reos-tauri
+npm install
+npm run tauri:dev
 ```
-User (in CAIRN): "My disk is almost full, can you help?"
 
-CAIRN: ## Handoff Proposed: CAIRN → ReOS
+### Step-by-Step Install (Beginners)
 
-       **Why I'm suggesting this handoff:**
-       This is a system administration task (disk management) that
-       ReOS specializes in.
+**Step 1: Install Ollama**
 
-       **About ReOS:**
-       ReOS is the System Agent, specializing in Linux system
-       administration, services, packages, processes, and terminal operations.
-
-       **Your choice:**
-       You can confirm this handoff, or stay with CAIRN if you prefer.
-
-       [Confirm] [Reject]
+Ollama lets you run AI models on your own computer. Open a terminal and paste:
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
 ```
 
-**Design Principles:**
-- **15 tools per agent max** (LLM cognitive research shows degradation beyond ~20)
-- **Explicit transitions** with verbose explanations
-- **User always in control** - reject any handoff
-- **Structured context passing** - receiving agent knows exactly what you need
-- **Flexible agents** - handle simple out-of-domain tasks without handoff
+Then download a model:
+```bash
+ollama pull llama3.2
+```
+
+**Step 2: Install Talking Rock**
+
+```bash
+# Clone the code
+git clone https://github.com/sefton37/ReOS
+cd ReOS
+
+# Install Python dependencies
+pip install -e .
+
+# Install the desktop app
+cd apps/reos-tauri
+npm install
+```
+
+**Step 3: Run It**
+
+```bash
+npm run tauri:dev
+```
+
+A window will open. Start talking to CAIRN!
 
 ---
 
 ## The Play - Your Personal Knowledge System
 
-The Play provides context across everything you do:
+Everything in Talking Rock is organized around "The Play" - a hierarchical system for your life:
 
-| Level | Time Horizon | Example |
-|-------|--------------|---------|
-| **The Play** | Your life | Your identity, values, long-term vision |
-| **Acts** | > 1 year | "Building my startup", "Career at Company X" |
-| **Scenes** | > 1 month | "Launch MVP", "Q1 Platform Migration" |
-| **Beats** | > 1 week | "Set up CI/CD", "Implement auth" |
+| Level | Timeframe | Example |
+|-------|-----------|---------|
+| **The Play** | Your whole life | Your identity, values, goals |
+| **Acts** | Major life chapters | "Building my startup", "Learning music" |
+| **Scenes** | Projects within acts | "Launch MVP", "Complete album" |
+| **Beats** | Tasks within scenes | "Set up database", "Record vocals" |
 
-CAIRN tracks activity across The Play—when you last touched projects, what's active, what's stale. When you assign a repository to an Act, RIVA activates for coding requests in that context.
-
----
-
-## Safety & Sovereignty
-
-### You're Always in Control
-
-- **Diff preview**: See exactly what will change before any file is modified
-- **Approval required**: All file changes, commands, and handoffs require your explicit OK
-- **Automatic backups**: Every file modification is backed up
-- **Rollback**: Undo any change
-
-### Circuit Breakers
-
-Built-in limits to prevent runaway operations:
-
-| Protection | Limit | Enforcement |
-|------------|-------|-------------|
-| Max operations per task | 25 | ✓ Enforced |
-| Max execution time | 5 minutes | ✓ Enforced |
-| Max sudo escalations | 3 per session | ✓ Enforced |
-| Debug retry attempts | 3 | ✓ Enforced |
-| Human checkpoint | After 2 automated recoveries | ✓ Enforced |
-| Tools per agent | 15 max | ✓ Enforced |
-
-### Privacy
-
-- **Local-first**: With Ollama, everything stays on your machine
-- **No telemetry**: We don't know you exist
-- **Open source**: Audit everything
-- **Your choice**: Use Ollama locally, or cloud APIs if you prefer
+CAIRN uses this structure to:
+- Know what you're working on
+- Surface the right things at the right time
+- Understand context when you ask questions
 
 ---
 
-## Architecture
+## How Talking Rock Compares
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        TALKING ROCK                                   │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │                    Natural Language Layer                    │   │
-│   │              Shell CLI  │  Tauri Desktop App                │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│                               │                                      │
-│   ┌───────────────────────────┴───────────────────────────┐         │
-│   │                   Agent Layer (15 tools each)          │         │
-│   │                                                        │         │
-│   │   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │         │
-│   │   │   CAIRN     │  │    ReOS     │  │    RIVA     │   │         │
-│   │   │  Attention  │  │   System    │  │    Code     │   │         │
-│   │   │             │  │             │  │             │   │         │
-│   │   │ • KB CRUD   │  │ • Shell     │  │ • Read/Edit │   │         │
-│   │   │ • Calendar  │  │ • Services  │  │ • Search    │   │         │
-│   │   │ • Contacts  │  │ • Packages  │  │ • Tests     │   │         │
-│   │   │ • Surfacing │  │ • Docker    │  │ • Git       │   │         │
-│   │   └─────────────┘  └─────────────┘  └─────────────┘   │         │
-│   │           │                │                │          │         │
-│   │           └────────────────┼────────────────┘          │         │
-│   │                    Handoff System                      │         │
-│   │              (User-gated transitions)                  │         │
-│   └────────────────────────────────────────────────────────┘         │
-│                                                                      │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │                  Shared Infrastructure                       │   │
-│   │                                                              │   │
-│   │  The Play (KB)  │  CAIRN Store  │  Safety Layer  │  Handoff │   │
-│   │                                                              │   │
-│   │  Ollama │ Anthropic │ OpenAI │ Local llama.cpp              │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
+| Feature | ChatGPT | Copilot | Talking Rock |
+|---------|---------|---------|--------------|
+| Works offline | No | No | **Yes** |
+| Your data stays private | No | No | **Yes** |
+| Free forever | No | No | **Yes** |
+| Open source | No | No | **Yes** |
+| Life organization | No | No | **Yes** |
+| Linux system control | No | No | **Yes** |
+| Code assistance | Yes | Yes | **Yes** |
 
 ---
 
-## Quick Start
+## The Mission
 
-```bash
-# 1. Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3.2
+Big tech companies want AI to be a subscription you pay forever. They collect your data, train on your conversations, and can change the rules anytime.
 
-# 2. Clone and install
-git clone https://github.com/sefton37/ReOS
-cd ReOS
-pip install -e .
+We believe AI should be:
+- **Owned by you** - Not rented from a corporation
+- **Private** - Your thoughts are your own
+- **Transparent** - You can see exactly how it works
+- **Free** - No subscription, no "we changed our pricing"
 
-# 3. Run the desktop app
-cd apps/reos-tauri
-npm install
-npm run tauri:dev
-
-# 4. Start with CAIRN (default), switch agents as needed
-```
+**Our goal: Build the best AI assistant in the world. Then give it away.**
 
 ---
 
 ## What's Built
 
-### CAIRN (New - Attention Minder)
-- [x] Knowledge base integration with The Play
-- [x] Kanban state tracking (active, backlog, waiting, someday, done)
-- [x] Activity tracking (last touched, touch count)
-- [x] Priority management (user-driven, 1-5 scale)
-- [x] Time awareness (due dates, defer until, calendar)
-- [x] Thunderbird integration (contacts, calendar, events)
-- [x] Contact knowledge graph (link people to projects)
-- [x] Smart surfacing algorithms
-- [x] 22 MCP tools
+### CAIRN (Attention Minder)
+- [x] Knowledge base integration
+- [x] Kanban tracking (active, backlog, waiting, done)
+- [x] Activity tracking (when you last touched things)
+- [x] Priority management
+- [x] Calendar integration (Thunderbird)
+- [x] Contact knowledge graph
+- [x] Smart surfacing ("what needs attention")
+- [x] **Coherence Kernel** - Filters distractions based on your identity
+- [x] 27 MCP tools
 
 ### ReOS (System Agent)
 - [x] Natural language system control
-- [x] Deep system understanding (containers, services, packages, processes)
-- [x] Multi-step plan generation with approval workflow
-- [x] Safety layer (command blocking, risk assessment, rate limiting)
-- [x] Circuit breakers (25 ops, 5 min, 3 sudo)
+- [x] Service, package, container management
+- [x] Safety layer with command blocking
+- [x] Circuit breakers
 
 ### RIVA (Code Agent)
-- [x] Repository assignment to Acts
-- [x] Intent discovery (prompt + Play + codebase patterns)
-- [x] Contract-based development (testable success criteria)
-- [x] Test-first approach (generates actual test code)
-- [x] Self-debugging loop (analyze failures, apply fixes, retry)
-- [x] Quality tier tracking (transparency when LLM falls back)
-- [x] Multi-language tools (Python, TypeScript, Rust, Go)
+- [x] Intent discovery
+- [x] Test-first development
+- [x] Self-debugging loop
+- [x] Multi-language support
+- [x] Git integration
 
-### Handoff System (New)
-- [x] Structured context passing (distilled, not full history)
-- [x] User confirmation gates (switching is always user-gated)
-- [x] Explicit, verbose transition messaging
-- [x] RIVA-style intent verification for multi-domain requests
-- [x] 15-tool cap per agent (validated)
-- [x] Flexible agents (handle simple out-of-domain tasks)
-
----
-
-## Comparison: Talking Rock vs Commercial Tools
-
-| Capability | Cursor | Copilot | Devin | Talking Rock |
-|------------|--------|---------|-------|--------------|
-| Code completion | ✓ | ✓ | ✓ | ✓ |
-| Multi-file editing | ✓ | Partial | ✓ | ✓ |
-| Test execution | ✓ | ✗ | ✓ | ✓ |
-| Self-debugging | Partial | ✗ | ✓ | ✓ |
-| **Life organization** | ✗ | ✗ | ✗ | **✓ (CAIRN)** |
-| **Linux sysadmin** | ✗ | ✗ | ✗ | **✓ (ReOS)** |
-| **Local-First** | ✗ | ✗ | ✗ | **✓** |
-| **Open Source** | ✗ | ✗ | ✗ | **✓** |
-| **No Subscription** | ✗ | ✗ | ✗ | **✓** |
-| **Data Privacy** | ✗ | ✗ | ✗ | **✓** |
-
----
-
-## The Meaning
-
-Software is eating the world. AI is eating software. And a handful of companies want to be the landlords of AI—charging rent forever for tools that could run on your own hardware.
-
-Talking Rock is the alternative:
-- **User sovereignty**: You control the AI, not the other way around
-- **Transparency**: See every decision, every step, every line of reasoning
-- **Privacy**: With local models, your code and data stay on your machine
-- **Freedom**: No lock-in, no subscription, no "we changed our pricing"
-- **Holistic**: One system for life, work, and code—not three separate tools
-
-The trillion-dollar companies have resources we don't. But they also have incentives we don't—engagement metrics, retention, lock-in. Talking Rock is optimized purely for what's best for the user.
-
-**The goal: Make the best AI assistant in the world. Then give it away.**
-
----
-
-## Contributing
-
-Talking Rock is open source (MIT). Contributions welcome:
-- Bug reports and feature requests via GitHub Issues
-- Code contributions via Pull Requests
-- Documentation improvements
-- Testing on different distros and configurations
-
-See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for guidelines.
+### Handoff System
+- [x] Seamless agent switching
+- [x] User approval for all transitions
+- [x] Context preservation
 
 ---
 
 ## Requirements
 
-- Linux (any major distro)
+**Minimum:**
+- Linux (Ubuntu, Fedora, Mint, Arch, etc.)
 - Python 3.12+
-- Node.js 18+ (for Tauri UI)
-- Rust toolchain (for Tauri)
-- Ollama with a local model (or API key for cloud models)
-- Thunderbird (optional, for calendar/contacts integration)
+- 8GB RAM
+- 10GB disk space
+
+**Recommended:**
+- 16GB+ RAM (for better AI models)
+- GPU (for faster inference)
+
+**Optional:**
+- Node.js 18+ (for desktop app)
+- Rust toolchain (for desktop app)
+- Thunderbird (for calendar/contacts)
 
 ---
 
-## Links
+## Documentation
 
-- [Technical Roadmap](docs/tech-roadmap.md) - Full implementation plan
-- [Security Design](docs/security-design.md) - How Talking Rock protects your system
+- [Beginner's Guide](docs/beginners-guide.md) - New to Linux? Start here
+- [Technical Roadmap](docs/tech-roadmap.md) - Development plans
+- [Security Design](docs/security.md) - How we protect your system
 - [CAIRN Architecture](docs/cairn_architecture.md) - Attention minder design
-- [The Play Documentation](docs/the-play.md) - Knowledge system details
+- [The Play System](docs/the-play.md) - Knowledge organization
+
+---
+
+## Contributing
+
+Talking Rock is open source (MIT license). We welcome:
+- Bug reports and feature requests
+- Code contributions
+- Documentation improvements
+- Testing on different Linux distributions
+- Translations
+
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for guidelines.
+
+---
+
+## Community
+
+- GitHub Issues for bugs and features
+- Discussions for questions and ideas
 
 ---
 
 ## License
 
-MIT
+MIT - Do whatever you want with it.
 
 ---
 
-*Talking Rock: AI that works for you, not rents from you.*
+*Talking Rock: AI that works for you, on your terms.*

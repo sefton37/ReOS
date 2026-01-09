@@ -48,6 +48,7 @@ from reos.code_mode.sandbox import CodeSandbox
 from reos.code_mode.streaming import ExecutionCancelledError, ExecutionObserver
 from reos.code_mode.explorer import StepExplorer, StepAlternative, ExplorationState
 from reos.code_mode.session_logger import SessionLogger
+from reos.config import TIMEOUTS, EXECUTION
 
 if TYPE_CHECKING:
     from reos.code_mode.planner import CodeTaskPlan
@@ -77,8 +78,8 @@ class LoopStatus(Enum):
     AWAITING_APPROVAL = "approval"  # Needs user input
 
 
-# Default timeout: 5 minutes for simple tasks
-DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS = 300
+# Default timeout from centralized config
+DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS = TIMEOUTS.CODE_EXECUTION
 
 
 @dataclass
@@ -113,7 +114,7 @@ class ExecutionState:
     # Metadata
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
-    max_iterations: int = 10
+    max_iterations: int = EXECUTION.MAX_ITERATIONS
     current_iteration: int = 0
 
 

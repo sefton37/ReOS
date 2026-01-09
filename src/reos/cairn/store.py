@@ -112,6 +112,23 @@ class CairnStore:
 
                 CREATE INDEX IF NOT EXISTS idx_priority_queue_entity
                     ON priority_queue(entity_type, entity_id);
+
+                -- Coherence verification traces (audit trail)
+                CREATE TABLE IF NOT EXISTS coherence_traces (
+                    trace_id TEXT PRIMARY KEY,
+                    demand_id TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    identity_hash TEXT NOT NULL,
+                    checks_json TEXT NOT NULL,
+                    final_score REAL NOT NULL,
+                    recommendation TEXT NOT NULL,
+                    user_override TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_coherence_traces_demand
+                    ON coherence_traces(demand_id);
+                CREATE INDEX IF NOT EXISTS idx_coherence_traces_timestamp
+                    ON coherence_traces(timestamp);
             """)
 
     # =========================================================================
@@ -909,3 +926,159 @@ class CairnStore:
         """
         items = self.list_metadata(kanban_state=KanbanState.ACTIVE, has_priority=False)
         return [item for item in items if item.needs_priority]
+
+    # =========================================================================
+    # Coherence Traces
+    # =========================================================================
+
+    def save_coherence_trace(
+        self,
+        trace_id: str,
+        demand_id: str,
+        timestamp: datetime,
+        identity_hash: str,
+        checks: list[dict],
+        final_score: float,
+        recommendation: str,
+        user_override: str | None = None,
+    ) -> None:
+        """Save a coherence verification trace.
+
+        Args:
+            trace_id: Unique trace identifier.
+            demand_id: ID of the demand that was verified.
+            timestamp: When verification was performed.
+            identity_hash: Hash of the identity model used.
+            checks: List of coherence checks performed.
+            final_score: The final coherence score.
+            recommendation: The recommendation (accept/defer/reject).
+            user_override: If user disagreed, their choice.
+        """
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO coherence_traces (
+                    trace_id, demand_id, timestamp, identity_hash,
+                    checks_json, final_score, recommendation, user_override
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trace_id,
+                    demand_id,
+                    timestamp.isoformat(),
+                    identity_hash,
+                    json.dumps(checks),
+                    final_score,
+                    recommendation,
+                    user_override,
+                ),
+            )
+
+    def get_coherence_trace(self, trace_id: str) -> dict | None:
+        """Get a coherence trace by ID.
+
+        Args:
+            trace_id: The trace ID to look up.
+
+        Returns:
+            Trace data as dict, or None if not found.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM coherence_traces WHERE trace_id = ?",
+                (trace_id,),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            return {
+                "trace_id": row["trace_id"],
+                "demand_id": row["demand_id"],
+                "timestamp": row["timestamp"],
+                "identity_hash": row["identity_hash"],
+                "checks": json.loads(row["checks_json"]),
+                "final_score": row["final_score"],
+                "recommendation": row["recommendation"],
+                "user_override": row["user_override"],
+            }
+
+    def list_coherence_traces(
+        self,
+        demand_id: str | None = None,
+        since: datetime | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """List coherence traces with optional filters.
+
+        Args:
+            demand_id: Filter by demand ID.
+            since: Only return traces after this time.
+            limit: Maximum traces to return.
+
+        Returns:
+            List of trace data dicts.
+        """
+        conditions = []
+        params: list[Any] = []
+
+        if demand_id is not None:
+            conditions.append("demand_id = ?")
+            params.append(demand_id)
+
+        if since is not None:
+            conditions.append("timestamp > ?")
+            params.append(since.isoformat())
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        query = f"""
+            SELECT * FROM coherence_traces
+            {where_clause}
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """
+        params.append(limit)
+
+        with self._get_connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [
+                {
+                    "trace_id": row["trace_id"],
+                    "demand_id": row["demand_id"],
+                    "timestamp": row["timestamp"],
+                    "identity_hash": row["identity_hash"],
+                    "checks": json.loads(row["checks_json"]),
+                    "final_score": row["final_score"],
+                    "recommendation": row["recommendation"],
+                    "user_override": row["user_override"],
+                }
+                for row in rows
+            ]
+
+    def record_user_override(
+        self,
+        trace_id: str,
+        user_choice: str,
+    ) -> bool:
+        """Record that user overrode a coherence recommendation.
+
+        Args:
+            trace_id: The trace to update.
+            user_choice: What the user chose instead.
+
+        Returns:
+            True if updated, False if trace not found.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE coherence_traces
+                SET user_override = ?
+                WHERE trace_id = ?
+                """,
+                (user_choice, trace_id),
+            )
+            return cursor.rowcount > 0

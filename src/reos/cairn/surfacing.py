@@ -2,12 +2,16 @@
 
 Surfaces items that need attention based on priority, time, and context.
 Designed to be helpful without being coercive or guilt-inducing.
+
+Enhanced with optional coherence verification from the CAIRN Coherence Kernel.
+When enabled, items are scored against the user's identity model from The Play.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
@@ -23,6 +27,7 @@ if TYPE_CHECKING:
     from reos.cairn.store import CairnStore
     from reos.cairn.thunderbird import ThunderbirdBridge
     from reos.play.play_fs import PlayStore
+    from reos.providers import LLMProvider
 
 
 class CairnSurfacer:
@@ -34,6 +39,11 @@ class CairnSurfacer:
     - Context matters (time of day, available time, energy)
     - Never guilt-trip ("you haven't touched this in 30 days")
     - Instead: "X is waiting when you're ready"
+
+    Optional coherence verification:
+    - When llm is provided, items can be scored against user identity
+    - Use enable_coherence=True in surface_next() to activate
+    - Items with low coherence scores may be filtered or reranked
     """
 
     def __init__(
@@ -41,6 +51,8 @@ class CairnSurfacer:
         cairn_store: CairnStore,
         play_store: PlayStore | None = None,
         thunderbird: ThunderbirdBridge | None = None,
+        llm: "LLMProvider | None" = None,
+        play_path: Path | None = None,
     ):
         """Initialize the surfacer.
 
@@ -48,13 +60,22 @@ class CairnSurfacer:
             cairn_store: CAIRN SQLite store for metadata.
             play_store: Optional Play store for entity details.
             thunderbird: Optional Thunderbird bridge for calendar.
+            llm: Optional LLM provider for coherence verification.
+            play_path: Path to The Play root (for identity extraction).
         """
         self.store = cairn_store
         self.play = play_store
         self.thunderbird = thunderbird
+        self.llm = llm
+        self.play_path = play_path
+        self._identity_model = None  # Cached identity model
+        self._identity_model_time = None  # When it was built
 
     def surface_next(
-        self, context: SurfaceContext | None = None
+        self,
+        context: SurfaceContext | None = None,
+        enable_coherence: bool = False,
+        coherence_threshold: float = -0.5,
     ) -> list[SurfacedItem]:
         """Surface the next thing(s) that need attention.
 
@@ -62,9 +83,11 @@ class CairnSurfacer:
 
         Args:
             context: Optional context for personalization.
+            enable_coherence: If True and LLM available, score items against identity.
+            coherence_threshold: Items below this score may be filtered (default -0.5).
 
         Returns:
-            List of surfaced items, ordered by urgency.
+            List of surfaced items, ordered by urgency (and coherence if enabled).
         """
         if context is None:
             context = SurfaceContext()
@@ -90,6 +113,10 @@ class CairnSurfacer:
         # 6. Stale items (gentle nudge)
         if context.include_stale:
             candidates.extend(self._get_stale_items(days=7, limit=2))
+
+        # Optional: Score candidates for coherence with user identity
+        if enable_coherence and self.llm:
+            candidates = self._score_coherence(candidates, coherence_threshold)
 
         # Dedupe and rank
         return self._rank_and_dedupe(candidates, max_items=context.max_items)
@@ -397,6 +424,111 @@ class CairnSurfacer:
             )
 
         return surfaced
+
+    # =========================================================================
+    # Coherence Verification
+    # =========================================================================
+
+    def _get_identity_model(self):
+        """Get or build the identity model.
+
+        Caches the identity model for 5 minutes to avoid rebuilding
+        on every surfacing call.
+        """
+        from reos.cairn.identity import build_identity_model
+
+        now = datetime.now()
+
+        # Check if cache is still valid (5 minute TTL)
+        if (
+            self._identity_model is not None
+            and self._identity_model_time is not None
+            and (now - self._identity_model_time).seconds < 300
+        ):
+            return self._identity_model
+
+        # Build fresh identity model
+        try:
+            self._identity_model = build_identity_model(store=self.store)
+            self._identity_model_time = now
+            logger.debug("Built identity model with %d facets", len(self._identity_model.facets))
+        except Exception as e:
+            logger.warning("Failed to build identity model: %s", e)
+            self._identity_model = None
+
+        return self._identity_model
+
+    def _score_coherence(
+        self,
+        candidates: list[SurfacedItem],
+        threshold: float = -0.5,
+    ) -> list[SurfacedItem]:
+        """Score surfaced items for coherence with user identity.
+
+        Args:
+            candidates: List of surfaced items to score.
+            threshold: Items below this score are filtered out.
+
+        Returns:
+            Scored and filtered list of items.
+        """
+        from reos.cairn.coherence import AttentionDemand, CoherenceVerifier
+
+        identity = self._get_identity_model()
+        if identity is None:
+            logger.debug("No identity model available, skipping coherence scoring")
+            return candidates
+
+        verifier = CoherenceVerifier(identity, llm=self.llm, max_depth=2)
+        scored: list[SurfacedItem] = []
+
+        for item in candidates:
+            try:
+                # Create attention demand from surfaced item
+                demand = AttentionDemand.create(
+                    source=f"{item.entity_type}:{item.entity_id}",
+                    content=f"{item.title}: {item.reason}",
+                    urgency=self._urgency_to_int(item.urgency),
+                )
+
+                # Verify coherence
+                result = verifier.verify(demand)
+
+                # Update item with coherence info
+                item.coherence_score = result.overall_score
+                item.coherence_recommendation = result.recommendation
+
+                # Filter items below threshold (unless critical urgency)
+                if result.overall_score >= threshold or item.urgency == "critical":
+                    scored.append(item)
+                else:
+                    logger.debug(
+                        "Filtered item %s (score=%.2f, threshold=%.2f)",
+                        item.title[:30], result.overall_score, threshold
+                    )
+
+            except Exception as e:
+                logger.warning("Coherence check failed for %s: %s", item.entity_id, e)
+                # Keep item if coherence check fails
+                scored.append(item)
+
+        # Re-sort by coherence score as secondary criterion
+        scored.sort(key=lambda x: (
+            self._urgency_order(x.urgency),
+            -(x.coherence_score or 0.0),
+        ))
+
+        return scored
+
+    def _urgency_to_int(self, urgency: str) -> int:
+        """Convert urgency string to int (0-10)."""
+        mapping = {"critical": 10, "high": 7, "medium": 5, "low": 3}
+        return mapping.get(urgency, 5)
+
+    def _urgency_order(self, urgency: str) -> int:
+        """Get sort order for urgency (lower = more urgent)."""
+        mapping = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        return mapping.get(urgency, 4)
 
     # =========================================================================
     # Helpers

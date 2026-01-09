@@ -438,6 +438,96 @@ def list_tools() -> list[Tool]:
                 },
             },
         ),
+        # =====================================================================
+        # Coherence Verification (Identity-based filtering)
+        # =====================================================================
+        Tool(
+            name="cairn_check_coherence",
+            description=(
+                "Check if an attention demand coheres with the user's identity. "
+                "Returns a score (-1.0 to 1.0) and recommendation (accept/defer/reject)."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "demand_text": {
+                        "type": "string",
+                        "description": "The attention demand to check",
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "Where this demand came from (e.g., 'email', 'thought')",
+                    },
+                    "urgency": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 10,
+                        "description": "Claimed urgency (0-10, default: 5)",
+                    },
+                },
+                "required": ["demand_text"],
+            },
+        ),
+        Tool(
+            name="cairn_add_anti_pattern",
+            description=(
+                "Add an anti-pattern to automatically reject matching attention demands. "
+                "Anti-patterns are topics or sources the user wants filtered out."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "The pattern to reject (e.g., 'spam', 'marketing')",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional reason for adding this pattern",
+                    },
+                },
+                "required": ["pattern"],
+            },
+        ),
+        Tool(
+            name="cairn_remove_anti_pattern",
+            description="Remove an anti-pattern from the rejection list.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "The pattern to remove",
+                    },
+                },
+                "required": ["pattern"],
+            },
+        ),
+        Tool(
+            name="cairn_list_anti_patterns",
+            description="List all current anti-patterns that are used to filter attention demands.",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="cairn_get_identity_summary",
+            description=(
+                "Get a summary of the user's identity model as understood by CAIRN. "
+                "Includes core identity, facets, and anti-patterns."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "include_facets": {
+                        "type": "boolean",
+                        "description": "Include identity facets (default: true)",
+                    },
+                    "max_facets": {
+                        "type": "number",
+                        "description": "Max facets to include (default: 10)",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -573,6 +663,24 @@ class CairnToolHandler:
         # =====================================================================
         if name == "cairn_activity_summary":
             return self._activity_summary(args)
+
+        # =====================================================================
+        # Coherence Verification
+        # =====================================================================
+        if name == "cairn_check_coherence":
+            return self._check_coherence(args)
+
+        if name == "cairn_add_anti_pattern":
+            return self._add_anti_pattern(args)
+
+        if name == "cairn_remove_anti_pattern":
+            return self._remove_anti_pattern(args)
+
+        if name == "cairn_list_anti_patterns":
+            return self._list_anti_patterns()
+
+        if name == "cairn_get_identity_summary":
+            return self._get_identity_summary(args)
 
         raise CairnToolError(
             code="unknown_tool",
@@ -999,3 +1107,128 @@ class CairnToolHandler:
             "days": days,
             "by_type": by_type,
         }
+
+    # =========================================================================
+    # Coherence Verification implementations
+    # =========================================================================
+
+    def _check_coherence(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Check if an attention demand coheres with identity."""
+        from reos.cairn.coherence import AttentionDemand, CoherenceVerifier
+        from reos.cairn.identity import build_identity_model
+
+        demand_text = args["demand_text"]
+        source = args.get("source", "unknown")
+        urgency = args.get("urgency", 5)
+
+        try:
+            # Build identity model
+            identity = build_identity_model(store=self.store)
+
+            # Create demand
+            demand = AttentionDemand.create(
+                source=source,
+                content=demand_text,
+                urgency=int(urgency),
+            )
+
+            # Verify coherence (no LLM for now - uses heuristics)
+            verifier = CoherenceVerifier(identity, llm=None, max_depth=2)
+            result = verifier.verify(demand)
+
+            return {
+                "coherence_score": round(result.overall_score, 3),
+                "recommendation": result.recommendation,
+                "checks_performed": len(result.checks),
+                "trace": result.trace,
+                "demand_id": result.demand.id,
+            }
+
+        except Exception as e:
+            return {
+                "error": str(e),
+                "coherence_score": 0.0,
+                "recommendation": "defer",
+            }
+
+    def _add_anti_pattern(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Add an anti-pattern."""
+        from reos.cairn.identity import add_anti_pattern
+
+        pattern = args["pattern"]
+        reason = args.get("reason")
+
+        try:
+            patterns = add_anti_pattern(pattern, reason)
+            return {
+                "added": True,
+                "pattern": pattern,
+                "total_patterns": len(patterns),
+            }
+        except ValueError as e:
+            return {
+                "added": False,
+                "error": str(e),
+            }
+
+    def _remove_anti_pattern(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Remove an anti-pattern."""
+        from reos.cairn.identity import remove_anti_pattern
+
+        pattern = args["pattern"]
+        patterns = remove_anti_pattern(pattern)
+
+        return {
+            "removed": True,
+            "pattern": pattern,
+            "total_patterns": len(patterns),
+        }
+
+    def _list_anti_patterns(self) -> dict[str, Any]:
+        """List all anti-patterns."""
+        from reos.cairn.identity import load_anti_patterns
+
+        patterns = load_anti_patterns()
+
+        return {
+            "count": len(patterns),
+            "patterns": patterns,
+        }
+
+    def _get_identity_summary(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Get identity model summary."""
+        from reos.cairn.identity import build_identity_model, get_identity_hash
+
+        include_facets = args.get("include_facets", True)
+        max_facets = args.get("max_facets", 10)
+
+        try:
+            identity = build_identity_model(store=self.store, max_facets=max_facets)
+
+            result: dict[str, Any] = {
+                "identity_hash": get_identity_hash(identity),
+                "core_preview": identity.core[:500] + "..." if len(identity.core) > 500 else identity.core,
+                "facet_count": len(identity.facets),
+                "anti_pattern_count": len(identity.anti_patterns),
+                "anti_patterns": identity.anti_patterns,
+                "built_at": identity.built_at.isoformat(),
+            }
+
+            if include_facets:
+                result["facets"] = [
+                    {
+                        "name": f.name,
+                        "source": f.source,
+                        "preview": f.content[:200] + "..." if len(f.content) > 200 else f.content,
+                        "weight": f.weight,
+                    }
+                    for f in identity.facets[:max_facets]
+                ]
+
+            return result
+
+        except Exception as e:
+            return {
+                "error": str(e),
+                "identity_hash": None,
+            }

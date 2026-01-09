@@ -350,6 +350,7 @@ function buildUi() {
       const result = (await kernelRequest('chat/respond', {
         text: message,
         conversation_id: currentConversationId,
+        agent_type: currentAgent,  // Pass current agent for persona selection
         // No use_code_mode flag - CAIRN is the default conversational agent
       })) as ChatRespondResult;
       cairnView.hideThinking();
@@ -2527,7 +2528,8 @@ function buildUi() {
     try {
       const res = (await kernelRequest('chat/respond', {
         text,
-        conversation_id: currentConversationId
+        conversation_id: currentConversationId,
+        agent_type: currentAgent,  // Pass current agent for persona selection
       })) as ChatRespondResult;
 
       // Update conversation ID for context continuity

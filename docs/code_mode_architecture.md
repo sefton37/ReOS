@@ -163,6 +163,181 @@ LogEntry:
 
 RIVA provides a single recursive rule for code execution. Instead of prescribing levels (project, component, function, line), levels emerge from recursive application of this constraint.
 
+### State Machine
+
+```
+                              ┌─────────────────────────────────────────────────────┐
+                              │              INTENTION STATE MACHINE                  │
+                              └─────────────────────────────────────────────────────┘
+
+                                            ┌──────────┐
+                                            │ PENDING  │
+                                            └────┬─────┘
+                                                 │ work() called
+                                                 ▼
+                                            ┌──────────┐
+                              ┌─────────────│  ACTIVE  │─────────────┐
+                              │             └────┬─────┘             │
+                              │                  │                   │
+                   can_verify_directly?          │           can_verify_directly?
+                        = false                  │                = true
+                              │                  │                   │
+                              │                  │                   ▼
+                              │                  │           ┌─────────────────┐
+                              │                  │           │   ACTION CYCLE  │
+                              │                  │           │  ┌───────────┐  │
+                              │                  │           │  │  thought  │  │
+                              │                  │           │  │     ↓     │  │
+                              │                  │           │  │  action   │  │
+                              │                  │           │  │     ↓     │  │
+                              │                  │           │  │  result   │  │
+                              │                  │           │  │     ↓     │  │
+                              │                  │           │  │ judgment  │  │
+                              │                  │           │  └─────┬─────┘  │
+                              │                  │           └────────┼────────┘
+                              │                  │                    │
+                              │                  │      ┌─────────────┼─────────────┐
+                              │                  │      │             │             │
+                              │                  │   SUCCESS       FAILURE      PARTIAL/
+                              │                  │      │             │          UNCLEAR
+                              │                  │      │             │             │
+                              │                  │      ▼             │             │
+                              │                  │ ┌──────────┐       │             │
+                              │                  │ │ VERIFIED │       │      should_decompose?
+                              │                  │ └──────────┘       │             │
+                              │                  │                    │    ┌────────┴────────┐
+                              │                  │                    │   false            true
+                              │                  │                    │    │                 │
+                              │                  │                    │    ▼                 │
+                              │                  │                    │  retry              │
+                              │                  │                    │  cycle ──────────►──┘
+                              │                  │                    │                     │
+                              ▼                  │                    │                     │
+                      ┌───────────────┐          │                    │                     │
+                      │  DECOMPOSE    │◄─────────┴────────────────────┴─────────────────────┘
+                      │               │
+                      │ Split into    │
+                      │ 2-5 children  │
+                      └───────┬───────┘
+                              │
+                              ▼
+                      ┌───────────────┐
+                      │ WORK CHILDREN │ ← Recursive call for each child
+                      │  (depth + 1)  │
+                      └───────┬───────┘
+                              │
+              ┌───────────────┼───────────────┐
+              │               │               │
+        all children    any child       max depth
+          VERIFIED        FAILED          exceeded
+              │               │               │
+              ▼               ▼               ▼
+        ┌──────────┐   ┌──────────┐   ┌──────────┐
+        │ VERIFIED │   │  FAILED  │   │  FAILED  │
+        └──────────┘   └──────────┘   └──────────┘
+```
+
+### Cycle State Machine
+
+Each action cycle within an intention follows this state flow:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              CYCLE FLOW                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌──────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐       │
+│   │ THOUGHT  │ ──►  │  ACTION  │ ──►  │  RESULT  │ ──►  │ JUDGMENT │       │
+│   │          │      │          │      │          │      │          │       │
+│   │ "What am │      │ COMMAND  │      │ stdout   │      │ SUCCESS  │       │
+│   │  I about │      │ EDIT     │      │ stderr   │      │ FAILURE  │       │
+│   │  to try" │      │ CREATE   │      │ exit code│      │ PARTIAL  │       │
+│   │          │      │ DELETE   │      │ error    │      │ UNCLEAR  │       │
+│   │          │      │ QUERY    │      │          │      │          │       │
+│   └──────────┘      └──────────┘      └──────────┘      └────┬─────┘       │
+│                                                              │             │
+│                    if not SUCCESS  ┌────────────────────────┘             │
+│                                    ▼                                       │
+│                             ┌──────────────┐                               │
+│                             │  REFLECTION  │                               │
+│                             │              │                               │
+│                             │ "Why did it  │                               │
+│                             │  fail? What  │                               │
+│                             │  to try next"│                               │
+│                             └──────────────┘                               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Judgment Decision Tree
+
+```
+                                ┌─────────────────────┐
+                                │    Cycle Result     │
+                                └──────────┬──────────┘
+                                           │
+                      ┌────────────────────┼────────────────────┐
+                      │                    │                    │
+                      ▼                    ▼                    ▼
+               ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+               │   SUCCESS   │      │   FAILURE   │      │   UNCLEAR   │
+               │  indicators │      │  indicators │      │             │
+               └─────────────┘      └─────────────┘      └─────────────┘
+
+Success indicators:              Failure indicators:           Unclear:
+• exit_code == 0                 • exit_code != 0              • No clear success
+• "success" in output            • "error" in output             or failure
+• "created" in output            • "failed" in output            indicators
+• "done" in output               • "exception" in output       • Ambiguous result
+• file exists after CREATE       • traceback detected
+• pattern found after EDIT       • permission denied
+```
+
+### Decomposition Triggers
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        SHOULD DECOMPOSE?                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌─────────────────┐                                                       │
+│   │ Check Triggers  │                                                       │
+│   └────────┬────────┘                                                       │
+│            │                                                                │
+│   ┌────────┼────────┬────────────────┬────────────────┐                    │
+│   │        │        │                │                │                    │
+│   ▼        ▼        ▼                ▼                ▼                    │
+│ cycles  repeated  repeated      reflection        can't verify            │
+│ >= max  failures  unclear        suggests         directly                │
+│   │     >= 2      >= 2           decompose            │                    │
+│   │        │        │                │                │                    │
+│   └────────┴────────┴────────────────┴────────────────┘                    │
+│                            │                                                │
+│                            ▼                                                │
+│                    ┌───────────────┐                                        │
+│                    │   DECOMPOSE   │                                        │
+│                    │               │                                        │
+│                    │ LLM generates │                                        │
+│                    │  2-5 children │                                        │
+│                    │     with:     │                                        │
+│                    │ • what        │                                        │
+│                    │ • acceptance  │                                        │
+│                    └───────────────┘                                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Safety Limits
+
+| Limit | Default | Purpose |
+|-------|---------|---------|
+| `max_depth` | 10 | Prevent infinite recursion |
+| `max_cycles_per_intention` | 5 | Prevent infinite retry loops |
+| `max_iterations` | 10 | Overall execution limit |
+| `wall_clock_timeout` | 300s | Real-time safety |
+
+These limits are configured in `src/reos/config.py` and can be tuned via environment variables.
+
 ### Data Structures (`intention.py`)
 
 ```python

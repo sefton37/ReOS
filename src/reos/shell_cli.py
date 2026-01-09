@@ -337,17 +337,37 @@ def main() -> NoReturn:
 
     parser = argparse.ArgumentParser(
         prog="reos-shell",
-        description="ReOS natural language terminal integration",
+        description="ReOS natural language terminal integration - talk to your Linux system",
+        epilog="""
+Examples:
+  reos-shell "what files are in this directory"
+  reos-shell "show me running processes using lots of memory"
+  reos-shell "install htop"
+  reos-shell -q "disk usage"      # Quiet mode, just output
+  reos-shell -n "fresh question"  # Start new conversation
+
+Shell Integration:
+  Add to ~/.bashrc for command_not_found handling:
+    command_not_found_handle() {
+        reos-shell --command-not-found "$*"
+    }
+
+  This lets you type natural language directly:
+    $ what files are here
+    ReOS: 'what files are here' is not a command.
+          Treat as natural language? [Y/n]
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "prompt",
         nargs="*",
-        help="Natural language prompt to process",
+        help="Natural language prompt (e.g., 'list all python files')",
     )
     parser.add_argument(
         "--quiet", "-q",
         action="store_true",
-        help="Suppress header and progress indicators",
+        help="Suppress header and progress indicators (output only)",
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -362,7 +382,12 @@ def main() -> NoReturn:
     parser.add_argument(
         "--command-not-found",
         action="store_true",
-        help="Mode for command_not_found_handle integration (shows prompt confirmation)",
+        help="Mode for command_not_found_handle (confirms before processing)",
+    )
+    parser.add_argument(
+        "--version", "-V",
+        action="version",
+        version="%(prog)s 0.0.0a0 (Talking Rock)",
     )
 
     args = parser.parse_args()

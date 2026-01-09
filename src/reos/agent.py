@@ -769,12 +769,26 @@ class ChatAgent:
             pending_approval_id=result.plan.id if result.plan and result.needs_approval else None,
         )
 
-    def _get_persona(self) -> dict[str, Any]:
+    def _get_persona(self, agent_type: str | None = None) -> dict[str, Any]:
+        """Get persona settings for the specified agent type.
+
+        Args:
+            agent_type: The agent type ('cairn', 'riva', 'reos').
+                       If None, falls back to active_persona_id from settings.
+        """
+        # Try to load per-agent persona if agent_type specified
+        if agent_type:
+            persona_id = f"persona-{agent_type}"
+            row = self._db.get_agent_persona(persona_id=persona_id)
+            if row is not None:
+                return dict(row)
+
+        # Fall back to active persona from settings
         persona_id = self._db.get_active_persona_id()
         if persona_id:
             row = self._db.get_agent_persona(persona_id=persona_id)
             if row is not None:
-                return row
+                return dict(row)
 
         return {
             "system_prompt": (
@@ -828,6 +842,7 @@ class ChatAgent:
         user_text: str,
         *,
         conversation_id: str | None = None,
+        agent_type: str | None = None,
     ) -> ChatResponse:
         """Respond to user message with conversation context.
 
@@ -835,6 +850,8 @@ class ChatAgent:
             user_text: The user's message
             conversation_id: Optional conversation ID for context continuity.
                            If None, creates a new conversation.
+            agent_type: The agent type ('cairn', 'riva', 'reos') for persona selection.
+                       If None, uses the active persona from settings.
 
         Returns:
             ChatResponse with answer and metadata
@@ -949,7 +966,7 @@ class ChatAgent:
 
         tools = list_tools()
 
-        persona = self._get_persona()
+        persona = self._get_persona(agent_type)
         temperature = float(persona.get("temperature") or 0.2)
         top_p = float(persona.get("top_p") or 0.9)
         tool_call_limit = int(persona.get("tool_call_limit") or 3)
@@ -989,16 +1006,25 @@ class ChatAgent:
 
         wants_diff = self._user_opted_into_diff(user_text)
 
-        tool_calls = self._select_tools(
-            user_text=user_text,
-            tools=tools,
-            wants_diff=wants_diff,
-            persona_prefix=persona_prefix,
-            llm=llm,
-            temperature=temperature,
-            top_p=top_p,
-            tool_call_limit=tool_call_limit,
-        )
+        # Detect personal questions - skip tool selection for these
+        # Personal questions should be answered directly from THE_PLAY context
+        is_personal = self._is_personal_question(user_text)
+
+        if is_personal:
+            # Personal question - skip tools entirely, answer from context
+            tool_calls = []
+            logger.debug("Personal question detected, skipping tool selection")
+        else:
+            tool_calls = self._select_tools(
+                user_text=user_text,
+                tools=tools,
+                wants_diff=wants_diff,
+                persona_prefix=persona_prefix,
+                llm=llm,
+                temperature=temperature,
+                top_p=top_p,
+                tool_call_limit=tool_call_limit,
+            )
 
         tool_results: list[dict[str, Any]] = []
         for call in tool_calls[:tool_call_limit]:
@@ -1410,6 +1436,77 @@ class ChatAgent:
             ]
         )
 
+    def _is_personal_question(self, user_text: str) -> bool:
+        """Detect if the question is about the user (personal) vs the system.
+
+        Personal questions should be answered from THE_PLAY context, not system tools.
+        This bypasses the tool selection phase for questions like "what do you know about me?"
+
+        Returns:
+            True if this is a personal question about the user's identity/goals/story.
+        """
+        t = user_text.lower()
+
+        # Direct personal question patterns
+        personal_patterns = [
+            "about me",
+            "about myself",
+            "know about me",
+            "know me",
+            "my goals",
+            "my story",
+            "my vision",
+            "my identity",
+            "my name",
+            "my background",
+            "my principles",
+            "my values",
+            "my work",
+            "my purpose",
+            "who am i",
+            "who i am",
+            "what am i",
+            "tell me about me",
+            "describe me",
+            "my philosophy",
+            "my beliefs",
+            "my journey",
+            "my mission",
+            "what do you know",  # When followed by context of "about me"
+        ]
+
+        # Check for personal patterns
+        for pattern in personal_patterns:
+            if pattern in t:
+                return True
+
+        # Also check for questions that reference "me" or "my" prominently
+        # but NOT system-related contexts
+        if any(word in t for word in ["me", "my", "myself", "i"]):
+            # Exclude system-related contexts
+            system_contexts = [
+                "my computer",
+                "my machine",
+                "my server",
+                "my disk",
+                "my memory",
+                "my cpu",
+                "my services",
+                "my containers",
+                "my docker",
+                "my files",
+                "my directory",
+                "my process",
+                "my network",
+                "my package",
+            ]
+            if not any(ctx in t for ctx in system_contexts):
+                # Check for question words that suggest personal inquiry
+                if any(q in t for q in ["who", "what do you know", "tell me"]):
+                    return True
+
+        return False
+
     def detect_intent(self, user_text: str) -> DetectedIntent | None:
         """Detect conversational intent from short user responses.
 
@@ -1584,8 +1681,7 @@ class ChatAgent:
 
         user = (
             "TOOLS:\n" + json.dumps(tool_specs, indent=2) + "\n\n" +
-            "USER_MESSAGE:\n" + user_text + "\n\n" +
-            f"USER_OPTED_INTO_DIFF: {wants_diff}\n"
+            "USER_MESSAGE:\n" + user_text
         )
 
         raw = llm.chat_json(system=system, user=user, temperature=temperature, top_p=top_p)
@@ -1701,11 +1797,21 @@ class ChatAgent:
             + "- Do not fabricate information; use what's in your context\n"
         )
 
-        user = (
-            f"USER_OPTED_INTO_DIFF: {wants_diff}\n\n"
-            "USER_MESSAGE:\n" + user_text + "\n\n"
-            "TOOL_RESULTS:\n" + json.dumps(tool_dump, indent=2, ensure_ascii=False)
-        )
+        # Build user message - only include tool results if there are any
+        if tool_dump:
+            user = (
+                user_text + "\n\n"
+                "TOOL_RESULTS:\n" + json.dumps(tool_dump, indent=2, ensure_ascii=False)
+            )
+        else:
+            # No tools called - this is a personal question
+            # Add explicit hint to use THE_PLAY context
+            user = (
+                user_text + "\n\n"
+                "NOTE: No system tools were called because this appears to be a personal question.\n"
+                "Answer using THE_PLAY context above which contains information about the user.\n"
+                "Do NOT say you don't have information - THE_PLAY IS your information source."
+            )
 
         raw = llm.chat_text(system=system, user=user, temperature=temperature, top_p=top_p)
         return self._parse_thinking_answer(raw)

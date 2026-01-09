@@ -217,6 +217,7 @@ def _handle_chat_respond(
     text: str,
     conversation_id: str | None = None,
     use_code_mode: bool = False,
+    agent_type: str | None = None,
 ) -> dict[str, Any]:
     agent = ChatAgent(db=db, use_code_mode=use_code_mode)
 
@@ -276,7 +277,7 @@ def _handle_chat_respond(
                         f"{intent.reference_term} ({resolved.get('type', '')}: {resolved.get('name', resolved.get('id', ''))})"
                     )
 
-    response = agent.respond(text, conversation_id=conversation_id)
+    response = agent.respond(text, conversation_id=conversation_id, agent_type=agent_type)
     return {
         "answer": response.answer,
         "conversation_id": response.conversation_id,
@@ -4339,11 +4340,14 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             text = params.get("text")
             conversation_id = params.get("conversation_id")
             use_code_mode = params.get("use_code_mode", False)  # Default is conversational (CAIRN)
+            agent_type = params.get("agent_type")  # 'cairn', 'riva', 'reos', or None
             if not isinstance(text, str) or not text.strip():
                 raise RpcError(code=-32602, message="text is required")
             if conversation_id is not None and not isinstance(conversation_id, str):
                 raise RpcError(code=-32602, message="conversation_id must be a string or null")
-            result = _handle_chat_respond(db, text=text, conversation_id=conversation_id, use_code_mode=use_code_mode)
+            if agent_type is not None and not isinstance(agent_type, str):
+                raise RpcError(code=-32602, message="agent_type must be a string or null")
+            result = _handle_chat_respond(db, text=text, conversation_id=conversation_id, use_code_mode=use_code_mode, agent_type=agent_type)
             return _jsonrpc_result(req_id=req_id, result=result)
 
         if method == "intent/detect":

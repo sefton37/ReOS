@@ -76,6 +76,10 @@ ignore_missing_imports = true
 [tool.mypy-fastapi]
 ignore_missing_imports = true
 
+[project.scripts]
+reos = "reos.__main__:main"
+reos-shell = "reos.shell_cli:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 

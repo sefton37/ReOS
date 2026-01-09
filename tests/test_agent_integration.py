@@ -505,7 +505,7 @@ class TestChatAgentAnswerGeneration:
         monkeypatch.setattr(agent_mod, "call_tool", fake_call_tool)
 
         tool_plan = {
-            "tool_calls": [{"name": "test_tool", "arguments": {}}]
+            "tool_calls": [{"name": "linux_system_info", "arguments": {}}]
         }
         ollama = FakeOllama(
             tool_plan_json=json.dumps(tool_plan),

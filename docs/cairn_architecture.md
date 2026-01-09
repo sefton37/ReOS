@@ -9,6 +9,7 @@ CAIRN embodies "No One" - calm, non-coercive, makes room rather than demands att
 - Priority driven by **user decision**, CAIRN surfaces when decisions are needed
 - Time and calendar aware
 - Never gamifies, never guilt-trips
+- **Identity-first**: Filters attention through coherence with your stated values
 
 ## Architecture Overview
 
@@ -22,6 +23,11 @@ CAIRN embodies "No One" - calm, non-coercive, makes room rather than demands att
 │  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
 │                              │                                   │
 │              ┌───────────────┴───────────────┐                   │
+│              │   Coherence Verification      │                   │
+│              │  (identity ↔ attention)       │                   │
+│              └───────────────┬───────────────┘                   │
+│                              │                                   │
+│              ┌───────────────┴───────────────┐                   │
 │              │      Knowledge Graph          │                   │
 │              │  (contacts ↔ projects/tasks)  │                   │
 │              └───────────────────────────────┘                   │
@@ -33,7 +39,8 @@ CAIRN embodies "No One" - calm, non-coercive, makes room rather than demands att
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
 │   Play Store    │  │Thunderbird Bridge│  │  CAIRN SQLite   │
 │  (Acts/Scenes/  │  │ (Calendar, Email,│  │ (Activity logs, │
-│   Beats/KB)     │  │  Contacts)       │  │  priorities)    │
+│   Beats/KB)     │  │  Contacts)       │  │  priorities,    │
+│                 │  │                  │  │  coherence)     │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
 
@@ -291,21 +298,175 @@ def surface_next(context: SurfaceContext) -> list[SurfacedItem]:
 4. **Context matters**: Morning surfacing differs from evening
 5. **Completion isn't the only goal**: Some items are ongoing, some get archived unfinished
 
+## Coherence Verification Kernel
+
+The Coherence Kernel is CAIRN's identity-aware filtering system. It mirrors RIVA's recursive intent verification pattern but applies it to attention management.
+
+### Core Principle
+
+**"If you can't verify coherence, decompose the demand."**
+
+Just as RIVA decomposes complex coding intentions into verifiable steps, CAIRN decomposes complex attention demands into verifiable facets.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Coherence Verification                        │
+│                                                                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
+│  │   Identity   │    │  Attention   │    │  Coherence   │       │
+│  │    Model     │───▶│   Demand     │───▶│   Verifier   │       │
+│  │  (from Play) │    │  (incoming)  │    │  (recursive) │       │
+│  └──────────────┘    └──────────────┘    └──────────────┘       │
+│         │                                        │               │
+│         │            ┌───────────────────────────┘               │
+│         │            │                                           │
+│         ▼            ▼                                           │
+│  ┌──────────────────────────────────────────────────────┐       │
+│  │                 Coherence Result                      │       │
+│  │  score: -1.0 to 1.0 | recommendation: accept/defer/reject    │
+│  └──────────────────────────────────────────────────────┘       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Data Types
+
+```python
+@dataclass
+class IdentityModel:
+    """Hierarchical representation of user identity from The Play."""
+    core: str                    # me.md content (highest priority)
+    facets: list[IdentityFacet]  # Extracted from Acts/Scenes/Beats
+    anti_patterns: list[str]     # Things the user has rejected
+
+@dataclass
+class AttentionDemand:
+    """Something competing for the user's attention."""
+    source: str                  # Where it came from
+    content: str                 # What it wants
+    urgency: int                 # 0-10 scale
+    coherence_score: float | None  # Calculated after verification
+
+@dataclass
+class CoherenceCheck:
+    """One cycle of coherence verification."""
+    facet_checked: str           # Which identity facet was consulted
+    demand_aspect: str           # Which aspect was examined
+    alignment: float             # -1.0 to 1.0
+    reasoning: str               # Why this score
+
+@dataclass
+class CoherenceResult:
+    """Result of coherence verification."""
+    demand: AttentionDemand
+    checks: list[CoherenceCheck]
+    overall_score: float         # -1.0 to 1.0
+    recommendation: str          # "accept", "defer", "reject"
+    trace: list[str]             # Audit trail
+```
+
+### Verification Algorithm
+
+```python
+class CoherenceVerifier:
+    def verify(self, demand: AttentionDemand, depth: int = 0) -> CoherenceResult:
+        # 1. Quick rejection via anti-patterns (no LLM needed)
+        if self._matches_anti_pattern(demand):
+            return CoherenceResult(..., recommendation="reject")
+
+        # 2. Simple demands - verify directly
+        if self._can_verify_directly(demand):
+            return self._direct_verification(demand)
+
+        # 3. Complex demands - decompose and verify parts
+        if depth < self.max_depth:
+            sub_demands = self._decompose(demand)
+            sub_results = [self.verify(sd, depth + 1) for sd in sub_demands]
+            return self._aggregate_results(demand, sub_results)
+
+        # 4. At max depth - best effort
+        return self._direct_verification(demand)
+```
+
+### Anti-Pattern Fast Path
+
+Users can define "anti-patterns" - topics or sources they want automatically rejected:
+
+```python
+# Add anti-pattern
+add_anti_pattern("crypto", reason="Not interested in cryptocurrency")
+
+# Demand mentioning crypto is instantly rejected
+demand = AttentionDemand.create(source="email", content="Check out this crypto opportunity!")
+result = verifier.verify(demand)
+# result.recommendation == "reject"
+# result.overall_score == -1.0
+```
+
+### Integration with Surfacing
+
+When `enable_coherence=True` is passed to `surface_next()`:
+
+1. Build identity model from The Play
+2. For each candidate item, create an AttentionDemand
+3. Run coherence verification
+4. Filter items below threshold
+5. Re-rank by coherence + urgency
+
+```python
+items = surfacer.surface_next(
+    enable_coherence=True,
+    coherence_threshold=-0.5,  # Filter strongly incoherent items
+)
+```
+
+### MCP Tools
+
+```
+cairn_check_coherence      - Verify if demand coheres with identity
+cairn_add_anti_pattern     - Add pattern to auto-reject
+cairn_remove_anti_pattern  - Remove anti-pattern
+cairn_list_anti_patterns   - List all anti-patterns
+cairn_get_identity_summary - View current identity model
+```
+
+### Trace Storage
+
+Every coherence decision is stored for:
+- Debugging why something was surfaced/rejected
+- Learning from user overrides
+- Transparency about attention decisions
+
+```sql
+CREATE TABLE coherence_traces (
+    trace_id TEXT PRIMARY KEY,
+    demand_id TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    identity_hash TEXT NOT NULL,    -- Which identity version was used
+    checks_json TEXT NOT NULL,
+    final_score REAL NOT NULL,
+    recommendation TEXT NOT NULL,
+    user_override TEXT              -- If user disagreed
+);
+```
+
 ## File Structure
 
 ```
 src/reos/cairn/
 ├── __init__.py
-├── models.py           # CairnMetadata, ContactLink, etc.
-├── store.py            # CAIRN SQLite operations
+├── models.py           # CairnMetadata, ContactLink, SurfacedItem
+├── store.py            # CAIRN SQLite operations + coherence traces
 ├── thunderbird.py      # Thunderbird bridge (read-only)
-├── surfacing.py        # Priority surfacing algorithms
-├── activity.py         # Activity tracking
-└── mcp_tools.py        # MCP tool definitions
+├── surfacing.py        # Priority surfacing with coherence integration
+├── coherence.py        # Coherence types and CoherenceVerifier
+├── identity.py         # Identity extraction from The Play
+└── mcp_tools.py        # MCP tool definitions (27 tools)
 
 src/reos/
-├── cairn/              # New
-├── code_mode/          # Existing (→ becomes RIVA)
-├── linux_tools.py      # Existing (→ stays ReOS)
+├── cairn/              # Attention minder
+├── code_mode/          # RIVA (code agent)
+├── linux_tools.py      # ReOS (system agent)
 └── ...
 ```
