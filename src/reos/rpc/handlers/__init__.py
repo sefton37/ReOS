@@ -21,4 +21,7 @@ from __future__ import annotations
 from reos.rpc.handlers import approvals  # noqa: F401
 from reos.rpc.handlers import auth  # noqa: F401
 from reos.rpc.handlers import conversations  # noqa: F401
+from reos.rpc.handlers import ollama  # noqa: F401
+from reos.rpc.handlers import providers  # noqa: F401
+from reos.rpc.handlers import system  # noqa: F401
 from reos.rpc.handlers import tools  # noqa: F401
