@@ -6,6 +6,13 @@ directly from the terminal, enabling shell integration via command_not_found_han
 Usage:
     python -m reos.shell_cli "what files are in my home directory"
     python -m reos.shell_cli --execute "list all python files"
+
+Architecture:
+    When running from the terminal, commands should execute with full terminal
+    access (stdin/stdout/stderr connected to the terminal). This allows users
+    to interact with commands normally (e.g., respond to y/n prompts).
+
+    We set REOS_TERMINAL_MODE=1 to signal this to downstream code.
 """
 
 from __future__ import annotations
@@ -19,6 +26,9 @@ from typing import NoReturn
 from .agent import ChatAgent, ChatResponse
 from .db import get_db
 from .logging_setup import configure_logging
+
+# Signal that we're running in terminal mode - commands should have terminal access
+os.environ["REOS_TERMINAL_MODE"] = "1"
 
 # File to persist conversation ID between shell invocations
 CONVERSATION_FILE = Path.home() / ".reos_conversation"
@@ -51,6 +61,32 @@ def clear_conversation() -> None:
             CONVERSATION_FILE.unlink()
     except Exception:
         pass
+
+
+def read_user_input(prompt_text: str = "") -> str:
+    """Read input from user, trying /dev/tty if stdin is unavailable.
+
+    Args:
+        prompt_text: Optional prompt to display (not used if reading from /dev/tty).
+
+    Returns:
+        User input string, stripped.
+    """
+    if sys.stdin.isatty():
+        # stdin is connected to terminal, use normal input
+        if prompt_text:
+            return input(prompt_text).strip()
+        return input().strip()
+
+    # stdin is not a tty (piped/redirected), try /dev/tty
+    try:
+        with open("/dev/tty", "r") as tty:
+            return tty.readline().strip()
+    except OSError:
+        # Can't open /dev/tty, fall back to stdin
+        if prompt_text:
+            return input(prompt_text).strip()
+        return input().strip()
 
 
 def colorize(text: str, color: str) -> str:
@@ -230,7 +266,8 @@ def prompt_for_approval() -> str | None:
     sys.stderr.flush()
 
     try:
-        response = input().strip().lower()
+        response = read_user_input().lower()
+
         if response in ("y", "yes", "ok", "proceed", "go", "do it"):
             return "yes"
         elif response in ("n", "no", "cancel", "abort", "stop"):
@@ -412,9 +449,10 @@ Shell Integration:
     if args.command_not_found:
         print(colorize("ReOS:", "cyan"), f"'{prompt}' is not a command.", file=sys.stderr)
         print(colorize("      ", "cyan"), "Treat as natural language? [Y/n] ", end="", file=sys.stderr)
+        sys.stderr.flush()
 
         try:
-            response = input().strip().lower()
+            response = read_user_input().lower()
             if response and response not in ("y", "yes"):
                 sys.exit(127)  # Standard exit code for command not found
         except (EOFError, KeyboardInterrupt):

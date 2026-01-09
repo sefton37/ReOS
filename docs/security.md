@@ -4,6 +4,23 @@
 
 ReOS is a natural language interface for Linux system administration that executes shell commands via LLM. This creates a unique threat surface: user input influences AI decisions that result in privileged system operations. This document describes the defense-in-depth security architecture.
 
+## Core Architectural Principle: Never Obstruct Linux
+
+**ReOS enhances Linux - it never obstructs it.**
+
+When running from a terminal (shell integration), commands execute with full terminal access:
+- stdin/stdout/stderr connected to the terminal
+- Interactive prompts (y/n, passwords) work normally
+- Users can respond to apt, sudo, and other interactive commands
+- The escape hatch (`!command`) always works
+
+This principle means:
+1. **Terminal mode**: Commands inherit terminal I/O - user interaction preserved
+2. **GUI/API mode**: Output captured for display - non-interactive by design
+3. **No silent failures**: If a command needs input, the user can provide it
+
+The `REOS_TERMINAL_MODE` environment variable signals terminal context throughout the codebase.
+
 ## Threat Model
 
 ### Attack Surface
