@@ -137,7 +137,9 @@ class TestContextGathering:
     @patch("subprocess.run")
     def test_check_service_active(self, mock_run):
         def side_effect(cmd, **kwargs):
-            if "is-active" in cmd:
+            if "show" in cmd:
+                return MagicMock(returncode=0, stdout="LoadState=loaded\n")
+            elif "is-active" in cmd:
                 return MagicMock(returncode=0, stdout="active\n")
             elif "is-enabled" in cmd:
                 return MagicMock(returncode=0, stdout="enabled\n")
@@ -155,7 +157,9 @@ class TestContextGathering:
     @patch("subprocess.run")
     def test_check_service_inactive(self, mock_run):
         def side_effect(cmd, **kwargs):
-            if "is-active" in cmd:
+            if "show" in cmd:
+                return MagicMock(returncode=0, stdout="LoadState=loaded\n")
+            elif "is-active" in cmd:
                 return MagicMock(returncode=0, stdout="inactive\n")
             elif "is-enabled" in cmd:
                 return MagicMock(returncode=1, stdout="disabled\n")

@@ -83,6 +83,9 @@ class ShellContext:
     service_status: str | None = None       # "active", "inactive", "failed"
     service_enabled: bool = False           # Is it enabled at boot?
 
+    # FTS5 search results (for semantic matching)
+    fts_matches: list[dict[str, str]] = field(default_factory=list)  # Matching packages/apps
+
     # Decision
     can_verify: bool = False                # Do we have enough context?
 
@@ -101,6 +104,16 @@ class ShellContext:
                 lines.append(f"- {self.intent_target}: package available but NOT installed")
                 if self.package_description:
                     lines.append(f"  Description: {self.package_description}")
+            elif self.fts_matches:
+                # Show FTS5 search results when exact match not found
+                lines.append(f"- {self.intent_target}: NOT FOUND directly, but similar programs found:")
+                for match in self.fts_matches[:3]:  # Top 3 matches
+                    name = match.get("name", match.get("desktop_id", "unknown"))
+                    desc = match.get("description", match.get("comment", ""))
+                    if desc:
+                        lines.append(f"  • {name}: {desc}")
+                    else:
+                        lines.append(f"  • {name}")
             else:
                 lines.append(f"- {self.intent_target}: NOT FOUND in PATH or packages")
 
@@ -252,12 +265,20 @@ class ShellContextGatherer:
         context.service_status = status
         context.service_enabled = enabled
 
+        # Level 5: FTS5 search (semantic matching when exact match fails)
+        if not (context.executable_path or context.package_installed or
+                context.package_available or context.is_service):
+            # Try semantic search using FTS5
+            fts_matches = self.search_fts5(original_input or intent_target)
+            context.fts_matches = fts_matches
+
         # Determine if we can verify
         context.can_verify = bool(
             context.executable_path or
             context.package_installed or
             context.package_available or
-            context.is_service
+            context.is_service or
+            context.fts_matches  # FTS5 matches also count as verifiable
         )
 
         return context
@@ -388,12 +409,29 @@ class ShellContextGatherer:
             if target in self.steady_state.available_services:
                 return True, None, False
 
-        # Check systemctl
+        # Check systemctl - first verify the service exists using 'show'
         service_names = [target, f"{target}.service"]
 
         for service_name in service_names:
             try:
-                # Check if it's a valid service
+                # Use 'systemctl show' to verify service exists
+                # It returns LoadState=loaded for real services, LoadState=not-found for fake ones
+                show_result = subprocess.run(
+                    ["systemctl", "show", service_name, "--property=LoadState"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                load_state = show_result.stdout.strip()
+
+                # Only continue if the service actually exists
+                if "LoadState=not-found" in load_state or "LoadState=masked" in load_state:
+                    continue
+
+                if "LoadState=loaded" not in load_state:
+                    continue
+
+                # Now get the status
                 result = subprocess.run(
                     ["systemctl", "is-active", service_name],
                     capture_output=True,
@@ -411,7 +449,7 @@ class ShellContextGatherer:
                 )
                 is_enabled = enabled_result.returncode == 0
 
-                # If we got a status (even "inactive"), it's a valid service
+                # If we got a status, it's a valid service
                 if status in ("active", "inactive", "failed", "activating", "deactivating"):
                     return True, status, is_enabled
 
@@ -419,6 +457,54 @@ class ShellContextGatherer:
                 pass
 
         return False, None, False
+
+    def search_fts5(self, query: str, limit: int = 5) -> list[dict[str, str]]:
+        """Search packages and desktop apps using FTS5 full-text search.
+
+        Args:
+            query: Search query (e.g., "image editor", "web browser")
+            limit: Maximum results to return
+
+        Returns:
+            List of matching packages/apps with name and description
+        """
+        if not query or not query.strip():
+            return []
+
+        try:
+            from .db import get_db
+            from .system_index import SystemIndexer
+
+            db = get_db()
+            indexer = SystemIndexer(db)
+
+            # Search both packages and desktop apps
+            results = indexer.search_all(query, limit=limit)
+
+            # Combine and return top matches
+            combined: list[dict[str, str]] = []
+
+            # Add package matches
+            for pkg in results.get("packages", []):
+                combined.append({
+                    "name": pkg["name"],
+                    "description": pkg.get("description", ""),
+                    "type": "package",
+                })
+
+            # Add desktop app matches
+            for app in results.get("desktop_apps", []):
+                combined.append({
+                    "name": app["name"],
+                    "description": app.get("comment", app.get("generic_name", "")),
+                    "type": "desktop_app",
+                    "exec_cmd": app.get("exec_cmd", ""),
+                })
+
+            return combined[:limit]
+        except Exception as e:
+            logger.debug("FTS5 search failed: %s", e)
+            return []
 
 
 def get_context_for_proposal(natural_language: str) -> ShellContext:

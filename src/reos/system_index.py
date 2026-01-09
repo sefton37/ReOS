@@ -78,6 +78,52 @@ class SystemIndexer:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_snapshots_date ON system_snapshots(date DESC)"
         )
+
+        # FTS5 table for full-text package search
+        # Enables queries like: "image editor" → finds "gimp"
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS packages_fts USING fts5(
+                name,
+                description,
+                is_installed,
+                category,
+                tokenize='porter unicode61'
+            )
+            """
+        )
+
+        # Desktop applications table for GUI app metadata
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS desktop_apps (
+                desktop_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                generic_name TEXT,
+                comment TEXT,
+                exec_cmd TEXT,
+                icon TEXT,
+                categories TEXT,
+                keywords TEXT,
+                indexed_at TEXT NOT NULL
+            )
+            """
+        )
+
+        # FTS5 for desktop apps
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS desktop_apps_fts USING fts5(
+                desktop_id,
+                name,
+                generic_name,
+                comment,
+                keywords,
+                tokenize='porter unicode61'
+            )
+            """
+        )
+
         conn.commit()
 
     def needs_refresh(self) -> bool:
@@ -172,6 +218,12 @@ class SystemIndexer:
 
         # Store in database
         self._store_snapshot(snapshot)
+
+        # Index for FTS5 search (packages + desktop apps)
+        logger.info("Indexing packages and desktop apps for FTS5 search...")
+        pkg_count = self.index_packages_fts(snapshot.packages)
+        app_count = self.index_desktop_apps()
+        logger.info("FTS5 indexed: %d packages, %d desktop apps", pkg_count, app_count)
 
         logger.info("System snapshot captured: %s", snapshot_id)
         return snapshot
@@ -378,10 +430,11 @@ class SystemIndexer:
             return []
 
     def _get_packages(self) -> dict[str, Any]:
-        """Get ALL installed packages."""
+        """Get ALL installed packages with descriptions for FTS5 indexing."""
         info: dict[str, Any] = {
             "manager": None,
             "installed": [],  # Full list of installed packages
+            "with_descriptions": [],  # List of (name, description) tuples
             "total_count": 0,
         }
 
@@ -392,42 +445,330 @@ class SystemIndexer:
             if pm is None:
                 return info
 
-            # Get full package list based on package manager
-            list_cmds = {
-                "apt": ["dpkg-query", "-W", "-f=${Package}\n"],
-                "dnf": ["rpm", "-qa", "--qf", "%{NAME}\n"],
-                "yum": ["rpm", "-qa", "--qf", "%{NAME}\n"],
-                "pacman": ["pacman", "-Qq"],
-                "zypper": ["rpm", "-qa", "--qf", "%{NAME}\n"],
-                "apk": ["apk", "list", "-I"],
-            }
-
-            if pm in list_cmds:
+            # Get full package list with descriptions based on package manager
+            if pm == "apt":
+                # dpkg-query with description (first line only)
                 try:
                     result = subprocess.run(
-                        list_cmds[pm],
+                        ["dpkg-query", "-W", "-f=${Package}\t${Description}\n"],
                         capture_output=True,
                         text=True,
-                        timeout=60,
+                        timeout=120,
                     )
                     if result.returncode == 0:
                         packages = []
+                        with_desc = []
                         for line in result.stdout.strip().splitlines():
-                            pkg = line.strip()
-                            if pkg:
-                                # For apk, strip version info
-                                if pm == "apk" and " " in pkg:
-                                    pkg = pkg.split()[0]
-                                packages.append(pkg)
+                            if "\t" in line:
+                                name, desc = line.split("\t", 1)
+                                name = name.strip()
+                                # Take only first line of description
+                                desc = desc.split("\n")[0].strip()
+                                if name:
+                                    packages.append(name)
+                                    with_desc.append((name, desc))
+                            else:
+                                name = line.strip()
+                                if name:
+                                    packages.append(name)
+                                    with_desc.append((name, ""))
                         info["installed"] = sorted(packages)
+                        info["with_descriptions"] = with_desc
                         info["total_count"] = len(packages)
                 except Exception as e:
-                    logger.debug("Could not list packages: %s", e)
+                    logger.debug("Could not list packages with descriptions: %s", e)
+
+            else:
+                # Other package managers: just get names (fallback)
+                list_cmds = {
+                    "dnf": ["rpm", "-qa", "--qf", "%{NAME}\n"],
+                    "yum": ["rpm", "-qa", "--qf", "%{NAME}\n"],
+                    "pacman": ["pacman", "-Qq"],
+                    "zypper": ["rpm", "-qa", "--qf", "%{NAME}\n"],
+                    "apk": ["apk", "list", "-I"],
+                }
+
+                if pm in list_cmds:
+                    try:
+                        result = subprocess.run(
+                            list_cmds[pm],
+                            capture_output=True,
+                            text=True,
+                            timeout=60,
+                        )
+                        if result.returncode == 0:
+                            packages = []
+                            for line in result.stdout.strip().splitlines():
+                                pkg = line.strip()
+                                if pkg:
+                                    # For apk, strip version info
+                                    if pm == "apk" and " " in pkg:
+                                        pkg = pkg.split()[0]
+                                    packages.append(pkg)
+                            info["installed"] = sorted(packages)
+                            info["with_descriptions"] = [(p, "") for p in packages]
+                            info["total_count"] = len(packages)
+                    except Exception as e:
+                        logger.debug("Could not list packages: %s", e)
 
         except Exception as e:
             logger.debug("Could not get package info: %s", e)
 
         return info
+
+    def index_packages_fts(self, packages_info: dict[str, Any]) -> int:
+        """Populate the FTS5 packages table with package descriptions.
+
+        Args:
+            packages_info: Output from _get_packages()
+
+        Returns:
+            Number of packages indexed
+        """
+        with_desc = packages_info.get("with_descriptions", [])
+        if not with_desc:
+            return 0
+
+        conn = self._db.connect()
+        try:
+            # Clear existing entries
+            conn.execute("DELETE FROM packages_fts")
+
+            # Insert all packages
+            for name, description in with_desc:
+                conn.execute(
+                    "INSERT INTO packages_fts (name, description, is_installed, category) VALUES (?, ?, ?, ?)",
+                    (name, description, "yes", ""),
+                )
+
+            conn.commit()
+            logger.info("Indexed %d packages in FTS5", len(with_desc))
+            return len(with_desc)
+        except Exception as e:
+            logger.error("Failed to index packages in FTS5: %s", e)
+            conn.rollback()
+            return 0
+
+    def search_packages(self, query: str, limit: int = 10) -> list[dict[str, str]]:
+        """Search packages using FTS5 full-text search.
+
+        Args:
+            query: Search query (e.g., "image editor", "web browser")
+            limit: Maximum results to return
+
+        Returns:
+            List of matching packages with name and description
+        """
+        if not query or not query.strip():
+            return []
+
+        try:
+            # Convert multi-word query to OR query for better matches
+            # "image editor" -> "image OR editor"
+            words = query.strip().split()
+            if len(words) > 1:
+                fts_query = " OR ".join(words)
+            else:
+                fts_query = query
+
+            # FTS5 search with ranking
+            rows = self._db._execute(
+                """
+                SELECT name, description, bm25(packages_fts) as rank
+                FROM packages_fts
+                WHERE packages_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (fts_query, limit),
+            ).fetchall()
+
+            return [{"name": row["name"], "description": row["description"]} for row in rows]
+        except Exception as e:
+            logger.debug("FTS5 search failed: %s", e)
+            return []
+
+    def index_desktop_apps(self) -> int:
+        """Index .desktop files for GUI application search.
+
+        Scans standard locations for .desktop files and indexes their
+        metadata (name, description, keywords) for FTS5 search.
+
+        Returns:
+            Number of desktop apps indexed
+        """
+        import configparser
+        from pathlib import Path
+
+        desktop_dirs = [
+            Path("/usr/share/applications"),
+            Path("/usr/local/share/applications"),
+            Path.home() / ".local/share/applications",
+            Path("/var/lib/flatpak/exports/share/applications"),
+            Path.home() / ".local/share/flatpak/exports/share/applications",
+        ]
+
+        apps: list[dict[str, str]] = []
+        now = datetime.now(UTC).isoformat()
+
+        for app_dir in desktop_dirs:
+            if not app_dir.exists():
+                continue
+
+            for desktop_file in app_dir.glob("*.desktop"):
+                try:
+                    parser = configparser.ConfigParser(interpolation=None)
+                    parser.read(str(desktop_file), encoding="utf-8")
+
+                    if "Desktop Entry" not in parser:
+                        continue
+
+                    entry = parser["Desktop Entry"]
+
+                    # Skip NoDisplay apps
+                    if entry.get("NoDisplay", "").lower() == "true":
+                        continue
+
+                    # Skip non-Application types
+                    if entry.get("Type", "Application") != "Application":
+                        continue
+
+                    app = {
+                        "desktop_id": desktop_file.stem,
+                        "name": entry.get("Name", desktop_file.stem),
+                        "generic_name": entry.get("GenericName", ""),
+                        "comment": entry.get("Comment", ""),
+                        "exec_cmd": entry.get("Exec", ""),
+                        "icon": entry.get("Icon", ""),
+                        "categories": entry.get("Categories", ""),
+                        "keywords": entry.get("Keywords", ""),
+                        "indexed_at": now,
+                    }
+                    apps.append(app)
+                except Exception as e:
+                    logger.debug("Failed to parse %s: %s", desktop_file, e)
+
+        if not apps:
+            return 0
+
+        conn = self._db.connect()
+        try:
+            # Clear existing entries
+            conn.execute("DELETE FROM desktop_apps")
+            conn.execute("DELETE FROM desktop_apps_fts")
+
+            for app in apps:
+                # Insert into regular table
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO desktop_apps
+                    (desktop_id, name, generic_name, comment, exec_cmd, icon, categories, keywords, indexed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        app["desktop_id"],
+                        app["name"],
+                        app["generic_name"],
+                        app["comment"],
+                        app["exec_cmd"],
+                        app["icon"],
+                        app["categories"],
+                        app["keywords"],
+                        app["indexed_at"],
+                    ),
+                )
+
+                # Insert into FTS5 table
+                conn.execute(
+                    """
+                    INSERT INTO desktop_apps_fts
+                    (desktop_id, name, generic_name, comment, keywords)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        app["desktop_id"],
+                        app["name"],
+                        app["generic_name"],
+                        app["comment"],
+                        app["keywords"],
+                    ),
+                )
+
+            conn.commit()
+            logger.info("Indexed %d desktop applications", len(apps))
+            return len(apps)
+        except Exception as e:
+            logger.error("Failed to index desktop apps: %s", e)
+            conn.rollback()
+            return 0
+
+    def search_desktop_apps(self, query: str, limit: int = 10) -> list[dict[str, str]]:
+        """Search desktop applications using FTS5.
+
+        Args:
+            query: Search query (e.g., "image editor", "web browser")
+            limit: Maximum results to return
+
+        Returns:
+            List of matching apps with name, comment, and exec command
+        """
+        if not query or not query.strip():
+            return []
+
+        try:
+            # Convert multi-word query to OR query for better matches
+            words = query.strip().split()
+            if len(words) > 1:
+                fts_query = " OR ".join(words)
+            else:
+                fts_query = query
+
+            rows = self._db._execute(
+                """
+                SELECT
+                    da.desktop_id,
+                    da.name,
+                    da.generic_name,
+                    da.comment,
+                    da.exec_cmd,
+                    bm25(desktop_apps_fts) as rank
+                FROM desktop_apps_fts
+                JOIN desktop_apps da ON da.desktop_id = desktop_apps_fts.desktop_id
+                WHERE desktop_apps_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (fts_query, limit),
+            ).fetchall()
+
+            return [
+                {
+                    "desktop_id": row["desktop_id"],
+                    "name": row["name"],
+                    "generic_name": row["generic_name"],
+                    "comment": row["comment"],
+                    "exec_cmd": row["exec_cmd"],
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.debug("Desktop apps FTS5 search failed: %s", e)
+            return []
+
+    def search_all(self, query: str, limit: int = 5) -> dict[str, list[dict[str, str]]]:
+        """Search both packages and desktop apps.
+
+        Args:
+            query: Search query
+            limit: Maximum results per category
+
+        Returns:
+            Dict with "packages" and "desktop_apps" results
+        """
+        return {
+            "packages": self.search_packages(query, limit),
+            "desktop_apps": self.search_desktop_apps(query, limit),
+        }
 
     def _get_containers(self) -> dict[str, Any]:
         """Get container runtime, ALL containers, and ALL images."""
