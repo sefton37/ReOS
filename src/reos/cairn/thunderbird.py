@@ -6,8 +6,11 @@ Thunderbird remains the source of truth - we just read from it.
 
 from __future__ import annotations
 
+import configparser
 import logging
 import os
+import re
+import shutil
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -15,6 +18,333 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Multi-Profile Discovery Types
+# =============================================================================
+
+
+@dataclass
+class ThunderbirdAccount:
+    """An email account within a Thunderbird profile."""
+
+    id: str  # Internal account ID (e.g., "account1")
+    name: str  # Display name
+    email: str  # Primary email address
+    type: str  # "imap", "pop3", "local", "rss"
+    server: str | None = None  # Server hostname
+    calendars: list[str] = field(default_factory=list)  # Calendar IDs
+    address_books: list[str] = field(default_factory=list)  # Address book IDs
+
+
+@dataclass
+class ThunderbirdProfile:
+    """A discovered Thunderbird profile."""
+
+    name: str  # Profile name (e.g., "default", "work")
+    path: Path  # Full path to profile directory
+    is_default: bool  # Is this the default profile?
+    accounts: list[ThunderbirdAccount] = field(default_factory=list)
+
+
+@dataclass
+class ThunderbirdIntegration:
+    """Full Thunderbird integration state."""
+
+    installed: bool  # Is Thunderbird installed?
+    install_suggestion: str | None = None  # Install command if not installed
+    profiles: list[ThunderbirdProfile] = field(default_factory=list)
+    active_profiles: list[str] = field(default_factory=list)  # Profile names enabled
+    declined: bool = False  # User declined integration
+    declined_at: datetime | None = None
+
+
+def check_thunderbird_installation() -> tuple[bool, str | None]:
+    """Check if Thunderbird is installed.
+
+    Returns:
+        Tuple of (installed, install_suggestion).
+    """
+    # Check common Thunderbird executable locations
+    thunderbird_paths = [
+        "/usr/bin/thunderbird",
+        "/snap/bin/thunderbird",
+        "/usr/bin/thunderbird-esr",
+    ]
+
+    # Check if thunderbird is in PATH
+    if shutil.which("thunderbird"):
+        return True, None
+
+    # Check common paths
+    for path in thunderbird_paths:
+        if Path(path).exists():
+            return True, None
+
+    # Not installed - provide install suggestions based on distro
+    # Try to detect package manager
+    if shutil.which("apt"):
+        return False, "sudo apt install thunderbird"
+    elif shutil.which("dnf"):
+        return False, "sudo dnf install thunderbird"
+    elif shutil.which("pacman"):
+        return False, "sudo pacman -S thunderbird"
+    elif shutil.which("snap"):
+        return False, "sudo snap install thunderbird"
+    elif shutil.which("flatpak"):
+        return False, "flatpak install flathub org.mozilla.Thunderbird"
+    else:
+        return False, "Install Thunderbird from your package manager or https://www.thunderbird.net/"
+
+
+def _get_thunderbird_base_paths() -> list[Path]:
+    """Get possible Thunderbird profile base paths.
+
+    Returns:
+        List of paths to check for profiles.ini.
+    """
+    home = Path.home()
+    return [
+        # Snap installation (Ubuntu/Linux)
+        home / "snap" / "thunderbird" / "common" / ".thunderbird",
+        # Flatpak installation
+        home / ".var" / "app" / "org.mozilla.Thunderbird" / ".thunderbird",
+        # Standard Linux
+        home / ".thunderbird",
+        # macOS
+        home / "Library" / "Thunderbird" / "Profiles",
+        # Windows
+        Path(os.environ.get("APPDATA", "")) / "Thunderbird" / "Profiles",
+    ]
+
+
+def discover_all_profiles() -> list[ThunderbirdProfile]:
+    """Discover all Thunderbird profiles on the system.
+
+    Parses profiles.ini to find all configured profiles.
+
+    Returns:
+        List of discovered profiles with their accounts.
+    """
+    profiles: list[ThunderbirdProfile] = []
+
+    for base_path in _get_thunderbird_base_paths():
+        if not base_path.exists():
+            continue
+
+        profiles_ini = base_path / "profiles.ini"
+        if not profiles_ini.exists():
+            # Fall back to directory-based detection
+            for item in base_path.iterdir():
+                if item.is_dir() and (
+                    item.name.endswith(".default")
+                    or item.name.endswith(".default-release")
+                ):
+                    profile = ThunderbirdProfile(
+                        name=item.name.split(".")[0],
+                        path=item,
+                        is_default=True,
+                        accounts=[],
+                    )
+                    # Get accounts for this profile
+                    profile.accounts = get_accounts_in_profile(item)
+                    profiles.append(profile)
+            continue
+
+        # Parse profiles.ini using configparser
+        try:
+            config = configparser.ConfigParser()
+            config.read(profiles_ini)
+
+            for section in config.sections():
+                if not section.startswith("Profile"):
+                    continue
+
+                name = config.get(section, "Name", fallback="unknown")
+                path_value = config.get(section, "Path", fallback=None)
+                is_relative = config.getboolean(section, "IsRelative", fallback=True)
+                is_default = config.getboolean(section, "Default", fallback=False)
+
+                if path_value is None:
+                    continue
+
+                if is_relative:
+                    profile_path = base_path / path_value
+                else:
+                    profile_path = Path(path_value)
+
+                if not profile_path.exists():
+                    logger.debug("Profile path does not exist: %s", profile_path)
+                    continue
+
+                profile = ThunderbirdProfile(
+                    name=name,
+                    path=profile_path,
+                    is_default=is_default,
+                    accounts=[],
+                )
+                # Get accounts for this profile
+                profile.accounts = get_accounts_in_profile(profile_path)
+                profiles.append(profile)
+
+        except Exception as e:
+            logger.warning("Failed to parse profiles.ini at %s: %s", profiles_ini, e)
+
+    return profiles
+
+
+def get_accounts_in_profile(profile_path: Path) -> list[ThunderbirdAccount]:
+    """Extract all email accounts from a Thunderbird profile.
+
+    Parses prefs.js to find mail.account.* entries.
+
+    Args:
+        profile_path: Path to the profile directory.
+
+    Returns:
+        List of accounts in the profile.
+    """
+    accounts: list[ThunderbirdAccount] = []
+    prefs_file = profile_path / "prefs.js"
+
+    if not prefs_file.exists():
+        return accounts
+
+    try:
+        content = prefs_file.read_text(errors="replace")
+
+        # Extract account IDs from mail.accountmanager.accounts
+        # Format: user_pref("mail.accountmanager.accounts", "account1,account2");
+        accounts_match = re.search(
+            r'user_pref\("mail\.accountmanager\.accounts",\s*"([^"]+)"\);',
+            content,
+        )
+
+        if not accounts_match:
+            return accounts
+
+        account_ids = accounts_match.group(1).split(",")
+
+        for account_id in account_ids:
+            account_id = account_id.strip()
+            if not account_id:
+                continue
+
+            # Get identity for this account
+            # Format: user_pref("mail.account.account1.identities", "id1");
+            identity_match = re.search(
+                rf'user_pref\("mail\.account\.{account_id}\.identities",\s*"([^"]+)"\);',
+                content,
+            )
+
+            # Get server for this account
+            # Format: user_pref("mail.account.account1.server", "server1");
+            server_match = re.search(
+                rf'user_pref\("mail\.account\.{account_id}\.server",\s*"([^"]+)"\);',
+                content,
+            )
+
+            email = ""
+            name = account_id
+            server_type = "unknown"
+            server_host = None
+
+            # Get email from identity
+            if identity_match:
+                identity_id = identity_match.group(1).split(",")[0].strip()
+                email_match = re.search(
+                    rf'user_pref\("mail\.identity\.{identity_id}\.useremail",\s*"([^"]+)"\);',
+                    content,
+                )
+                if email_match:
+                    email = email_match.group(1)
+
+                name_match = re.search(
+                    rf'user_pref\("mail\.identity\.{identity_id}\.fullName",\s*"([^"]+)"\);',
+                    content,
+                )
+                if name_match:
+                    name = name_match.group(1)
+
+            # Get server type and hostname
+            if server_match:
+                server_id = server_match.group(1).strip()
+                type_match = re.search(
+                    rf'user_pref\("mail\.server\.{server_id}\.type",\s*"([^"]+)"\);',
+                    content,
+                )
+                if type_match:
+                    server_type = type_match.group(1)
+
+                host_match = re.search(
+                    rf'user_pref\("mail\.server\.{server_id}\.hostname",\s*"([^"]+)"\);',
+                    content,
+                )
+                if host_match:
+                    server_host = host_match.group(1)
+
+            # Get calendars (from calendar-data directory)
+            calendars: list[str] = []
+            calendar_data = profile_path / "calendar-data"
+            if calendar_data.exists():
+                # Each .sqlite file is a calendar
+                for cal_file in calendar_data.glob("*.sqlite"):
+                    calendars.append(cal_file.stem)
+
+            # Get address books
+            address_books: list[str] = []
+            abook_path = profile_path / "abook.sqlite"
+            if abook_path.exists():
+                address_books.append("abook")
+            # Check for additional address books
+            for abook_file in profile_path.glob("abook-*.sqlite"):
+                address_books.append(abook_file.stem)
+
+            account = ThunderbirdAccount(
+                id=account_id,
+                name=name,
+                email=email,
+                type=server_type,
+                server=server_host,
+                calendars=calendars,
+                address_books=address_books,
+            )
+            accounts.append(account)
+
+    except Exception as e:
+        logger.warning("Failed to parse prefs.js at %s: %s", prefs_file, e)
+
+    return accounts
+
+
+def get_thunderbird_integration_state() -> ThunderbirdIntegration:
+    """Get full Thunderbird integration state.
+
+    Returns:
+        ThunderbirdIntegration with installation status and discovered profiles.
+    """
+    installed, install_suggestion = check_thunderbird_installation()
+
+    if not installed:
+        return ThunderbirdIntegration(
+            installed=False,
+            install_suggestion=install_suggestion,
+            profiles=[],
+        )
+
+    profiles = discover_all_profiles()
+
+    return ThunderbirdIntegration(
+        installed=True,
+        install_suggestion=None,
+        profiles=profiles,
+    )
+
+
+# =============================================================================
+# Original Types (preserved for compatibility)
+# =============================================================================
 
 
 @dataclass

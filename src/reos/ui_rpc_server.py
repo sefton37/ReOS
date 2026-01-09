@@ -3882,6 +3882,118 @@ def _handle_cairn_thunderbird_status(_db: Database) -> dict[str, Any]:
     }
 
 
+def _handle_thunderbird_check(db: Database) -> dict[str, Any]:
+    """Check Thunderbird installation and discover profiles."""
+    from .cairn.thunderbird import (
+        get_thunderbird_integration_state,
+        ThunderbirdProfile,
+        ThunderbirdAccount,
+    )
+    from .cairn.store import CairnStore
+
+    # Get integration state from Thunderbird
+    integration = get_thunderbird_integration_state()
+
+    # Get stored preferences
+    play_path = get_current_play_path(db)
+    if play_path:
+        store = CairnStore(Path(play_path) / ".cairn" / "cairn.db")
+        stored_state = store.get_integration_state("thunderbird")
+    else:
+        stored_state = None
+
+    # Determine integration state
+    if stored_state and stored_state["state"] == "declined":
+        state = "declined"
+    elif stored_state and stored_state["state"] == "active":
+        state = "active"
+    else:
+        state = "not_configured"
+
+    # Serialize profiles
+    def serialize_account(acc: ThunderbirdAccount) -> dict:
+        return {
+            "id": acc.id,
+            "name": acc.name,
+            "email": acc.email,
+            "type": acc.type,
+            "server": acc.server,
+            "calendars": acc.calendars,
+            "address_books": acc.address_books,
+        }
+
+    def serialize_profile(prof: ThunderbirdProfile) -> dict:
+        return {
+            "name": prof.name,
+            "path": str(prof.path),
+            "is_default": prof.is_default,
+            "accounts": [serialize_account(a) for a in prof.accounts],
+        }
+
+    return {
+        "installed": integration.installed,
+        "install_suggestion": integration.install_suggestion,
+        "profiles": [serialize_profile(p) for p in integration.profiles],
+        "integration_state": state,
+        "active_profiles": stored_state["config"].get("active_profiles", []) if stored_state and stored_state["config"] else [],
+    }
+
+
+def _handle_thunderbird_configure(
+    db: Database,
+    *,
+    active_profiles: list[str],
+    active_accounts: list[str] | None = None,
+    all_active: bool = False,
+) -> dict[str, Any]:
+    """Configure Thunderbird integration."""
+    from .cairn.store import CairnStore
+
+    play_path = get_current_play_path(db)
+    if not play_path:
+        raise RpcError(code=-32000, message="No Play path configured")
+
+    store = CairnStore(Path(play_path) / ".cairn" / "cairn.db")
+
+    config = {
+        "active_profiles": active_profiles,
+        "active_accounts": active_accounts or [],
+        "all_active": all_active,
+    }
+
+    store.set_integration_active("thunderbird", config)
+
+    return {"success": True, "config": config}
+
+
+def _handle_thunderbird_decline(db: Database) -> dict[str, Any]:
+    """Mark Thunderbird integration as declined (never ask again)."""
+    from .cairn.store import CairnStore
+
+    play_path = get_current_play_path(db)
+    if not play_path:
+        raise RpcError(code=-32000, message="No Play path configured")
+
+    store = CairnStore(Path(play_path) / ".cairn" / "cairn.db")
+    store.set_integration_declined("thunderbird")
+
+    return {"success": True}
+
+
+def _handle_thunderbird_reset(db: Database) -> dict[str, Any]:
+    """Reset Thunderbird integration (re-enable prompts)."""
+    from .cairn.store import CairnStore
+
+    play_path = get_current_play_path(db)
+    if not play_path:
+        raise RpcError(code=-32000, message="No Play path configured")
+
+    store = CairnStore(Path(play_path) / ".cairn" / "cairn.db")
+    store.clear_integration_decline("thunderbird")
+
+    return {"success": True}
+
+
 # -------------------------------------------------------------------------
 # Safety & Security Settings
 # -------------------------------------------------------------------------
@@ -5707,6 +5819,33 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
 
         if method == "cairn/thunderbird/status":
             return _jsonrpc_result(req_id=req_id, result=_handle_cairn_thunderbird_status(db))
+
+        if method == "thunderbird/check":
+            return _jsonrpc_result(req_id=req_id, result=_handle_thunderbird_check(db))
+
+        if method == "thunderbird/configure":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            active_profiles = params.get("active_profiles", [])
+            if not isinstance(active_profiles, list):
+                raise RpcError(code=-32602, message="active_profiles must be a list")
+            active_accounts = params.get("active_accounts")
+            all_active = params.get("all_active", False)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_thunderbird_configure(
+                    db,
+                    active_profiles=active_profiles,
+                    active_accounts=active_accounts,
+                    all_active=all_active,
+                ),
+            )
+
+        if method == "thunderbird/decline":
+            return _jsonrpc_result(req_id=req_id, result=_handle_thunderbird_decline(db))
+
+        if method == "thunderbird/reset":
+            return _jsonrpc_result(req_id=req_id, result=_handle_thunderbird_reset(db))
 
         # -------------------------------------------------------------------------
         # Safety & Security Settings

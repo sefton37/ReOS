@@ -234,43 +234,151 @@ export function createCairnView(
   `;
   chatMessages.appendChild(welcomeMsg);
 
-  // Thunderbird integration prompt (shown if not connected)
+  // Thunderbird integration prompt (shown if not connected and not declined)
   const thunderbirdPrompt = el('div');
   thunderbirdPrompt.style.cssText = `
-    background: rgba(245, 158, 11, 0.1);
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
     border-radius: 12px;
     padding: 16px;
     color: rgba(255,255,255,0.9);
     display: none;
   `;
-  thunderbirdPrompt.innerHTML = `
-    <div style="display: flex; align-items: flex-start; gap: 12px;">
-      <span style="font-size: 24px;">📧</span>
-      <div style="flex: 1;">
-        <div style="font-weight: 600; margin-bottom: 6px; color: #f59e0b;">Connect Thunderbird?</div>
-        <div style="font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.7); margin-bottom: 12px;">
-          CAIRN can integrate with Thunderbird to help manage your calendar events and contacts.
-          This enables time-aware surfacing and contact-linked knowledge items.
-        </div>
-        <div style="font-size: 12px; color: rgba(255,255,255,0.5);">
-          Install <a href="https://www.thunderbird.net" target="_blank" style="color: #60a5fa;">Thunderbird</a> and create a profile to enable this feature.
-        </div>
-      </div>
-    </div>
-  `;
   chatMessages.appendChild(thunderbirdPrompt);
+
+  // Interface for Thunderbird check result
+  interface ThunderbirdCheckResult {
+    installed: boolean;
+    install_suggestion: string | null;
+    profiles: Array<{ name: string; accounts: Array<{ email: string }> }>;
+    integration_state: 'not_configured' | 'active' | 'declined';
+    active_profiles: string[];
+  }
+
+  // Update Thunderbird prompt content based on state
+  function updateThunderbirdPrompt(status: ThunderbirdCheckResult) {
+    // Don't show if declined or active
+    if (status.integration_state === 'declined' || status.integration_state === 'active') {
+      thunderbirdPrompt.style.display = 'none';
+      return;
+    }
+
+    const profileCount = status.profiles.length;
+    const accountCount = status.profiles.reduce((sum, p) => sum + p.accounts.length, 0);
+
+    if (!status.installed) {
+      // Not installed - show install guide
+      thunderbirdPrompt.style.background = 'rgba(245, 158, 11, 0.1)';
+      thunderbirdPrompt.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+      thunderbirdPrompt.innerHTML = `
+        <div style="display: flex; align-items: flex-start; gap: 12px;">
+          <span style="font-size: 24px;">📅</span>
+          <div style="flex: 1;">
+            <div style="font-weight: 600; margin-bottom: 6px; color: #f59e0b;">Connect Your Calendar & Contacts</div>
+            <div style="font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.7); margin-bottom: 12px;">
+              Thunderbird isn't installed yet. I can help you track appointments and know who you're working with.
+            </div>
+            <div style="font-size: 12px; color: rgba(255,255,255,0.5); margin-bottom: 12px; font-family: monospace; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px;">
+              ${status.install_suggestion || 'Install Thunderbird from your package manager'}
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="tb-dismiss" style="padding: 8px 16px; background: rgba(255,255,255,0.1); border: none; border-radius: 6px; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 12px;">Not now</button>
+              <button class="tb-never" style="padding: 8px 16px; background: none; border: none; color: rgba(255,255,255,0.4); cursor: pointer; font-size: 12px;">Never ask again</button>
+            </div>
+          </div>
+        </div>
+      `;
+    } else {
+      // Installed but not configured
+      thunderbirdPrompt.style.background = 'rgba(59, 130, 246, 0.1)';
+      thunderbirdPrompt.style.borderColor = 'rgba(59, 130, 246, 0.3)';
+      thunderbirdPrompt.innerHTML = `
+        <div style="display: flex; align-items: flex-start; gap: 12px;">
+          <span style="font-size: 24px;">📅</span>
+          <div style="flex: 1;">
+            <div style="font-weight: 600; margin-bottom: 6px; color: #3b82f6;">Connect Your Calendar & Contacts</div>
+            <div style="font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.7); margin-bottom: 12px;">
+              ${profileCount > 0
+                ? `Found ${profileCount} profile${profileCount > 1 ? 's' : ''} with ${accountCount} account${accountCount > 1 ? 's' : ''}. Connect to enable time-aware surfacing.`
+                : 'Connect Thunderbird to help me track your calendar and contacts.'}
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="tb-connect" style="padding: 8px 16px; background: #3b82f6; border: none; border-radius: 6px; color: #fff; cursor: pointer; font-size: 12px; font-weight: 500;">Connect${profileCount > 0 ? ' All' : ''}</button>
+              <button class="tb-dismiss" style="padding: 8px 16px; background: rgba(255,255,255,0.1); border: none; border-radius: 6px; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 12px;">Not now</button>
+              <button class="tb-never" style="padding: 8px 16px; background: none; border: none; color: rgba(255,255,255,0.4); cursor: pointer; font-size: 12px;">Never ask again</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Add event listeners
+    const connectBtn = thunderbirdPrompt.querySelector('.tb-connect');
+    const dismissBtn = thunderbirdPrompt.querySelector('.tb-dismiss');
+    const neverBtn = thunderbirdPrompt.querySelector('.tb-never');
+
+    if (connectBtn) {
+      connectBtn.addEventListener('click', async () => {
+        try {
+          const profileNames = status.profiles.map(p => p.name);
+          await callbacks.kernelRequest('thunderbird/configure', {
+            active_profiles: profileNames,
+            all_active: true,
+          });
+          thunderbirdPrompt.style.display = 'none';
+        } catch (e) {
+          console.error('Failed to connect Thunderbird:', e);
+        }
+      });
+    }
+
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', () => {
+        thunderbirdPrompt.style.display = 'none';
+      });
+    }
+
+    if (neverBtn) {
+      neverBtn.addEventListener('click', async () => {
+        try {
+          await callbacks.kernelRequest('thunderbird/decline', {});
+          thunderbirdPrompt.style.display = 'none';
+        } catch (e) {
+          console.error('Failed to decline Thunderbird:', e);
+        }
+      });
+    }
+
+    thunderbirdPrompt.style.display = 'block';
+  }
 
   // Check Thunderbird status on load
   void (async () => {
     try {
-      const status = await callbacks.kernelRequest('cairn/thunderbird/status', {}) as { available: boolean; message?: string };
-      if (!status.available) {
-        thunderbirdPrompt.style.display = 'block';
-      }
+      const status = await callbacks.kernelRequest('thunderbird/check', {}) as ThunderbirdCheckResult;
+      updateThunderbirdPrompt(status);
     } catch (e) {
-      // Silently ignore - Thunderbird check is optional
-      console.log('Thunderbird status check failed:', e);
+      // Fall back to old status check
+      try {
+        const oldStatus = await callbacks.kernelRequest('cairn/thunderbird/status', {}) as { available: boolean };
+        if (!oldStatus.available) {
+          // Show simple prompt for backwards compatibility
+          thunderbirdPrompt.innerHTML = `
+            <div style="display: flex; align-items: flex-start; gap: 12px;">
+              <span style="font-size: 24px;">📧</span>
+              <div style="flex: 1;">
+                <div style="font-weight: 600; margin-bottom: 6px; color: #f59e0b;">Connect Thunderbird?</div>
+                <div style="font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.7);">
+                  CAIRN can integrate with Thunderbird to help manage your calendar events and contacts.
+                </div>
+              </div>
+            </div>
+          `;
+          thunderbirdPrompt.style.display = 'block';
+        }
+      } catch {
+        console.log('Thunderbird status check failed:', e);
+      }
     }
   })();
 

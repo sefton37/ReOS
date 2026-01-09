@@ -591,6 +591,57 @@ class CairnSurfacer:
         return deduped[:max_items]
 
 
+def get_integration_context(store_path: Path | None = None) -> str:
+    """Get context about integrations for LLM system prompts.
+
+    This enables CAIRN to naturally discuss integration status in conversation.
+
+    Args:
+        store_path: Path to the CAIRN store. If None, returns generic message.
+
+    Returns:
+        Context string describing integration state.
+    """
+    if store_path is None:
+        return "Integration status unknown."
+
+    try:
+        from reos.cairn.store import CairnStore
+
+        store = CairnStore(store_path)
+        thunderbird_state = store.get_integration_state("thunderbird")
+
+        if thunderbird_state is None or thunderbird_state["state"] == "not_configured":
+            return (
+                "Thunderbird is not connected. "
+                "The user can say 'connect Thunderbird' or 'set up calendar' to configure it. "
+                "This will enable calendar events and contact awareness."
+            )
+
+        if thunderbird_state["state"] == "declined":
+            return (
+                "The user has declined Thunderbird integration. "
+                "Do not suggest connecting it unless they ask about calendar or contacts. "
+                "They can re-enable it in Settings > Integrations."
+            )
+
+        if thunderbird_state["state"] == "active":
+            config = thunderbird_state.get("config", {})
+            active_profiles = config.get("active_profiles", []) if config else []
+            profile_count = len(active_profiles)
+            return (
+                f"Thunderbird is connected with {profile_count} profile(s). "
+                "Calendar events and contacts are available for surfacing. "
+                "You can reference the user's upcoming events and linked contacts."
+            )
+
+        return "Integration status unknown."
+
+    except Exception as e:
+        logger.debug("Failed to get integration context: %s", e)
+        return "Integration status unavailable."
+
+
 def create_surface_context(
     current_act_id: str | None = None,
     time_available: int | None = None,

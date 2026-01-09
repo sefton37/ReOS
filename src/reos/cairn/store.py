@@ -129,6 +129,17 @@ class CairnStore:
                     ON coherence_traces(demand_id);
                 CREATE INDEX IF NOT EXISTS idx_coherence_traces_timestamp
                     ON coherence_traces(timestamp);
+
+                -- Integration preferences (Thunderbird, etc.)
+                CREATE TABLE IF NOT EXISTS integration_preferences (
+                    integration_id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL DEFAULT 'not_configured',
+                    config_json TEXT,
+                    declined_at TEXT,
+                    last_prompted TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
             """)
 
     # =========================================================================
@@ -1082,3 +1093,203 @@ class CairnStore:
                 (user_choice, trace_id),
             )
             return cursor.rowcount > 0
+
+    # =========================================================================
+    # Integration Preferences
+    # =========================================================================
+
+    def get_integration_state(self, integration_id: str) -> dict | None:
+        """Get integration state by ID.
+
+        Args:
+            integration_id: The integration identifier (e.g., "thunderbird").
+
+        Returns:
+            Integration state dict, or None if not configured.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM integration_preferences WHERE integration_id = ?",
+                (integration_id,),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            config = None
+            if row["config_json"]:
+                try:
+                    config = json.loads(row["config_json"])
+                except json.JSONDecodeError:
+                    pass
+
+            return {
+                "integration_id": row["integration_id"],
+                "state": row["state"],
+                "config": config,
+                "declined_at": row["declined_at"],
+                "last_prompted": row["last_prompted"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+
+    def set_integration_active(
+        self,
+        integration_id: str,
+        config: dict,
+    ) -> None:
+        """Set an integration as active with configuration.
+
+        Args:
+            integration_id: The integration identifier.
+            config: Configuration dict (e.g., active_profiles, active_accounts).
+        """
+        now = datetime.now().isoformat()
+
+        with self._get_connection() as conn:
+            # Check if exists
+            existing = conn.execute(
+                "SELECT integration_id FROM integration_preferences WHERE integration_id = ?",
+                (integration_id,),
+            ).fetchone()
+
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE integration_preferences
+                    SET state = 'active',
+                        config_json = ?,
+                        declined_at = NULL,
+                        updated_at = ?
+                    WHERE integration_id = ?
+                    """,
+                    (json.dumps(config), now, integration_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO integration_preferences (
+                        integration_id, state, config_json, created_at, updated_at
+                    ) VALUES (?, 'active', ?, ?, ?)
+                    """,
+                    (integration_id, json.dumps(config), now, now),
+                )
+
+    def set_integration_declined(self, integration_id: str) -> None:
+        """Mark an integration as declined (user chose 'Never ask again').
+
+        Args:
+            integration_id: The integration identifier.
+        """
+        now = datetime.now().isoformat()
+
+        with self._get_connection() as conn:
+            # Check if exists
+            existing = conn.execute(
+                "SELECT integration_id FROM integration_preferences WHERE integration_id = ?",
+                (integration_id,),
+            ).fetchone()
+
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE integration_preferences
+                    SET state = 'declined',
+                        declined_at = ?,
+                        updated_at = ?
+                    WHERE integration_id = ?
+                    """,
+                    (now, now, integration_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO integration_preferences (
+                        integration_id, state, declined_at, created_at, updated_at
+                    ) VALUES (?, 'declined', ?, ?, ?)
+                    """,
+                    (integration_id, now, now, now),
+                )
+
+    def clear_integration_decline(self, integration_id: str) -> bool:
+        """Clear the declined state for an integration (re-enable prompts).
+
+        Args:
+            integration_id: The integration identifier.
+
+        Returns:
+            True if updated, False if not found.
+        """
+        now = datetime.now().isoformat()
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE integration_preferences
+                SET state = 'not_configured',
+                    declined_at = NULL,
+                    config_json = NULL,
+                    updated_at = ?
+                WHERE integration_id = ?
+                """,
+                (now, integration_id),
+            )
+            return cursor.rowcount > 0
+
+    def record_integration_prompt(self, integration_id: str) -> None:
+        """Record that we prompted the user about an integration.
+
+        Args:
+            integration_id: The integration identifier.
+        """
+        now = datetime.now().isoformat()
+
+        with self._get_connection() as conn:
+            # Check if exists
+            existing = conn.execute(
+                "SELECT integration_id FROM integration_preferences WHERE integration_id = ?",
+                (integration_id,),
+            ).fetchone()
+
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE integration_preferences
+                    SET last_prompted = ?, updated_at = ?
+                    WHERE integration_id = ?
+                    """,
+                    (now, now, integration_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO integration_preferences (
+                        integration_id, state, last_prompted, created_at, updated_at
+                    ) VALUES (?, 'not_configured', ?, ?, ?)
+                    """,
+                    (integration_id, now, now, now),
+                )
+
+    def is_integration_declined(self, integration_id: str) -> bool:
+        """Check if an integration was declined by the user.
+
+        Args:
+            integration_id: The integration identifier.
+
+        Returns:
+            True if declined, False otherwise.
+        """
+        state = self.get_integration_state(integration_id)
+        return state is not None and state["state"] == "declined"
+
+    def is_integration_active(self, integration_id: str) -> bool:
+        """Check if an integration is active.
+
+        Args:
+            integration_id: The integration identifier.
+
+        Returns:
+            True if active, False otherwise.
+        """
+        state = self.get_integration_state(integration_id)
+        return state is not None and state["state"] == "active"

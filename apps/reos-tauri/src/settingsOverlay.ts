@@ -9,7 +9,33 @@
 import { kernelRequest } from './kernel';
 import { el } from './dom';
 
-type SettingsTab = 'llm' | 'persona' | 'safety';
+type SettingsTab = 'llm' | 'persona' | 'safety' | 'integrations';
+
+// Thunderbird integration types
+interface ThunderbirdAccount {
+  id: string;
+  name: string;
+  email: string;
+  type: string;
+  server: string | null;
+  calendars: string[];
+  address_books: string[];
+}
+
+interface ThunderbirdProfile {
+  name: string;
+  path: string;
+  is_default: boolean;
+  accounts: ThunderbirdAccount[];
+}
+
+interface ThunderbirdCheckResult {
+  installed: boolean;
+  install_suggestion: string | null;
+  profiles: ThunderbirdProfile[];
+  integration_state: 'not_configured' | 'active' | 'declined';
+  active_profiles: string[];
+}
 
 interface OllamaStatus {
   url: string;
@@ -220,6 +246,9 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
   // Safety state
   let safetySettings: SafetySettings | null = null;
 
+  // Integrations state
+  let thunderbirdStatus: ThunderbirdCheckResult | null = null;
+
   // Create overlay container
   const overlay = el('div');
   overlay.className = 'settings-overlay';
@@ -313,10 +342,12 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
   const llmTab = createTab('llm', 'LLM Provider', '🤖');
   const personaTab = createTab('persona', 'Agent Persona', '🎭');
   const safetyTab = createTab('safety', 'Safety', '🛡️');
+  const integrationsTab = createTab('integrations', 'Integrations', '🔗');
 
   tabsContainer.appendChild(llmTab);
   tabsContainer.appendChild(personaTab);
   tabsContainer.appendChild(safetyTab);
+  tabsContainer.appendChild(integrationsTab);
 
   // Content area
   const content = el('div');
@@ -456,6 +487,13 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
       };
     }
 
+    // Load Thunderbird integration status
+    try {
+      thunderbirdStatus = await kernelRequest('thunderbird/check', {}) as ThunderbirdCheckResult;
+    } catch {
+      thunderbirdStatus = null;
+    }
+
     render();
   }
 
@@ -467,6 +505,8 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
     personaTab.style.borderBottomColor = activeTab === 'persona' ? '#3b82f6' : 'transparent';
     safetyTab.style.color = activeTab === 'safety' ? '#fff' : 'rgba(255,255,255,0.6)';
     safetyTab.style.borderBottomColor = activeTab === 'safety' ? '#3b82f6' : 'transparent';
+    integrationsTab.style.color = activeTab === 'integrations' ? '#fff' : 'rgba(255,255,255,0.6)';
+    integrationsTab.style.borderBottomColor = activeTab === 'integrations' ? '#3b82f6' : 'transparent';
 
     content.innerHTML = '';
 
@@ -474,8 +514,10 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
       renderLLMTab();
     } else if (activeTab === 'persona') {
       renderPersonaTab();
-    } else {
+    } else if (activeTab === 'safety') {
       renderSafetyTab();
+    } else if (activeTab === 'integrations') {
+      renderIntegrationsTab();
     }
   }
 
@@ -2373,6 +2415,319 @@ When executing:
     container.appendChild(descEl);
 
     return container;
+  }
+
+  // ============ Integrations Tab ============
+  function renderIntegrationsTab() {
+    // Header explanation
+    const headerInfo = el('div');
+    headerInfo.style.cssText = `
+      padding: 16px;
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      border-radius: 8px;
+      margin-bottom: 20px;
+    `;
+    headerInfo.innerHTML = `
+      <div style="display: flex; align-items: flex-start; gap: 12px;">
+        <span style="font-size: 24px;">🔗</span>
+        <div>
+          <div style="font-weight: 600; color: #fff; margin-bottom: 4px;">External Integrations</div>
+          <div style="font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.5;">
+            Connect Talking Rock to external applications to enhance your experience.
+            CAIRN can access your calendar and contacts to help you stay organized.
+          </div>
+        </div>
+      </div>
+    `;
+    content.appendChild(headerInfo);
+
+    // Thunderbird Section
+    const thunderbirdSection = createSection('Thunderbird');
+
+    if (!thunderbirdStatus) {
+      const loading = el('div');
+      loading.textContent = 'Loading integration status...';
+      loading.style.cssText = 'color: rgba(255,255,255,0.6); text-align: center; padding: 20px;';
+      thunderbirdSection.appendChild(loading);
+      content.appendChild(thunderbirdSection);
+      return;
+    }
+
+    // Status Card
+    const statusCard = el('div');
+    statusCard.style.cssText = `
+      padding: 16px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      border-left: 3px solid ${getStatusColor(thunderbirdStatus)};
+      margin-bottom: 16px;
+    `;
+
+    const statusHeader = el('div');
+    statusHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;';
+
+    const statusTitle = el('div');
+    statusTitle.innerHTML = `
+      <div style="font-weight: 500; color: #fff; font-size: 14px;">Status</div>
+      <div style="font-size: 12px; color: rgba(255,255,255,0.6);">${getStatusText(thunderbirdStatus)}</div>
+    `;
+
+    const statusBadge = el('div');
+    statusBadge.style.cssText = `
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+      background: ${getStatusColor(thunderbirdStatus)}22;
+      color: ${getStatusColor(thunderbirdStatus)};
+    `;
+    statusBadge.textContent = thunderbirdStatus.integration_state === 'active' ? 'Connected'
+      : thunderbirdStatus.integration_state === 'declined' ? 'Declined'
+      : thunderbirdStatus.installed ? 'Not Connected'
+      : 'Not Installed';
+
+    statusHeader.appendChild(statusTitle);
+    statusHeader.appendChild(statusBadge);
+    statusCard.appendChild(statusHeader);
+
+    // Show profiles if installed
+    if (thunderbirdStatus.installed && thunderbirdStatus.profiles.length > 0) {
+      const profilesInfo = el('div');
+      profilesInfo.style.cssText = 'margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);';
+
+      const totalAccounts = thunderbirdStatus.profiles.reduce((sum, p) => sum + p.accounts.length, 0);
+      const totalCalendars = thunderbirdStatus.profiles.reduce((sum, p) =>
+        sum + p.accounts.reduce((s, a) => s + a.calendars.length, 0), 0);
+      const totalAddressBooks = thunderbirdStatus.profiles.reduce((sum, p) =>
+        sum + p.accounts.reduce((s, a) => s + a.address_books.length, 0), 0);
+
+      profilesInfo.innerHTML = `
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+          <div style="text-align: center;">
+            <div style="font-size: 20px; font-weight: 600; color: #3b82f6;">${thunderbirdStatus.profiles.length}</div>
+            <div style="font-size: 11px; color: rgba(255,255,255,0.5);">Profiles</div>
+          </div>
+          <div style="text-align: center;">
+            <div style="font-size: 20px; font-weight: 600; color: #22c55e;">${totalAccounts}</div>
+            <div style="font-size: 11px; color: rgba(255,255,255,0.5);">Accounts</div>
+          </div>
+          <div style="text-align: center;">
+            <div style="font-size: 20px; font-weight: 600; color: #f59e0b;">${totalCalendars + totalAddressBooks}</div>
+            <div style="font-size: 11px; color: rgba(255,255,255,0.5);">Calendars + Contacts</div>
+          </div>
+        </div>
+      `;
+      statusCard.appendChild(profilesInfo);
+    }
+
+    thunderbirdSection.appendChild(statusCard);
+
+    // Action Buttons
+    const actionsRow = el('div');
+    actionsRow.style.cssText = 'display: flex; gap: 12px; flex-wrap: wrap;';
+
+    if (!thunderbirdStatus.installed) {
+      // Not installed - show install suggestion
+      const installInfo = el('div');
+      installInfo.style.cssText = `
+        width: 100%;
+        padding: 12px;
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.2);
+        border-radius: 8px;
+        margin-bottom: 12px;
+      `;
+      installInfo.innerHTML = `
+        <div style="font-size: 13px; color: rgba(255,255,255,0.8); margin-bottom: 8px;">
+          Thunderbird is not installed. To enable calendar and contact integration:
+        </div>
+        <code style="display: block; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px; font-size: 12px; color: #22c55e;">
+          ${thunderbirdStatus.install_suggestion || 'Install Thunderbird from your package manager'}
+        </code>
+      `;
+      thunderbirdSection.appendChild(installInfo);
+    } else if (thunderbirdStatus.integration_state === 'declined') {
+      // Declined - show re-enable button
+      const reEnableBtn = createButton('Re-enable Prompts', async () => {
+        try {
+          await kernelRequest('thunderbird/reset', {});
+          thunderbirdStatus = await kernelRequest('thunderbird/check', {}) as ThunderbirdCheckResult;
+          render();
+        } catch (e) {
+          console.error('Failed to reset:', e);
+        }
+      }, 'secondary');
+      actionsRow.appendChild(reEnableBtn);
+
+      const declineNote = el('div');
+      declineNote.style.cssText = 'width: 100%; font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 8px;';
+      declineNote.textContent = 'You previously declined Thunderbird integration. Click above to allow CAIRN to offer connection again.';
+      actionsRow.appendChild(declineNote);
+    } else if (thunderbirdStatus.integration_state === 'active') {
+      // Connected - show disconnect button
+      const disconnectBtn = createButton('Disconnect', async () => {
+        if (confirm('Disconnect Thunderbird? CAIRN will no longer access your calendar and contacts.')) {
+          try {
+            await kernelRequest('thunderbird/reset', {});
+            thunderbirdStatus = await kernelRequest('thunderbird/check', {}) as ThunderbirdCheckResult;
+            render();
+          } catch (e) {
+            console.error('Failed to disconnect:', e);
+          }
+        }
+      }, 'danger');
+      actionsRow.appendChild(disconnectBtn);
+
+      // Show connected profiles
+      if (thunderbirdStatus.active_profiles.length > 0) {
+        const connectedInfo = el('div');
+        connectedInfo.style.cssText = 'width: 100%; font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 8px;';
+        connectedInfo.textContent = `Connected profiles: ${thunderbirdStatus.active_profiles.join(', ')}`;
+        actionsRow.appendChild(connectedInfo);
+      }
+    } else {
+      // Not configured - show connect buttons
+      const connectAllBtn = createButton('Connect All', async () => {
+        try {
+          const profileNames = thunderbirdStatus!.profiles.map(p => p.name);
+          await kernelRequest('thunderbird/configure', {
+            active_profiles: profileNames,
+            all_active: true,
+          });
+          thunderbirdStatus = await kernelRequest('thunderbird/check', {}) as ThunderbirdCheckResult;
+          render();
+        } catch (e) {
+          console.error('Failed to connect:', e);
+        }
+      }, 'primary');
+      actionsRow.appendChild(connectAllBtn);
+
+      const declineBtn = createButton('Never Ask Again', async () => {
+        try {
+          await kernelRequest('thunderbird/decline', {});
+          thunderbirdStatus = await kernelRequest('thunderbird/check', {}) as ThunderbirdCheckResult;
+          render();
+        } catch (e) {
+          console.error('Failed to decline:', e);
+        }
+      }, 'secondary');
+      actionsRow.appendChild(declineBtn);
+    }
+
+    thunderbirdSection.appendChild(actionsRow);
+
+    // Profile Details (expandable)
+    if (thunderbirdStatus.installed && thunderbirdStatus.profiles.length > 0) {
+      const detailsSection = el('details');
+      detailsSection.style.cssText = 'margin-top: 16px;';
+
+      const summary = el('summary');
+      summary.textContent = 'View Profile Details';
+      summary.style.cssText = 'cursor: pointer; color: #3b82f6; font-size: 13px; padding: 8px 0;';
+      detailsSection.appendChild(summary);
+
+      const detailsContent = el('div');
+      detailsContent.style.cssText = 'padding: 12px 0;';
+
+      for (const profile of thunderbirdStatus.profiles) {
+        const profileCard = el('div');
+        profileCard.style.cssText = `
+          padding: 12px;
+          background: rgba(0,0,0,0.2);
+          border-radius: 6px;
+          margin-bottom: 8px;
+        `;
+
+        let accountsHtml = '';
+        for (const account of profile.accounts) {
+          accountsHtml += `
+            <div style="margin-left: 16px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <div style="font-size: 13px; color: #fff;">${account.email || account.name}</div>
+              <div style="font-size: 11px; color: rgba(255,255,255,0.5);">
+                ${account.type.toUpperCase()} • ${account.calendars.length} calendar(s) • ${account.address_books.length} address book(s)
+              </div>
+            </div>
+          `;
+        }
+
+        profileCard.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="font-weight: 500; color: #fff;">${profile.name}</div>
+            ${profile.is_default ? '<span style="font-size: 10px; background: #3b82f6; color: #fff; padding: 2px 6px; border-radius: 4px;">Default</span>' : ''}
+          </div>
+          <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 8px;">${profile.path}</div>
+          ${accountsHtml || '<div style="color: rgba(255,255,255,0.4); font-size: 12px; font-style: italic;">No accounts found</div>'}
+        `;
+        detailsContent.appendChild(profileCard);
+      }
+
+      detailsSection.appendChild(detailsContent);
+      thunderbirdSection.appendChild(detailsSection);
+    }
+
+    content.appendChild(thunderbirdSection);
+  }
+
+  function getStatusColor(status: ThunderbirdCheckResult): string {
+    if (!status.installed) return '#ef4444';  // Red
+    if (status.integration_state === 'active') return '#22c55e';  // Green
+    if (status.integration_state === 'declined') return '#f59e0b';  // Amber
+    return '#3b82f6';  // Blue
+  }
+
+  function getStatusText(status: ThunderbirdCheckResult): string {
+    if (!status.installed) return 'Thunderbird is not installed on this system';
+    if (status.integration_state === 'active') return 'Connected and syncing calendar/contacts';
+    if (status.integration_state === 'declined') return 'You chose not to connect Thunderbird';
+    return `Found ${status.profiles.length} profile(s) ready to connect`;
+  }
+
+  function createButton(
+    text: string,
+    onClick: () => Promise<void>,
+    style: 'primary' | 'secondary' | 'danger' = 'primary'
+  ): HTMLButtonElement {
+    const btn = el('button') as HTMLButtonElement;
+    btn.textContent = text;
+
+    const colors = {
+      primary: { bg: '#3b82f6', hover: '#2563eb' },
+      secondary: { bg: '#4b5563', hover: '#374151' },
+      danger: { bg: '#ef4444', hover: '#dc2626' },
+    };
+
+    btn.style.cssText = `
+      padding: 10px 20px;
+      background: ${colors[style].bg};
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    `;
+
+    btn.addEventListener('mouseenter', () => {
+      btn.style.background = colors[style].hover;
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.background = colors[style].bg;
+    });
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.style.opacity = '0.7';
+      try {
+        await onClick();
+      } finally {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
+    });
+
+    return btn;
   }
 
   async function savePersona(persona: PersonaData) {
