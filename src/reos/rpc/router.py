@@ -21,9 +21,18 @@ from reos.rpc.types import (
     RpcError,
     METHOD_NOT_FOUND,
     INVALID_PARAMS,
-    RATE_LIMIT_ERROR,
-    VALIDATION_ERROR,
-    SAFETY_ERROR,
+    INTERNAL_ERROR,
+)
+from reos.errors import (
+    TalkingRockError,
+    ValidationError as DomainValidationError,
+    SafetyError,
+    RateLimitError as DomainRateLimitError,
+    LLMError,
+    DatabaseError,
+    NotFoundError,
+    AuthenticationError,
+    get_error_code,
 )
 
 logger = logging.getLogger(__name__)
@@ -214,8 +223,25 @@ def dispatch(method: str, params: JSON | None, db: Database) -> Any:
             _audit_method_call(method, kwargs, success=False)
         raise
 
+    except TalkingRockError as e:
+        # Handle all domain errors with proper RPC error codes
+        error_code = get_error_code(e)
+        logger.warning("%s in %s: %s", type(e).__name__, method, e.message)
+        if security_config and security_config.audit:
+            audit_log(
+                AuditEventType.VALIDATION_FAILED if isinstance(e, DomainValidationError)
+                else AuditEventType.COMMAND_EXECUTED,
+                {"method": method, "error_type": type(e).__name__, "message": e.message},
+                success=False,
+            )
+        raise RpcError(
+            error_code,
+            e.message,
+            data=e.to_dict() if e.context else None,
+        ) from e
+
     except ValidationError as e:
-        # Wrap validation errors with proper RPC error code
+        # Handle legacy security.ValidationError
         logger.warning("Validation error in %s: %s", method, e.message)
         if security_config and security_config.audit:
             audit_log(
@@ -224,7 +250,7 @@ def dispatch(method: str, params: JSON | None, db: Database) -> Any:
                 success=False,
             )
         raise RpcError(
-            VALIDATION_ERROR,
+            -32000,  # VALIDATION_ERROR
             e.message,
             data={"field": e.field} if e.field else None,
         ) from e
@@ -238,7 +264,7 @@ def dispatch(method: str, params: JSON | None, db: Database) -> Any:
         logger.exception("Unexpected error in %s", method)
         if security_config and security_config.audit:
             _audit_method_call(method, kwargs, success=False, error=str(e))
-        raise
+        raise RpcError(INTERNAL_ERROR, "Internal error") from e
 
 
 def _audit_method_call(
