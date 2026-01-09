@@ -230,14 +230,15 @@ RIVA: [Understanding your request...]
 
 ### Built-in Limits
 
-Talking Rock has safety limits that can't be disabled:
+Talking Rock has safety limits that can be tuned but not disabled:
 
-| Protection | Limit |
-|------------|-------|
-| Max operations per task | 25 |
-| Max run time | 5 minutes |
-| Sudo commands per session | 3 |
-| Debug retries | 3 |
+| Protection | Default | Tunable Range |
+|------------|---------|---------------|
+| Max iterations per task | 10 | 3-50 |
+| Max run time | 5 minutes | 1-30 minutes |
+| Sudo commands per session | 10 | 1-20 |
+| Auth attempts (rate limit) | 5/minute | N/A |
+| Command max length | 8KB | 1-16KB |
 
 ### Your Privacy
 
