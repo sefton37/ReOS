@@ -106,6 +106,8 @@ from reos.code_mode.optimization.status import (
     create_status,
 )
 from reos.code_mode.optimization.factory import (
+    analyze_repo_and_populate_memory,
+    create_optimized_context_with_repo_analysis,
     create_optimized_context,
     create_minimal_context,
     create_metrics_only_context,
@@ -150,6 +152,8 @@ __all__ = [
     "OptimizationStatus",
     "create_status",
     # Factory
+    "analyze_repo_and_populate_memory",
+    "create_optimized_context_with_repo_analysis",
     "create_optimized_context",
     "create_minimal_context",
     "create_metrics_only_context",
