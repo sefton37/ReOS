@@ -16,6 +16,7 @@ This module implements:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -26,6 +27,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeVar
 
 from reos.code_mode.json_utils import parse_llm_json
+from reos.code_mode.optimization.verification_layers import (
+    verify_action_multilayer,
+    VerificationStrategy,
+)
 
 if TYPE_CHECKING:
     from reos.code_mode.sandbox import CodeSandbox
@@ -38,6 +43,8 @@ if TYPE_CHECKING:
     from reos.code_mode.optimization.trust import TrustBudget
     from reos.code_mode.optimization.verification import VerificationBatcher
     from reos.code_mode.optimization.pattern_success import PatternSuccessTracker
+    from reos.code_mode.optimization.verification_layers import VerificationResult
+    from reos.code_mode.project_memory import ProjectMemoryStore
     from reos.providers import LLMProvider
 
 logger = logging.getLogger(__name__)
@@ -454,8 +461,12 @@ class WorkContext:
     trust_budget: "TrustBudget | None" = None  # Session trust for verification decisions
     verification_batcher: "VerificationBatcher | None" = None  # Batch low-risk verifications
     pattern_success_tracker: "PatternSuccessTracker | None" = None  # Learn from execution history
+    project_memory: "ProjectMemoryStore | None" = None  # Project decisions, patterns, learned corrections
     max_cycles_per_intention: int = 5
     max_depth: int = 10
+
+    # Verification control
+    enable_multilayer_verification: bool = True  # Set to False to disable verification (for benchmarking)
 
     # Callbacks for UI integration
     on_intention_start: Callable[[Intention], None] | None = None
@@ -963,6 +974,59 @@ def determine_next_action(intention: Intention, ctx: WorkContext) -> tuple[str, 
     if tool_context:
         existing_context += f"\n\n[Additional Context from Tools]\n{tool_context[:2000]}"
 
+    # Gather project memory context for fair evaluation
+    # This provides models the repo conventions they need to integrate correctly
+    project_memory_context = ""
+    if ctx.project_memory:
+        try:
+            repo_path = str(getattr(ctx.sandbox, 'repo_path', None) or getattr(ctx.sandbox, 'root_dir', '.'))
+            memory = ctx.project_memory.get_relevant_context(
+                repo_path=repo_path,
+                prompt=intention.what,
+                file_paths=None,  # Could pass related files if available
+                max_decisions=5,
+                max_patterns=5,
+                max_corrections=3,
+            )
+
+            # Inject decisions
+            if memory.relevant_decisions:
+                decisions_text = "\n".join(f"- {d.decision}" for d in memory.relevant_decisions)
+                project_memory_context += f"\n\nPROJECT DECISIONS (must respect):\n{decisions_text}"
+
+            # Inject patterns
+            if memory.applicable_patterns:
+                patterns_text = "\n".join(f"- {p.description}" for p in memory.applicable_patterns)
+                project_memory_context += f"\n\nCODE PATTERNS (must follow):\n{patterns_text}"
+
+            # Inject learned corrections
+            if memory.recent_corrections:
+                corrections_text = "\n".join(
+                    f"- {c.inferred_rule}" for c in memory.recent_corrections if c.inferred_rule
+                )
+                if corrections_text:
+                    project_memory_context += f"\n\nLEARNED (from previous corrections):\n{corrections_text}"
+
+            if project_memory_context:
+                logger.info(
+                    "Injected project memory: %d decisions, %d patterns, %d corrections",
+                    len(memory.relevant_decisions),
+                    len(memory.applicable_patterns),
+                    len(memory.recent_corrections),
+                )
+                if ctx.session_logger:
+                    ctx.session_logger.log_debug("riva", "project_memory_injected",
+                        f"Injected context: {len(project_memory_context)} chars", {
+                            "decisions_count": len(memory.relevant_decisions),
+                            "patterns_count": len(memory.applicable_patterns),
+                            "corrections_count": len(memory.recent_corrections),
+                        })
+        except Exception as e:
+            logger.warning("Failed to inject project memory: %s", e)
+            if ctx.session_logger:
+                ctx.session_logger.log_warning("riva", "project_memory_failed",
+                    f"Could not inject project memory: {e}")
+
     system_prompt = """You are determining the next action to satisfy an intention.
 
 CRITICAL RULES:
@@ -995,7 +1059,7 @@ Be specific and concrete. Write REAL implementations, not stubs."""
 
 INTENTION: {intention.what}
 ACCEPTANCE: {intention.acceptance}
-{history}{existing_context}
+{history}{existing_context}{project_memory_context}
 
 What should we try next? Remember: write COMPLETE working code, not placeholders."""
 
@@ -1306,6 +1370,31 @@ def _merge_python_content(existing: str, new_content: str) -> str:
     return '\n'.join(result_lines)
 
 
+def _verification_to_judgment(verification_result: "VerificationResult") -> Judgment:
+    """Convert a VerificationResult to a Judgment.
+
+    Args:
+        verification_result: Result from verify_action_multilayer()
+
+    Returns:
+        Judgment based on verification outcome and confidence
+    """
+    if not verification_result.overall_passed:
+        # Verification failed at some layer
+        return Judgment.FAILURE
+
+    # Passed all layers, but check confidence
+    # High confidence (>=0.90) -> SUCCESS
+    # Medium confidence (0.70-0.89) -> PARTIAL (might need review)
+    # Low confidence (<0.70) -> FAILURE (not confident enough)
+    if verification_result.overall_confidence >= 0.90:
+        return Judgment.SUCCESS
+    elif verification_result.overall_confidence >= 0.70:
+        return Judgment.PARTIAL
+    else:
+        return Judgment.FAILURE
+
+
 def execute_action(action: Action, ctx: WorkContext) -> str:
     """Execute an action and return the result."""
     # Track execution time for metrics
@@ -1545,6 +1634,36 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
     if ctx.metrics:
         ctx.metrics.max_depth_reached = max(ctx.metrics.max_depth_reached, depth)
 
+        # Capture LLM provider and model info (only once, at start of session)
+        if depth == 0 and ctx.llm and ctx.metrics.llm_provider is None:
+            try:
+                ctx.metrics.set_llm_info(
+                    provider=ctx.llm.provider_type,
+                    model=getattr(ctx.llm, '_model', None)
+                )
+                logger.info(
+                    "Captured LLM info: provider=%s, model=%s",
+                    ctx.metrics.llm_provider,
+                    ctx.metrics.llm_model
+                )
+            except Exception as e:
+                logger.warning("Failed to capture LLM info: %s", e)
+
+        # Capture repository context (only once, at start of session)
+        if depth == 0 and ctx.metrics.repo_path is None:
+            try:
+                # Get repo path from sandbox
+                repo_path = getattr(ctx.sandbox, 'repo_path', None) or getattr(ctx.sandbox, 'root_dir', None)
+                if repo_path:
+                    ctx.metrics.set_repo_info(repo_path=str(repo_path))
+                    logger.info(
+                        "Captured repo info: path=%s, name=%s",
+                        ctx.metrics.repo_path,
+                        ctx.metrics.repo_name
+                    )
+            except Exception as e:
+                logger.warning("Failed to capture repo info: %s", e)
+
     # Log start
     if ctx.session_logger:
         ctx.session_logger.log_info("riva", "work_start",
@@ -1672,7 +1791,65 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
             # CRITICAL: Never assume success without SOME form of verification
             if should_verify_action:
                 # Immediate verification required (HIGH risk or low trust)
-                cycle.judgment = ctx.checkpoint.judge_action(intention, cycle)
+                # Use multi-layer verification for code actions (EDIT, CREATE)
+                if ctx.enable_multilayer_verification and action.type in (ActionType.EDIT, ActionType.CREATE):
+                    # Choose verification strategy based on risk level
+                    from reos.code_mode.optimization.risk import RiskLevel
+                    if action_risk.level == RiskLevel.HIGH:
+                        strategy = VerificationStrategy.THOROUGH  # All 4 layers
+                    elif action_risk.level == RiskLevel.MEDIUM:
+                        strategy = VerificationStrategy.STANDARD  # Syntax + semantic + behavioral
+                    else:  # LOW
+                        strategy = VerificationStrategy.MINIMAL  # Syntax only
+
+                    if ctx.session_logger:
+                        ctx.session_logger.log_info("riva", "multilayer_verification_start",
+                            f"Starting {strategy.value} verification for {action.type.value}", {
+                                "strategy": strategy.value,
+                                "risk_level": action_risk.level.value,
+                            })
+
+                    # Run multi-layer verification
+                    # Call async function from sync context
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+
+                    verification_result = loop.run_until_complete(
+                        verify_action_multilayer(
+                            action=action,
+                            intention=intention,
+                            ctx=ctx,
+                            strategy=strategy,
+                            stop_on_failure=True,  # Fail fast to save tokens
+                        )
+                    )
+
+                    cycle.judgment = _verification_to_judgment(verification_result)
+
+                    # Record verification layer results in metrics
+                    if ctx.metrics:
+                        ctx.metrics.record_verification_layers(verification_result)
+                        # Record confidence prediction (we'll track actual success later)
+                        # For now, record the prediction
+                        ctx.metrics.record_confidence_prediction(
+                            verification_result.overall_confidence,
+                            cycle.judgment == Judgment.SUCCESS
+                        )
+
+                    if ctx.session_logger:
+                        ctx.session_logger.log_info("riva", "multilayer_verification_complete",
+                            f"Verification: {cycle.judgment.value} (confidence: {verification_result.overall_confidence:.2%})", {
+                                "judgment": cycle.judgment.value,
+                                "confidence": verification_result.overall_confidence,
+                                "layers_run": len(verification_result.layers),
+                                "duration_ms": verification_result.total_duration_ms,
+                            })
+                else:
+                    # Fall back to simple judgment for non-code actions (COMMAND, QUERY, DELETE)
+                    cycle.judgment = ctx.checkpoint.judge_action(intention, cycle)
 
                 # Track verification in metrics with actual risk level
                 if ctx.metrics:
@@ -1702,15 +1879,95 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
                             "can_batch": action_risk.can_batch,
                             "has_batcher": ctx.verification_batcher is not None,
                         })
-                cycle.judgment = ctx.checkpoint.judge_action(intention, cycle)
+
+                # Use multi-layer verification for code actions (EDIT, CREATE)
+                if ctx.enable_multilayer_verification and action.type in (ActionType.EDIT, ActionType.CREATE):
+                    # Choose verification strategy based on risk level
+                    from reos.code_mode.optimization.risk import RiskLevel
+                    if action_risk.level == RiskLevel.HIGH:
+                        strategy = VerificationStrategy.THOROUGH  # All 4 layers
+                    elif action_risk.level == RiskLevel.MEDIUM:
+                        strategy = VerificationStrategy.STANDARD  # Syntax + semantic + behavioral
+                    else:  # LOW
+                        strategy = VerificationStrategy.MINIMAL  # Syntax only
+
+                    if ctx.session_logger:
+                        ctx.session_logger.log_info("riva", "multilayer_verification_start",
+                            f"Starting {strategy.value} verification (fallback) for {action.type.value}", {
+                                "strategy": strategy.value,
+                                "risk_level": action_risk.level.value,
+                            })
+
+                    # Run multi-layer verification
+                    # Call async function from sync context
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+
+                    verification_result = loop.run_until_complete(
+                        verify_action_multilayer(
+                            action=action,
+                            intention=intention,
+                            ctx=ctx,
+                            strategy=strategy,
+                            stop_on_failure=True,  # Fail fast to save tokens
+                        )
+                    )
+
+                    cycle.judgment = _verification_to_judgment(verification_result)
+
+                    # Record verification layer results in metrics
+                    if ctx.metrics:
+                        ctx.metrics.record_verification_layers(verification_result)
+                        ctx.metrics.record_confidence_prediction(
+                            verification_result.overall_confidence,
+                            cycle.judgment == Judgment.SUCCESS
+                        )
+
+                    if ctx.session_logger:
+                        ctx.session_logger.log_info("riva", "multilayer_verification_complete",
+                            f"Verification (fallback): {cycle.judgment.value} (confidence: {verification_result.overall_confidence:.2%})", {
+                                "judgment": cycle.judgment.value,
+                                "confidence": verification_result.overall_confidence,
+                                "layers_run": len(verification_result.layers),
+                                "duration_ms": verification_result.total_duration_ms,
+                            })
+                else:
+                    # Fall back to simple judgment for non-code actions (COMMAND, QUERY, DELETE)
+                    cycle.judgment = ctx.checkpoint.judge_action(intention, cycle)
 
                 if ctx.metrics:
                     ctx.metrics.record_verification(action_risk.level.value)
 
+            # ================================================================
+            # STAGE GATE: Cycle Complete
+            # ================================================================
             if ctx.session_logger:
+                # Build cycle completion summary (no truncation)
+                summary_parts = []
+                summary_parts.append("-" * 60)
+                summary_parts.append(f"CYCLE COMPLETE: {cycle.judgment.value}")
+                summary_parts.append("-" * 60)
+                summary_parts.append(f"Action: {action.type.value}")
+                if hasattr(action, "target") and action.target:
+                    summary_parts.append(f"Target: {action.target}")
+                summary_parts.append(f"Risk Level: {action_risk.level.value}")
+                summary_parts.append(f"Verified: {should_verify_action}")
+                if ctx.trust_budget:
+                    summary_parts.append(f"Trust Remaining: {ctx.trust_budget.remaining}")
+                summary_parts.append("")
+                summary_parts.append("Result:")
+                summary_parts.append(result)  # NO TRUNCATION - show full result
+                summary_parts.append("-" * 60)
+
                 ctx.session_logger.log_info("riva", "cycle_complete",
-                    f"Judgment: {cycle.judgment.value}", {
-                        "result_preview": result[:200],
+                    "\n".join(summary_parts), {
+                        "judgment": cycle.judgment.value,
+                        "action_type": action.type.value,
+                        "target": action.target if hasattr(action, "target") else None,
+                        "result": result,  # Full result, no truncation
                         "risk_level": action_risk.level.value,
                         "verified": should_verify_action,
                         "trust_remaining": ctx.trust_budget.remaining if ctx.trust_budget else None,
@@ -1863,6 +2120,46 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
         success = intention.status == IntentionStatus.VERIFIED
         ctx.metrics.complete(success)
         logger.info("Metrics: %s", ctx.metrics.summary())
+
+        # Persist metrics to database for continuous learning
+        try:
+            import sqlite3
+            from reos.settings import settings
+            from reos.code_mode.optimization.metrics import MetricsStore
+
+            # Create database connection
+            db_path = settings.data_dir / "riva.db"
+            settings.data_dir.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(db_path))
+
+            # Create a simple wrapper that provides both execute() and fetchall()
+            class DBWrapper:
+                def __init__(self, connection):
+                    self.conn = connection
+                    self.cursor = connection.cursor()
+
+                def execute(self, sql, params=None):
+                    if params:
+                        return self.cursor.execute(sql, params)
+                    return self.cursor.execute(sql)
+
+                def fetchall(self, sql=None, params=None):
+                    if sql:
+                        # Execute first, then fetchall
+                        self.execute(sql, params)
+                    return self.cursor.fetchall()
+
+            # Save metrics
+            db = DBWrapper(conn)
+            store = MetricsStore(db)
+            store.save(ctx.metrics)
+            conn.commit()
+            conn.close()
+
+            logger.info("Metrics persisted to database: %s", db_path)
+        except Exception as e:
+            # Don't fail the session if metrics persistence fails
+            logger.warning("Failed to persist metrics to database: %s", e)
 
     if ctx.on_intention_complete:
         ctx.on_intention_complete(intention)

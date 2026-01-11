@@ -32,6 +32,15 @@ class ExecutionMetrics:
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
 
+    # LLM provider information (for model-specific learning)
+    llm_provider: str | None = None  # "ollama", "anthropic", "openai", etc.
+    llm_model: str | None = None     # "claude-sonnet-4", "gpt-4-turbo", "llama3-70b", etc.
+
+    # Repository context (for repo-specific learning)
+    repo_path: str | None = None     # Absolute path to repository
+    repo_name: str | None = None     # Repository name (friendly)
+    files_changed: list[str] = field(default_factory=list)  # Files modified in this session
+
     # Timing (milliseconds)
     total_duration_ms: int = 0
     llm_time_ms: int = 0
@@ -72,6 +81,60 @@ class ExecutionMetrics:
     # Token usage (if available from provider)
     tokens_input: int = 0
     tokens_output: int = 0
+
+    # Verification layer tracking (detailed breakdown)
+    verification_layer_results: list[dict[str, Any]] = field(default_factory=list)
+    syntax_layer_passed: int = 0
+    syntax_layer_failed: int = 0
+    semantic_layer_passed: int = 0
+    semantic_layer_failed: int = 0
+    behavioral_layer_passed: int = 0
+    behavioral_layer_failed: int = 0
+    intent_layer_passed: int = 0
+    intent_layer_failed: int = 0
+
+    # Confidence calibration (predicted vs actual)
+    confidence_predictions: list[float] = field(default_factory=list)
+    confidence_actuals: list[bool] = field(default_factory=list)
+
+    # Verification time breakdown
+    syntax_layer_time_ms: int = 0
+    semantic_layer_time_ms: int = 0
+    behavioral_layer_time_ms: int = 0
+    intent_layer_time_ms: int = 0
+
+    def set_llm_info(self, provider: str | None, model: str | None) -> None:
+        """Set LLM provider and model information.
+
+        Args:
+            provider: Provider type (ollama, anthropic, openai, etc.)
+            model: Model name (claude-sonnet-4, gpt-4-turbo, llama3-70b, etc.)
+        """
+        self.llm_provider = provider
+        self.llm_model = model
+
+    def set_repo_info(self, repo_path: str | None, repo_name: str | None = None) -> None:
+        """Set repository context information.
+
+        Args:
+            repo_path: Absolute path to repository
+            repo_name: Repository name (if None, derived from path)
+        """
+        self.repo_path = repo_path
+        if repo_path and not repo_name:
+            from pathlib import Path
+            self.repo_name = Path(repo_path).name
+        else:
+            self.repo_name = repo_name
+
+    def record_file_changed(self, file_path: str) -> None:
+        """Record a file that was changed in this session.
+
+        Args:
+            file_path: Path to file that was modified
+        """
+        if file_path not in self.files_changed:
+            self.files_changed.append(file_path)
 
     def record_llm_call(
         self,
@@ -118,6 +181,78 @@ class ExecutionMetrics:
         """Record a failure."""
         self.failure_count += 1
 
+    def record_verification_layers(self, verification_result: Any) -> None:
+        """Record results from multi-layer verification.
+
+        Args:
+            verification_result: VerificationResult from verify_action_multilayer()
+        """
+        # Store full result for analysis
+        result_dict = {
+            "overall_passed": verification_result.overall_passed,
+            "overall_confidence": verification_result.overall_confidence,
+            "total_duration_ms": verification_result.total_duration_ms,
+            "layers": [],
+        }
+
+        for layer_result in verification_result.layers:
+            layer_name = layer_result.layer.value
+            passed = layer_result.passed
+            confidence = layer_result.confidence
+            duration_ms = layer_result.duration_ms
+
+            # Track per-layer pass/fail counts
+            if layer_name == "syntax":
+                if passed:
+                    self.syntax_layer_passed += 1
+                else:
+                    self.syntax_layer_failed += 1
+                self.syntax_layer_time_ms += duration_ms
+            elif layer_name == "semantic":
+                if passed:
+                    self.semantic_layer_passed += 1
+                else:
+                    self.semantic_layer_failed += 1
+                self.semantic_layer_time_ms += duration_ms
+            elif layer_name == "behavioral":
+                if passed:
+                    self.behavioral_layer_passed += 1
+                else:
+                    self.behavioral_layer_failed += 1
+                self.behavioral_layer_time_ms += duration_ms
+            elif layer_name == "intent":
+                if passed:
+                    self.intent_layer_passed += 1
+                else:
+                    self.intent_layer_failed += 1
+                self.intent_layer_time_ms += duration_ms
+
+            # Store layer details
+            result_dict["layers"].append({
+                "layer": layer_name,
+                "passed": passed,
+                "confidence": confidence,
+                "duration_ms": duration_ms,
+                "reason": layer_result.reason,
+            })
+
+        self.verification_layer_results.append(result_dict)
+        self.verification_time_ms += verification_result.total_duration_ms
+
+    def record_confidence_prediction(self, predicted_confidence: float, actual_success: bool) -> None:
+        """Record a confidence prediction and its actual outcome.
+
+        This allows us to measure confidence calibration:
+        - Are high-confidence predictions actually successful?
+        - Are low-confidence predictions actually failures?
+
+        Args:
+            predicted_confidence: Confidence score (0.0-1.0) from verification
+            actual_success: Did the action actually succeed?
+        """
+        self.confidence_predictions.append(predicted_confidence)
+        self.confidence_actuals.append(actual_success)
+
     def complete(self, success: bool) -> None:
         """Mark execution as complete."""
         self.completed_at = datetime.now(timezone.utc)
@@ -134,6 +269,8 @@ class ExecutionMetrics:
             "session_id": self.session_id,
             "started_at": self.started_at.isoformat(),
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "llm_provider": self.llm_provider,
+            "llm_model": self.llm_model,
             "timing": {
                 "total_ms": self.total_duration_ms,
                 "llm_ms": self.llm_time_ms,
@@ -172,6 +309,158 @@ class ExecutionMetrics:
                 "input": self.tokens_input,
                 "output": self.tokens_output,
             },
+            "verification_layers": {
+                "syntax": {
+                    "passed": self.syntax_layer_passed,
+                    "failed": self.syntax_layer_failed,
+                    "time_ms": self.syntax_layer_time_ms,
+                },
+                "semantic": {
+                    "passed": self.semantic_layer_passed,
+                    "failed": self.semantic_layer_failed,
+                    "time_ms": self.semantic_layer_time_ms,
+                },
+                "behavioral": {
+                    "passed": self.behavioral_layer_passed,
+                    "failed": self.behavioral_layer_failed,
+                    "time_ms": self.behavioral_layer_time_ms,
+                },
+                "intent": {
+                    "passed": self.intent_layer_passed,
+                    "failed": self.intent_layer_failed,
+                    "time_ms": self.intent_layer_time_ms,
+                },
+                "results": self.verification_layer_results,
+            },
+            "confidence_calibration": {
+                "predictions": self.confidence_predictions,
+                "actuals": self.confidence_actuals,
+                "count": len(self.confidence_predictions),
+            },
+        }
+
+    def get_layer_catch_rates(self) -> dict[str, float]:
+        """Calculate what percentage of errors each layer caught.
+
+        Returns:
+            Dictionary with layer names and their catch rates (0.0-1.0)
+        """
+        catch_rates = {}
+
+        # Syntax layer
+        total_syntax = self.syntax_layer_passed + self.syntax_layer_failed
+        if total_syntax > 0:
+            catch_rates["syntax"] = self.syntax_layer_failed / total_syntax
+        else:
+            catch_rates["syntax"] = 0.0
+
+        # Semantic layer
+        total_semantic = self.semantic_layer_passed + self.semantic_layer_failed
+        if total_semantic > 0:
+            catch_rates["semantic"] = self.semantic_layer_failed / total_semantic
+        else:
+            catch_rates["semantic"] = 0.0
+
+        # Behavioral layer
+        total_behavioral = self.behavioral_layer_passed + self.behavioral_layer_failed
+        if total_behavioral > 0:
+            catch_rates["behavioral"] = self.behavioral_layer_failed / total_behavioral
+        else:
+            catch_rates["behavioral"] = 0.0
+
+        # Intent layer
+        total_intent = self.intent_layer_passed + self.intent_layer_failed
+        if total_intent > 0:
+            catch_rates["intent"] = self.intent_layer_failed / total_intent
+        else:
+            catch_rates["intent"] = 0.0
+
+        return catch_rates
+
+    def get_confidence_calibration(self) -> dict[str, float]:
+        """Calculate how well-calibrated our confidence predictions are.
+
+        Returns:
+            Dictionary with calibration metrics:
+            - accuracy: Overall accuracy of predictions
+            - high_confidence_accuracy: Accuracy when confidence >= 0.9
+            - low_confidence_accuracy: Accuracy when confidence < 0.7
+            - calibration_error: Mean squared difference between confidence and actual
+        """
+        if not self.confidence_predictions or not self.confidence_actuals:
+            return {
+                "accuracy": 0.0,
+                "high_confidence_accuracy": 0.0,
+                "low_confidence_accuracy": 0.0,
+                "calibration_error": 0.0,
+                "sample_count": 0,
+            }
+
+        n = len(self.confidence_predictions)
+        correct_count = sum(1 for pred, actual in zip(self.confidence_predictions, self.confidence_actuals) if (pred >= 0.5 and actual) or (pred < 0.5 and not actual))
+        accuracy = correct_count / n if n > 0 else 0.0
+
+        # High confidence accuracy (predictions >= 0.9)
+        high_conf_pairs = [(p, a) for p, a in zip(self.confidence_predictions, self.confidence_actuals) if p >= 0.9]
+        if high_conf_pairs:
+            high_conf_correct = sum(1 for _, actual in high_conf_pairs if actual)
+            high_confidence_accuracy = high_conf_correct / len(high_conf_pairs)
+        else:
+            high_confidence_accuracy = 0.0
+
+        # Low confidence accuracy (predictions < 0.7)
+        low_conf_pairs = [(p, a) for p, a in zip(self.confidence_predictions, self.confidence_actuals) if p < 0.7]
+        if low_conf_pairs:
+            low_conf_correct = sum(1 for _, actual in low_conf_pairs if not actual)  # Should be failures
+            low_confidence_accuracy = low_conf_correct / len(low_conf_pairs)
+        else:
+            low_confidence_accuracy = 0.0
+
+        # Calibration error (mean squared error between confidence and actual)
+        squared_errors = [(pred - (1.0 if actual else 0.0)) ** 2 for pred, actual in zip(self.confidence_predictions, self.confidence_actuals)]
+        calibration_error = sum(squared_errors) / n if n > 0 else 0.0
+
+        return {
+            "accuracy": accuracy,
+            "high_confidence_accuracy": high_confidence_accuracy,
+            "low_confidence_accuracy": low_confidence_accuracy,
+            "calibration_error": calibration_error,
+            "sample_count": n,
+        }
+
+    def get_verification_impact(self) -> dict[str, Any]:
+        """Calculate the impact of verification on success rates.
+
+        Returns:
+            Dictionary with impact metrics:
+            - total_verifications: Total number of verifications run
+            - errors_caught: Number of errors caught by verification
+            - avg_verification_time_ms: Average time spent on verification
+            - first_try_success: Whether we succeeded on first try
+        """
+        total_layer_checks = (
+            self.syntax_layer_passed + self.syntax_layer_failed +
+            self.semantic_layer_passed + self.semantic_layer_failed +
+            self.behavioral_layer_passed + self.behavioral_layer_failed +
+            self.intent_layer_passed + self.intent_layer_failed
+        )
+
+        errors_caught = (
+            self.syntax_layer_failed +
+            self.semantic_layer_failed +
+            self.behavioral_layer_failed +
+            self.intent_layer_failed
+        )
+
+        avg_verification_time = self.verification_time_ms / total_layer_checks if total_layer_checks > 0 else 0
+
+        return {
+            "total_verifications": total_layer_checks,
+            "errors_caught": errors_caught,
+            "error_catch_rate": errors_caught / total_layer_checks if total_layer_checks > 0 else 0.0,
+            "avg_verification_time_ms": avg_verification_time,
+            "total_verification_time_ms": self.verification_time_ms,
+            "first_try_success": self.first_try_success,
         }
 
     def summary(self) -> str:
@@ -212,6 +501,10 @@ class MetricsStore:
                 session_id TEXT PRIMARY KEY,
                 started_at TEXT NOT NULL,
                 completed_at TEXT,
+                llm_provider TEXT,
+                llm_model TEXT,
+                repo_path TEXT,
+                repo_name TEXT,
                 total_duration_ms INTEGER,
                 llm_time_ms INTEGER,
                 execution_time_ms INTEGER,
@@ -226,6 +519,11 @@ class MetricsStore:
                 metrics_json TEXT
             )
         """)
+        # Create index for repo-specific queries
+        self.db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_repo_model
+            ON riva_metrics(repo_path, llm_model)
+        """)
 
     def save(self, metrics: ExecutionMetrics) -> None:
         """Save metrics to database."""
@@ -235,16 +533,22 @@ class MetricsStore:
             """
             INSERT OR REPLACE INTO riva_metrics (
                 session_id, started_at, completed_at,
+                llm_provider, llm_model,
+                repo_path, repo_name,
                 total_duration_ms, llm_time_ms, execution_time_ms,
                 llm_calls_total, decomposition_count, max_depth_reached,
                 verifications_total, retry_count, failure_count,
                 success, first_try_success, metrics_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 metrics.session_id,
                 metrics.started_at.isoformat(),
                 metrics.completed_at.isoformat() if metrics.completed_at else None,
+                metrics.llm_provider,
+                metrics.llm_model,
+                metrics.repo_path,
+                metrics.repo_name,
                 metrics.total_duration_ms,
                 metrics.llm_time_ms,
                 metrics.execution_time_ms,

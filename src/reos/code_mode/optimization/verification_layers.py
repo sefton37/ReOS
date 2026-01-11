@@ -216,8 +216,32 @@ async def verify_action_multilayer(
     overall_passed = True
     total_tokens = 0
 
-    for layer in layers_to_run:
+    # Log verification start with full context
+    if ctx.session_logger:
+        ctx.session_logger.log_info(
+            "riva",
+            "verification_start",
+            f"Starting {strategy.value} verification for {action.type.value}",
+            {
+                "action_type": action.type.value,
+                "target": action.target if hasattr(action, "target") else None,
+                "strategy": strategy.value,
+                "layers_to_run": [layer.value for layer in layers_to_run],
+                "intention": intention.what,
+            },
+        )
+
+    for i, layer in enumerate(layers_to_run, 1):
         layer_start = time.perf_counter()
+
+        # Log layer start
+        if ctx.session_logger:
+            ctx.session_logger.log_info(
+                "riva",
+                "verification_layer_start",
+                f"[{i}/{len(layers_to_run)}] Running {layer.value} verification",
+                {"layer": layer.value, "layer_number": i, "total_layers": len(layers_to_run)},
+            )
 
         # Execute layer verification
         if layer == VerificationLayer.SYNTAX:
@@ -242,6 +266,24 @@ async def verify_action_multilayer(
         layer_results.append(result)
         total_tokens += result.tokens_used
 
+        # Log detailed layer result (NO TRUNCATION)
+        status_symbol = "✓" if result.passed else "✗"
+        if ctx.session_logger:
+            ctx.session_logger.log_info(
+                "riva",
+                "verification_layer_complete",
+                f"[{i}/{len(layers_to_run)}] {status_symbol} {layer.value}: {result.reason}",
+                {
+                    "layer": layer.value,
+                    "passed": result.passed,
+                    "confidence": result.confidence,
+                    "duration_ms": layer_duration,
+                    "reason": result.reason,  # Full reason, no truncation
+                    "details": result.details,  # Full details
+                    "tokens_used": result.tokens_used,
+                },
+            )
+
         logger.debug(
             "Verification layer %s: %s (%.2f confidence, %dms)",
             layer.value,
@@ -255,6 +297,17 @@ async def verify_action_multilayer(
             overall_passed = False
             if stop_on_failure:
                 logger.info("Stopping verification at layer %s (failed)", layer.value)
+                if ctx.session_logger:
+                    ctx.session_logger.log_info(
+                        "riva",
+                        "verification_stopped",
+                        f"Verification stopped at {layer.value} layer (fail-fast enabled)",
+                        {
+                            "stopped_at": layer.value,
+                            "reason": result.reason,
+                            "remaining_layers": [l.value for l in layers_to_run[i:]],
+                        },
+                    )
                 break
 
     # Calculate overall confidence (weighted average)
@@ -278,6 +331,68 @@ async def verify_action_multilayer(
     stopped_at = None
     if not overall_passed and stop_on_failure and layer_results:
         stopped_at = layer_results[-1].layer
+
+    # ========================================================================
+    # STAGE GATE SUMMARY: Verification Complete
+    # ========================================================================
+    if ctx.session_logger:
+        # Build detailed summary
+        summary_lines = []
+        summary_lines.append("=" * 60)
+        summary_lines.append("VERIFICATION COMPLETE")
+        summary_lines.append("=" * 60)
+        summary_lines.append(f"Strategy: {strategy.value}")
+        summary_lines.append(f"Overall Result: {'PASS' if overall_passed else 'FAIL'}")
+        summary_lines.append(f"Overall Confidence: {overall_confidence:.1%}")
+        summary_lines.append(f"Total Duration: {total_duration}ms")
+        summary_lines.append(f"Tokens Used: {total_tokens}")
+        summary_lines.append("")
+        summary_lines.append("Layer Results:")
+        summary_lines.append("-" * 60)
+
+        for i, result in enumerate(layer_results, 1):
+            status = "✓ PASS" if result.passed else "✗ FAIL"
+            summary_lines.append(
+                f"  [{i}] {result.layer.value.upper()}: {status} "
+                f"(confidence: {result.confidence:.1%}, {result.duration_ms}ms)"
+            )
+            summary_lines.append(f"      Reason: {result.reason}")
+            if result.details:
+                # Show full details, no truncation
+                for key, value in result.details.items():
+                    summary_lines.append(f"      {key}: {value}")
+
+        if stopped_at:
+            summary_lines.append("")
+            summary_lines.append(f"⚠ Stopped early at {stopped_at.value} layer (fail-fast)")
+
+        summary_lines.append("=" * 60)
+
+        # Log the complete summary
+        ctx.session_logger.log_info(
+            "riva",
+            "verification_summary",
+            "\n".join(summary_lines),
+            {
+                "overall_passed": overall_passed,
+                "overall_confidence": overall_confidence,
+                "total_duration_ms": total_duration,
+                "total_tokens": total_tokens,
+                "layers_run": len(layer_results),
+                "stopped_at": stopped_at.value if stopped_at else None,
+                "layer_results": [
+                    {
+                        "layer": r.layer.value,
+                        "passed": r.passed,
+                        "confidence": r.confidence,
+                        "duration_ms": r.duration_ms,
+                        "reason": r.reason,
+                        "details": r.details,
+                    }
+                    for r in layer_results
+                ],
+            },
+        )
 
     return VerificationResult(
         action=action,
@@ -424,7 +539,7 @@ async def _verify_semantic_layer(action: "Action", ctx: "WorkContext") -> LayerR
 
     if errors:
         # Semantic errors found - code won't work
-        error_messages = "; ".join(str(e) for e in errors[:3])  # First 3 errors
+        error_messages = "; ".join(str(e) for e in errors)  # Show all errors
         return LayerResult(
             layer=VerificationLayer.SEMANTIC,
             passed=False,
@@ -434,7 +549,7 @@ async def _verify_semantic_layer(action: "Action", ctx: "WorkContext") -> LayerR
         )
     elif warnings:
         # Warnings only - code might work but has issues
-        warning_messages = "; ".join(str(w) for w in warnings[:2])
+        warning_messages = "; ".join(str(w) for w in warnings)  # Show all warnings
         return LayerResult(
             layer=VerificationLayer.SEMANTIC,
             passed=True,
@@ -529,7 +644,7 @@ async def _run_python_tests(file_path: str, ctx: "WorkContext") -> LayerResult |
                 passed=True,
                 confidence=0.95,
                 reason=f"All tests passed ({test_count} tests)",
-                details={"test_count": test_count, "output": result.stdout[:500]},
+                details={"test_count": test_count, "output": result.stdout},
             )
         else:
             # Tests failed
@@ -539,7 +654,7 @@ async def _run_python_tests(file_path: str, ctx: "WorkContext") -> LayerResult |
                 passed=False,
                 confidence=0.0,
                 reason=f"Tests failed ({failed_count} failures)",
-                details={"failed_count": failed_count, "output": result.stdout[:500]},
+                details={"failed_count": failed_count, "output": result.stdout},
             )
 
     except subprocess.TimeoutExpired:
@@ -644,16 +759,143 @@ async def _verify_intent_layer(
     Returns:
         LayerResult with pass/fail and confidence
     """
-    # TODO: Implement intent verification with LLM
-    # For now, placeholder
-    return LayerResult(
-        layer=VerificationLayer.INTENT,
-        passed=True,
-        confidence=0.8,
-        reason="Intent verification not yet implemented (placeholder)",
-        details={"status": "placeholder"},
-        tokens_used=0,
-    )
+    # If no LLM available, skip intent verification
+    if not ctx.llm:
+        logger.warning("No LLM available for intent verification, skipping Layer 4")
+        return LayerResult(
+            layer=VerificationLayer.INTENT,
+            passed=True,
+            confidence=0.5,  # Neutral - can't verify without LLM
+            reason="Intent verification skipped (no LLM available)",
+            details={"status": "skipped"},
+            tokens_used=0,
+        )
+
+    # Extract code content from action
+    if action.type.value == "create":
+        code_content = action.content
+        context = f"Creating new file: {action.target}"
+    elif action.type.value == "edit":
+        code_content = action.content
+        context = f"Editing file: {action.target}"
+    else:
+        # Intent verification only makes sense for code actions
+        return LayerResult(
+            layer=VerificationLayer.INTENT,
+            passed=True,
+            confidence=0.5,
+            reason="Intent verification skipped (not a code action)",
+            details={"status": "skipped"},
+            tokens_used=0,
+        )
+
+    # Build LLM prompt for intent verification
+    system_prompt = """You are a code verification assistant. Your job is to determine if generated code matches the user's original intent.
+
+You will be given:
+1. The user's original request (what they wanted)
+2. The acceptance criteria (how to verify success)
+3. The generated code
+
+Your task: Judge if the code accomplishes what was requested.
+
+Respond with EXACTLY this format:
+ALIGNED: yes/no
+CONFIDENCE: 0.0-1.0
+REASON: brief explanation
+
+Example responses:
+ALIGNED: yes
+CONFIDENCE: 0.95
+REASON: Code implements the requested hello() function that returns a greeting string
+
+ALIGNED: no
+CONFIDENCE: 0.85
+REASON: Code implements fibonacci instead of factorial as requested"""
+
+    user_prompt = f"""Original Request: {intention.what}
+
+Acceptance Criteria: {intention.acceptance}
+
+Context: {context}
+
+Generated Code:
+```
+{code_content[:1000]}  # Limit to first 1000 chars to avoid huge prompts
+```
+
+Does this code accomplish what was requested? Respond in the required format."""
+
+    try:
+        # Call LLM
+        response = ctx.llm.chat_text(
+            system=system_prompt,
+            user=user_prompt,
+            timeout_seconds=30.0,
+            temperature=0.1,  # Low temperature for consistent judgments
+        )
+
+        # Parse response
+        aligned = None
+        confidence = 0.5
+        reason = "Could not parse LLM response"
+
+        for line in response.strip().split("\n"):
+            line = line.strip()
+            if line.startswith("ALIGNED:"):
+                aligned_str = line.split(":", 1)[1].strip().lower()
+                aligned = aligned_str in ("yes", "true", "1")
+            elif line.startswith("CONFIDENCE:"):
+                try:
+                    confidence = float(line.split(":", 1)[1].strip())
+                    # Clamp to valid range
+                    confidence = max(0.0, min(1.0, confidence))
+                except (ValueError, IndexError):
+                    pass
+            elif line.startswith("REASON:"):
+                reason = line.split(":", 1)[1].strip()
+
+        # If we couldn't parse alignment, treat as failure
+        if aligned is None:
+            logger.warning("Could not parse ALIGNED status from LLM response: %s", response)
+            return LayerResult(
+                layer=VerificationLayer.INTENT,
+                passed=False,
+                confidence=0.3,
+                reason="Failed to parse LLM intent verification response",
+                details={"llm_response": response},
+                tokens_used=100,  # Estimate
+            )
+
+        logger.info(
+            "Intent verification: aligned=%s, confidence=%.2f, reason=%s",
+            aligned,
+            confidence,
+            reason,
+        )
+
+        return LayerResult(
+            layer=VerificationLayer.INTENT,
+            passed=aligned,
+            confidence=confidence if aligned else (1.0 - confidence),
+            reason=reason,
+            details={
+                "llm_response": response,
+                "aligned": aligned,
+            },
+            tokens_used=100,  # Estimate - could track actual tokens if needed
+        )
+
+    except Exception as e:
+        logger.error("Intent verification failed with exception: %s", e)
+        return LayerResult(
+            layer=VerificationLayer.INTENT,
+            passed=False,
+            confidence=0.0,
+            reason=f"Intent verification error: {str(e)}",
+            details={"error": str(e)},
+            tokens_used=0,
+        )
 
 
 def _infer_language(file_path: str) -> str:

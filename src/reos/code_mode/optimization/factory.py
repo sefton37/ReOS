@@ -18,6 +18,8 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +36,209 @@ if TYPE_CHECKING:
     from reos.code_mode.tools import ToolProvider
     from reos.providers import LLMProvider
     from reos.db import Database
+    from reos.play_fs import Act
+
+logger = logging.getLogger(__name__)
+
+
+async def analyze_repo_and_populate_memory(
+    act: "Act",
+    llm: "LLMProvider",
+    project_memory: Any,  # ProjectMemoryStore
+) -> None:
+    """Analyze repository and populate ProjectMemory with findings.
+
+    Uses ActRepoAnalyzer to discover:
+    - Structure (components, entry points, test strategy)
+    - Conventions (naming, imports, docstrings)
+    - Types (data models with field types)
+
+    Then converts analysis into ProjectMemory decisions and patterns.
+
+    Args:
+        act: The Act (project) to analyze
+        llm: Local LLM provider (Ollama) for cheap analysis
+        project_memory: ProjectMemoryStore to populate
+
+    Cost: ~$0.0011 per analysis with local LLM (vs $0.33 with GPT-4)
+    """
+    try:
+        from reos.code_mode.repo_analyzer import ActRepoAnalyzer
+
+        # Create analyzer
+        analyzer = ActRepoAnalyzer(act=act, llm=llm)
+
+        # Run analysis (cached if recent)
+        logger.info("Running repo analysis for %s", act.title)
+        context = await analyzer.analyze_if_needed()
+
+        # Convert structure analysis to ProjectMemory decisions
+        if context.structure:
+            struct = context.structure
+
+            # Record test strategy decision
+            if struct.test_strategy:
+                await asyncio.to_thread(
+                    project_memory.record_decision,
+                    decision=f"Test strategy: {struct.test_strategy}",
+                    rationale="Discovered from repository analysis",
+                    confidence=0.9,
+                )
+
+            # Record documentation location
+            if struct.docs_location:
+                await asyncio.to_thread(
+                    project_memory.record_decision,
+                    decision=f"Documentation: {struct.docs_location}",
+                    rationale="Discovered from repository analysis",
+                    confidence=0.9,
+                )
+
+            # Record component structure as patterns
+            for comp in struct.components[:5]:  # Top 5 components
+                pattern_desc = f"Component '{comp['name']}': {comp['purpose']}"
+                await asyncio.to_thread(
+                    project_memory.record_pattern,
+                    pattern_type="structure",
+                    description=pattern_desc,
+                    example=f"Located at: {comp['path']}",
+                    confidence=0.8,
+                )
+
+        # Convert convention analysis to ProjectMemory patterns
+        if context.conventions:
+            conv = context.conventions
+
+            # Import style pattern
+            if conv.import_style:
+                await asyncio.to_thread(
+                    project_memory.record_pattern,
+                    pattern_type="import",
+                    description=f"Import style: {conv.import_style}",
+                    example=conv.examples.get("import", ""),
+                    confidence=0.9,
+                )
+
+            # Class naming pattern
+            if conv.class_naming:
+                await asyncio.to_thread(
+                    project_memory.record_pattern,
+                    pattern_type="naming",
+                    description=f"Class naming: {conv.class_naming}",
+                    example=conv.examples.get("class", ""),
+                    confidence=0.9,
+                )
+
+            # Function naming pattern
+            if conv.function_naming:
+                await asyncio.to_thread(
+                    project_memory.record_pattern,
+                    pattern_type="naming",
+                    description=f"Function naming: {conv.function_naming}",
+                    example=conv.examples.get("function", ""),
+                    confidence=0.9,
+                )
+
+            # Type hints pattern
+            if conv.type_hints_usage:
+                await asyncio.to_thread(
+                    project_memory.record_pattern,
+                    pattern_type="style",
+                    description=f"Type hints: {conv.type_hints_usage}",
+                    example=conv.examples.get("function", ""),
+                    confidence=0.9,
+                )
+
+            # Docstring style pattern
+            if conv.docstring_style:
+                await asyncio.to_thread(
+                    project_memory.record_pattern,
+                    pattern_type="documentation",
+                    description=f"Docstring style: {conv.docstring_style}",
+                    example=conv.examples.get("docstring", ""),
+                    confidence=0.9,
+                )
+
+        # Convert type analysis to ProjectMemory patterns
+        if context.types:
+            types = context.types
+
+            # Record key data models
+            for model in types.data_models[:10]:  # Top 10 data models
+                fields_desc = ", ".join(
+                    f"{name}: {typ}"
+                    for name, typ in model.get("key_fields", {}).items()
+                )
+                if fields_desc:
+                    pattern_desc = f"{model['name']} fields: {fields_desc}"
+                    await asyncio.to_thread(
+                        project_memory.record_pattern,
+                        pattern_type="types",
+                        description=pattern_desc,
+                        example=f"File: {model.get('file', 'unknown')}",
+                        confidence=0.8,
+                    )
+
+        logger.info("Repo analysis complete and injected into ProjectMemory")
+
+    except Exception as e:
+        # Don't fail session creation if analysis fails
+        logger.warning("Repo analysis failed, continuing without it: %s", e)
+
+
+async def create_optimized_context_with_repo_analysis(
+    sandbox: "CodeSandbox",
+    llm: "LLMProvider | None",
+    checkpoint: Any,
+    *,
+    act: "Act",
+    local_llm: "LLMProvider",
+    project_memory: Any,  # ProjectMemoryStore (required for this function)
+    enable_repo_analysis: bool = True,
+    **kwargs: Any,
+) -> "WorkContext":
+    """Create WorkContext with automatic repo analysis and ProjectMemory population.
+
+    This is an async wrapper around create_optimized_context that:
+    1. Runs ActRepoAnalyzer to discover repo structure, conventions, types
+    2. Converts analysis into ProjectMemory decisions and patterns
+    3. Creates WorkContext with populated ProjectMemory
+
+    Use this when starting a Code Mode session to ensure models have comprehensive
+    repo context for fair evaluation.
+
+    Args:
+        sandbox: Code sandbox for execution
+        llm: LLM provider for code generation
+        checkpoint: Human or auto checkpoint
+
+        act: The Act (project) being worked on
+        local_llm: Local LLM provider (Ollama) for cheap repo analysis
+        project_memory: ProjectMemoryStore to populate with analysis
+        enable_repo_analysis: Whether to run repo analysis (default True)
+        **kwargs: Additional arguments passed to create_optimized_context
+
+    Returns:
+        Configured WorkContext with repo analysis injected into ProjectMemory
+
+    Cost: ~$0.0011 for repo analysis with local LLM (vs $0.33 with GPT-4)
+    """
+    # Run repo analysis and populate ProjectMemory
+    if enable_repo_analysis and act and local_llm and project_memory:
+        await analyze_repo_and_populate_memory(
+            act=act,
+            llm=local_llm,
+            project_memory=project_memory,
+        )
+
+    # Create WorkContext with populated ProjectMemory
+    return create_optimized_context(
+        sandbox=sandbox,
+        llm=llm,
+        checkpoint=checkpoint,
+        project_memory=project_memory,
+        **kwargs,
+    )
 
 
 def create_optimized_context(
@@ -48,6 +253,8 @@ def create_optimized_context(
     # Pattern success tracking
     db: "Database | None" = None,
     repo_path: str | None = None,
+    # Project memory (for fair context provision)
+    project_memory: Any = None,  # ProjectMemoryStore | None
     # Optimization settings
     enable_metrics: bool = True,
     enable_trust_budget: bool = True,
@@ -82,6 +289,7 @@ def create_optimized_context(
 
         db: Database connection for pattern success tracking (optional)
         repo_path: Repository path for pattern success tracking (optional)
+        project_memory: ProjectMemoryStore for providing repo context (optional)
 
         enable_metrics: Enable execution metrics collection
         enable_trust_budget: Enable trust budget for verification decisions
@@ -137,6 +345,7 @@ def create_optimized_context(
         trust_budget=trust_budget,
         verification_batcher=verification_batcher,
         pattern_success_tracker=pattern_success_tracker,
+        project_memory=project_memory,
         max_cycles_per_intention=max_cycles_per_intention,
         max_depth=max_depth,
         on_intention_start=on_intention_start,
