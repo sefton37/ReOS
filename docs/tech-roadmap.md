@@ -46,7 +46,7 @@ All three share the same principles:
 - Safety without surveillance
 
 **The core value proposition:**
-> "ChatGPT is faster but sometimes makes shit up. RIVA is slower but never lies."
+> "ChatGPT optimizes for speed. RIVA optimizes for correctness."
 
 We don't compete on speed. We compete on **reliability and trust**.
 
@@ -668,7 +668,7 @@ See [RIVA Performance Strategy](./riva-performance-strategy.md) for full details
 | **First-try success** | 90-95% | 85-90% (slightly lower, but safer) |
 | **Token usage** | 2-3k | 4-6k (2x more, but local) |
 | **Ownership** | Their cloud, their rules | Your machine, your data |
-| **Trust** | Hope it's right | Verification guarantees |
+| **Trust** | Optimized for speed | Optimized for verification |
 
 **What we can do that they can't:**
 
@@ -680,7 +680,7 @@ See [RIVA Performance Strategy](./riva-performance-strategy.md) for full details
 6. **Federated Improvement**: Learn from corrections without centralizing data
 
 **User perception we design for:**
-> "Takes longer and sometimes needs tweaking, but never does anything unexpected, I own everything, and it's free."
+> "Takes longer and sometimes needs tweaking, but it checks its work, I own everything, and it's free."
 
 **Value proposition:** All you need is patience.
 

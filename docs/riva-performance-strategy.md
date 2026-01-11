@@ -15,13 +15,13 @@
 - Success rate: 85-90% works on first try (slightly lower, but safer)
 
 **User Perception:**
-> "Takes longer and sometimes needs tweaking, but never does anything unexpected, I own everything, and it's free."
+> "Takes longer and sometimes needs tweaking, but it checks its work, I own everything, and it's free."
 
 ## Core Philosophy
 
 You don't need to beat them on speed. Beat them on **reliability and trust**.
 
-> "ChatGPT is faster but sometimes makes shit up. RIVA is slower but never lies."
+> "ChatGPT optimizes for speed. RIVA optimizes for correctness."
 
 This is the tradeoff users accept:
 
@@ -29,9 +29,9 @@ This is the tradeoff users accept:
 |-----------|----------|------|
 | **Speed** | Fast (5-15s) | 3x slower (15-45s) |
 | **Cost** | $20-500/month | Free (local inference) |
-| **Reliability** | 90-95% first try | 85-90% first try, but safer |
+| **Reliability** | 90-95% first try | 85-90% first try |
 | **Ownership** | Their cloud, their rules | Complete data sovereignty |
-| **Trust** | Hope it's right | Verification guarantees |
+| **Trust** | Optimized for speed | Optimized for verification |
 
 **Value proposition:** "All you need is patience."
 

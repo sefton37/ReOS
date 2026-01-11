@@ -340,7 +340,7 @@ CAIRN uses this structure to:
 
 ### The Honest Tradeoff
 
-> "ChatGPT is faster but sometimes makes shit up. RIVA is slower but never lies."
+> "ChatGPT optimizes for speed. RIVA optimizes for correctness."
 
 | Dimension | Big Tech | Talking Rock |
 |-----------|----------|--------------|
@@ -348,9 +348,9 @@ CAIRN uses this structure to:
 | **Cost** | $20-500/month | Free |
 | **First-try success** | 90-95% | 85-90% (but safer) |
 | **Ownership** | Their cloud | Your machine |
-| **Trust** | Hope it's right | Verification guarantees |
+| **Trust** | Optimized for speed | Optimized for verification |
 
-**Why choose slower?** Because Talking Rock verifies before acting. It won't hallucinate an API that doesn't exist. It won't make changes you didn't approve. All you need is patience.
+**Why choose slower?** Because Talking Rock spends extra cycles verifying before acting. The tradeoff: slower responses, but more rigorous checking. You still approve all changes. All you need is patience.
 
 ---
 

@@ -344,9 +344,9 @@ These limits are configured in `src/reos/config.py` and can be tuned via environ
 
 ### Performance Optimization
 
-RIVA accepts being **3x slower than big tech** in exchange for **verification guarantees**. The optimization philosophy:
+RIVA accepts being **3x slower than big tech** in exchange for **more rigorous verification**. The optimization philosophy:
 
-> "ChatGPT is faster but sometimes makes shit up. RIVA is slower but never lies."
+> "ChatGPT optimizes for speed. RIVA optimizes for correctness."
 
 **Key Optimizations:**
 

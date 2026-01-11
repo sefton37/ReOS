@@ -228,7 +228,7 @@ The Talking Rock Tauri desktop app is the **home base** for your AI assistant. I
 
 ## The Honest Tradeoff: Speed vs. Trust
 
-> "ChatGPT is faster but sometimes makes shit up. RIVA is slower but never lies."
+> "ChatGPT optimizes for speed. RIVA optimizes for correctness."
 
 Talking Rock doesn't try to beat big tech on speed. We beat them on **reliability and trust**.
 
@@ -238,10 +238,10 @@ Talking Rock doesn't try to beat big tech on speed. We beat them on **reliabilit
 | **Cost** | $20-500/month | Free |
 | **First-try success** | 90-95% | 85-90% (but safer) |
 | **Ownership** | Their cloud, their rules | Your machine, your data |
-| **Trust** | Hope it's right | Verification guarantees |
+| **Trust** | Optimized for speed | Optimized for verification |
 
 **The user perception we're designing for:**
-> "Takes longer and sometimes needs tweaking, but never does anything unexpected, I own everything, and it's free."
+> "Takes longer and sometimes needs tweaking, but it checks its work, I own everything, and it's free."
 
 **Value proposition:** All you need is patience.
 
