@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from reos.code_mode.optimization.risk import ActionRisk
     from reos.code_mode.optimization.trust import TrustBudget
     from reos.code_mode.optimization.verification import VerificationBatcher
+    from reos.code_mode.optimization.pattern_success import PatternSuccessTracker
     from reos.providers import LLMProvider
 
 logger = logging.getLogger(__name__)
@@ -452,6 +453,7 @@ class WorkContext:
     metrics: "ExecutionMetrics | None" = None  # Performance metrics collection
     trust_budget: "TrustBudget | None" = None  # Session trust for verification decisions
     verification_batcher: "VerificationBatcher | None" = None  # Batch low-risk verifications
+    pattern_success_tracker: "PatternSuccessTracker | None" = None  # Learn from execution history
     max_cycles_per_intention: int = 5
     max_depth: int = 10
 
@@ -1638,10 +1640,33 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
                 judgment=Judgment.UNCLEAR,  # Will be set by checkpoint
             )
 
-            # Determine if we should verify based on trust budget
+            # Determine if we should verify based on trust budget and pattern history
             should_verify_action = True
+            pattern_trust = 0.5  # Default moderate trust
+
+            # Check pattern history for learned trust
+            if ctx.pattern_success_tracker:
+                pattern_trust = ctx.pattern_success_tracker.get_trust_level(action)
+                if ctx.session_logger:
+                    ctx.session_logger.log_debug("riva", "pattern_trust",
+                        f"Pattern trust level: {pattern_trust:.2f}", {
+                            "pattern_trust": pattern_trust,
+                            "action_type": action.type.value,
+                        })
+
+            # Use trust budget with pattern trust consideration
             if ctx.trust_budget:
                 should_verify_action = ctx.trust_budget.should_verify(action_risk)
+
+                # If pattern has very high trust (>0.9) and budget allows, skip verification
+                if pattern_trust > 0.9 and ctx.trust_budget.remaining > 50:
+                    should_verify_action = False
+                    if ctx.session_logger:
+                        ctx.session_logger.log_debug("riva", "pattern_trust_skip",
+                            f"Skipping verification due to high pattern trust ({pattern_trust:.2f})", {
+                                "pattern_trust": pattern_trust,
+                                "action_type": action.type.value,
+                            })
 
             # Determine actual verification strategy
             # CRITICAL: Never assume success without SOME form of verification
@@ -1714,6 +1739,12 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
                         if ctx.trust_budget:
                             ctx.trust_budget.deplete()
 
+                        # Record pattern failure
+                        if ctx.pattern_success_tracker:
+                            ctx.pattern_success_tracker.record_outcome(
+                                action, False, f"{action.type.value} in batch"
+                            )
+
                         # Create reflection about batch failure
                         failed_expectations = [f.expected for f in batch_result.failures]
                         cycle.reflection = f"Batch verification failed. Failed checks: {', '.join(failed_expectations[:3])}"
@@ -1740,10 +1771,22 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
                 if intention.status == IntentionStatus.VERIFIED:
                     if ctx.trust_budget and should_verify_action:
                         ctx.trust_budget.replenish()
+
+                    # Record pattern success
+                    if ctx.pattern_success_tracker:
+                        ctx.pattern_success_tracker.record_outcome(
+                            action, True, f"{action.type.value}"
+                        )
             else:
                 # Verification caught a failure - this is good
                 if ctx.trust_budget and should_verify_action:
                     ctx.trust_budget.record_failure_caught()
+
+                # Record pattern failure
+                if ctx.pattern_success_tracker:
+                    ctx.pattern_success_tracker.record_outcome(
+                        action, False, f"{action.type.value}"
+                    )
 
                 # Reflect on failure
                 cycle.reflection = reflect(intention, cycle, ctx)

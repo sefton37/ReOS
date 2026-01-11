@@ -55,9 +55,10 @@ Modules
     risk            Action risk classification (HIGH/MEDIUM/LOW)
     trust           Session-level trust budget management
     verification    Batch verification for reduced LLM calls
-    pattern_success Pattern success tracking for learned trust (scaffolded)
-    fast_path       Optimized handlers for common patterns (scaffolded)
-    model_selector  Task-appropriate model selection (scaffolded)
+    pattern_success Pattern success tracking for learned trust (fully integrated)
+    fast_path       Optimized handlers: ADD_IMPORT, FIX_IMPORT, CREATE_FUNCTION, ADD_TEST
+    model_selector  Task-appropriate model selection (needs multi-model infrastructure)
+    verification_layers Multi-layer verification (syntax, semantic, behavioral, intent)
     status          Unified status reporting for observability
     factory         Convenience functions for WorkContext creation
 
@@ -86,6 +87,14 @@ from reos.code_mode.optimization.fast_path import (
     FastPathPattern,
     detect_pattern,
     execute_fast_path,
+)
+from reos.code_mode.optimization.verification_layers import (
+    VerificationLayer,
+    VerificationStrategy,
+    VerificationResult,
+    LayerResult,
+    verify_action_multilayer,
+    get_strategy_for_risk,
 )
 from reos.code_mode.optimization.model_selector import (
     ModelTier,
@@ -126,6 +135,13 @@ __all__ = [
     "FastPathPattern",
     "detect_pattern",
     "execute_fast_path",
+    # Verification Layers
+    "VerificationLayer",
+    "VerificationStrategy",
+    "VerificationResult",
+    "LayerResult",
+    "verify_action_multilayer",
+    "get_strategy_for_risk",
     # Model Selection
     "ModelTier",
     "ModelSelection",
