@@ -1,23 +1,23 @@
 """Fast-path handlers for common patterns.
 
-WARNING: THIS MODULE IS EXPERIMENTAL SCAFFOLDING
-==========================================
-All handlers currently return False (fall back to full RIVA).
-No fast paths are actually implemented yet. This module exists
-as scaffolding for future optimization work.
-
-DO NOT rely on this module for any functionality. It is exported
-for API completeness but provides no actual optimization benefit.
-
-When handlers are implemented, remove this warning.
-==========================================
-
-Design intent (not yet implemented):
 80% of requests are variations on 20% of patterns.
-We could optimize those common patterns and use full RIVA for edge cases.
+We optimize those common patterns and use full RIVA for edge cases.
 
 Patterns are detected heuristically. When detection fails,
 we fall back to full RIVA - no harm done.
+
+Implemented Handlers
+--------------------
+- ADD_IMPORT: Add import statements to Python files
+
+Scaffolded (not yet implemented)
+--------------------------------
+- CREATE_FUNCTION, CREATE_CLASS, CREATE_FILE
+- ADD_TEST, FIX_TEST
+- FIX_IMPORT, FIX_TYPO, FIX_INDENT
+- ADD_METHOD, ADD_DOCSTRING
+
+Use get_available_patterns() to check which handlers are ready.
 """
 
 from __future__ import annotations
@@ -265,9 +265,232 @@ def _handle_fix_import(intention: "Intention", ctx: "WorkContext") -> bool:
 
 
 def _handle_add_import(intention: "Intention", ctx: "WorkContext") -> bool:
-    """Optimized handler for adding imports."""
-    logger.debug("ADD_IMPORT fast path not yet implemented")
-    return False
+    """Optimized handler for adding imports.
+
+    This handler adds an import statement to a Python file with minimal overhead.
+    It's optimized for the common case: "add import X to file Y".
+
+    Steps:
+    1. Extract file path and import statement from intention
+    2. Read the file and find the import section
+    3. Add the import at the right location
+    4. Verify syntax is valid
+
+    Returns:
+        True if handled successfully, False to fall back to full RIVA
+    """
+    from reos.code_mode.intention import (
+        ActionType,
+        Action,
+        Cycle,
+        Judgment,
+        IntentionStatus,
+    )
+
+    # Extract file path and import from intention
+    file_path = _extract_file_path(intention.what)
+    import_stmt = _extract_import_statement(intention.what)
+
+    if not file_path or not import_stmt:
+        logger.debug("ADD_IMPORT: Could not extract file path or import statement")
+        return False
+
+    logger.info(
+        "ADD_IMPORT fast path: adding '%s' to %s",
+        import_stmt.strip(),
+        file_path,
+    )
+
+    try:
+        # Read the file
+        content = ctx.sandbox.read_file(file_path)
+        lines = content.splitlines(keepends=True)
+
+        # Check if import already exists
+        import_line = import_stmt if import_stmt.endswith("\n") else import_stmt + "\n"
+        if import_stmt.strip() in content:
+            logger.info("ADD_IMPORT: Import already exists, marking success")
+            # Create a cycle to record the action
+            cycle = Cycle(
+                action=Action(type=ActionType.QUERY, content=f"Check if {import_stmt} exists"),
+                result="Import already exists",
+                judgment=Judgment.SUCCESS,
+            )
+            intention.trace.append(cycle)
+            intention.status = IntentionStatus.VERIFIED
+            return True
+
+        # Find the right position to insert
+        insert_pos = _find_import_insert_position(lines, import_stmt)
+
+        # Insert the import
+        lines.insert(insert_pos, import_line)
+        new_content = "".join(lines)
+
+        # Verify syntax before writing
+        if not _verify_python_syntax(new_content, file_path):
+            logger.warning("ADD_IMPORT: Syntax error after adding import")
+            return False
+
+        # Write the file
+        old_str, new_str = _build_import_edit(lines, insert_pos, import_line, content)
+        ctx.sandbox.edit_file(file_path, old_str, new_str)
+
+        # Record the action in the intention
+        cycle = Cycle(
+            action=Action(type=ActionType.EDIT, content=f"Add {import_stmt} to {file_path}"),
+            result=f"Added import at line {insert_pos + 1}",
+            judgment=Judgment.SUCCESS,
+        )
+        intention.trace.append(cycle)
+        intention.status = IntentionStatus.VERIFIED
+
+        logger.info("ADD_IMPORT: Successfully added import at line %d", insert_pos + 1)
+        return True
+
+    except Exception as e:
+        logger.warning("ADD_IMPORT fast path failed: %s", e)
+        return False
+
+
+def _extract_file_path(what: str) -> str | None:
+    """Extract file path from intention description.
+
+    Handles patterns like:
+    - "add import json to src/utils/parser.py"
+    - "import datetime in lib/helpers.py"
+    - "src/main.py: add import os"
+    """
+    # Pattern: explicit "to <path>" or "in <path>"
+    match = re.search(r"(?:to|in)\s+([^\s]+\.py)", what, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    # Pattern: "<path>:" at the start
+    match = re.search(r"^([^\s:]+\.py)\s*:", what)
+    if match:
+        return match.group(1)
+
+    # Pattern: any .py path in the string
+    match = re.search(r"([a-zA-Z0-9_/\\.-]+\.py)", what)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def _extract_import_statement(what: str) -> str | None:
+    """Extract import statement from intention description.
+
+    Handles patterns like:
+    - "add import json to file.py" -> "import json"
+    - "add from typing import Optional" -> "from typing import Optional"
+    - "import datetime in file.py" -> "import datetime"
+    """
+    # Pattern: "from X import Y" - stop at words that indicate end of import
+    match = re.search(
+        r"(from\s+[\w.]+\s+import\s+(?:[\w]+(?:\s*,\s*[\w]+)*|\*))",
+        what,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).strip()
+
+    # Pattern: "import X" (but not "add import X")
+    match = re.search(r"(?:^|add\s+)(import\s+[\w.]+(?:\s+as\s+\w+)?)", what, re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+
+    return None
+
+
+def _find_import_insert_position(lines: list[str], import_stmt: str) -> int:
+    """Find the best position to insert an import.
+
+    Strategy:
+    - After __future__ imports
+    - Group with similar imports (stdlib, third-party, local)
+    - After docstrings and before code
+    """
+    last_import_line = 0
+    in_docstring = False
+    docstring_end = 0
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+
+        # Track docstrings
+        if stripped.startswith('"""') or stripped.startswith("'''"):
+            if in_docstring:
+                in_docstring = False
+                docstring_end = i + 1
+            elif stripped.count('"""') == 1 or stripped.count("'''") == 1:
+                in_docstring = True
+            else:
+                # Single-line docstring
+                docstring_end = i + 1
+
+        # Track imports
+        if stripped.startswith(("import ", "from ")):
+            last_import_line = i + 1
+
+    # If there are existing imports, add after them
+    if last_import_line > 0:
+        return last_import_line
+
+    # If there's a module docstring, add after it
+    if docstring_end > 0:
+        return docstring_end
+
+    # Otherwise, add at the beginning
+    return 0
+
+
+def _verify_python_syntax(content: str, file_path: str) -> bool:
+    """Verify Python syntax is valid.
+
+    Returns True if syntax is valid, False otherwise.
+    """
+    import ast
+
+    try:
+        ast.parse(content)
+        return True
+    except SyntaxError as e:
+        logger.debug("Syntax error in %s: %s", file_path, e)
+        return False
+
+
+def _build_import_edit(
+    lines: list[str],
+    insert_pos: int,
+    import_line: str,
+    original_content: str,
+) -> tuple[str, str]:
+    """Build old_str and new_str for the edit operation.
+
+    Since we're inserting, we need to find an anchor point.
+    We use the line at insert_pos (or the last line if inserting at end).
+    """
+    if insert_pos == 0:
+        # Inserting at the beginning
+        if lines:
+            old_str = lines[0]
+            new_str = import_line + old_str
+        else:
+            # Empty file
+            old_str = ""
+            new_str = import_line
+    elif insert_pos >= len(lines):
+        # Inserting at the end
+        old_str = lines[-1]
+        new_str = old_str.rstrip("\n") + "\n" + import_line
+    else:
+        # Inserting in the middle - use the line before as anchor
+        old_str = lines[insert_pos - 1]
+        new_str = old_str.rstrip("\n") + "\n" + import_line
+
+    return old_str, new_str
 
 
 def _handle_fix_typo(intention: "Intention", ctx: "WorkContext") -> bool:
@@ -295,9 +518,9 @@ FAST_PATH_HANDLERS: dict[FastPathPattern, Callable] = {
 
 def get_available_patterns() -> list[FastPathPattern]:
     """Get list of patterns that have implementations."""
-    # For now, none are fully implemented
-    # Return empty list until handlers are ready
-    return []
+    return [
+        FastPathPattern.ADD_IMPORT,
+    ]
 
 
 def is_pattern_available(pattern: FastPathPattern) -> bool:

@@ -1566,7 +1566,50 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
             f"Intention {'can' if verifiable else 'cannot'} be verified directly")
 
     if verifiable:
-        # 2. Try to satisfy it with action cycles
+        # 2a. Check for fast path optimization
+        # Fast paths handle common patterns with minimal overhead
+        try:
+            from reos.code_mode.optimization.fast_path import (
+                detect_pattern,
+                execute_fast_path,
+                is_pattern_available,
+            )
+
+            pattern_match = detect_pattern(intention.what, intention.acceptance)
+            if pattern_match.is_match and is_pattern_available(pattern_match.pattern):
+                if ctx.session_logger:
+                    ctx.session_logger.log_info("riva", "fast_path_attempt",
+                        f"Attempting fast path: {pattern_match.pattern.value}", {
+                            "pattern": pattern_match.pattern.value,
+                            "confidence": pattern_match.confidence,
+                            "extracted": pattern_match.extracted,
+                        })
+
+                # Try the fast path handler
+                if execute_fast_path(pattern_match.pattern, intention, ctx):
+                    # Fast path succeeded - skip normal RIVA cycle
+                    if ctx.session_logger:
+                        ctx.session_logger.log_info("riva", "fast_path_success",
+                            f"Fast path handled: {pattern_match.pattern.value}", {
+                                "pattern": pattern_match.pattern.value,
+                            })
+                    if ctx.metrics:
+                        ctx.metrics.record_action()  # Record the fast path action
+                    if ctx.on_intention_complete:
+                        ctx.on_intention_complete(intention)
+                    return
+
+                # Fast path failed - fall back to normal RIVA
+                if ctx.session_logger:
+                    ctx.session_logger.log_debug("riva", "fast_path_fallback",
+                        "Fast path failed, falling back to full RIVA", {
+                            "pattern": pattern_match.pattern.value,
+                        })
+        except Exception as e:
+            # Fast path system error - log and continue with normal RIVA
+            logger.warning("Fast path detection failed: %s", e)
+
+        # 2b. Try to satisfy it with action cycles
         while intention.status == IntentionStatus.ACTIVE:
             # Determine next action
             thought, action = determine_next_action(intention, ctx)

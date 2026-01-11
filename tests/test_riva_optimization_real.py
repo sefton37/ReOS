@@ -494,3 +494,165 @@ class TestTrustCostModel:
 
         assert trust.remaining == 85  # +5 for catching failure
         assert trust.failures_caught == 1
+
+
+# =============================================================================
+# Test Cases: Fast Path ADD_IMPORT Handler
+# =============================================================================
+
+
+class TestAddImportFastPath:
+    """Test the ADD_IMPORT fast path handler helper functions."""
+
+    def test_extract_file_path_with_to(self) -> None:
+        """Extract file path from 'add import X to file.py' pattern."""
+        from reos.code_mode.optimization.fast_path import _extract_file_path
+
+        result = _extract_file_path("add import json to src/utils/parser.py")
+        assert result == "src/utils/parser.py"
+
+    def test_extract_file_path_with_in(self) -> None:
+        """Extract file path from 'import X in file.py' pattern."""
+        from reos.code_mode.optimization.fast_path import _extract_file_path
+
+        result = _extract_file_path("import datetime in lib/helpers.py")
+        assert result == "lib/helpers.py"
+
+    def test_extract_file_path_with_colon(self) -> None:
+        """Extract file path from 'file.py: add import X' pattern."""
+        from reos.code_mode.optimization.fast_path import _extract_file_path
+
+        result = _extract_file_path("src/main.py: add import os")
+        assert result == "src/main.py"
+
+    def test_extract_file_path_fallback(self) -> None:
+        """Extract file path when it's just mentioned."""
+        from reos.code_mode.optimization.fast_path import _extract_file_path
+
+        result = _extract_file_path("add import json utils.py")
+        assert result == "utils.py"
+
+    def test_extract_file_path_none(self) -> None:
+        """Return None when no file path found."""
+        from reos.code_mode.optimization.fast_path import _extract_file_path
+
+        result = _extract_file_path("add import json")
+        assert result is None
+
+    def test_extract_import_statement_simple(self) -> None:
+        """Extract simple import statement."""
+        from reos.code_mode.optimization.fast_path import _extract_import_statement
+
+        result = _extract_import_statement("add import json to file.py")
+        assert result == "import json"
+
+    def test_extract_import_statement_from(self) -> None:
+        """Extract 'from X import Y' statement."""
+        from reos.code_mode.optimization.fast_path import _extract_import_statement
+
+        result = _extract_import_statement("add from typing import Optional to file.py")
+        assert result == "from typing import Optional"
+
+    def test_extract_import_statement_with_alias(self) -> None:
+        """Extract import with alias."""
+        from reos.code_mode.optimization.fast_path import _extract_import_statement
+
+        result = _extract_import_statement("add import numpy as np to file.py")
+        assert result == "import numpy as np"
+
+    def test_extract_import_statement_none(self) -> None:
+        """Return None when no import found."""
+        from reos.code_mode.optimization.fast_path import _extract_import_statement
+
+        result = _extract_import_statement("fix the function in file.py")
+        assert result is None
+
+    def test_find_import_insert_position_after_imports(self) -> None:
+        """Insert after existing imports."""
+        from reos.code_mode.optimization.fast_path import _find_import_insert_position
+
+        lines = [
+            "import os\n",
+            "import sys\n",
+            "\n",
+            "def main():\n",
+            "    pass\n",
+        ]
+        pos = _find_import_insert_position(lines, "import json")
+        assert pos == 2  # After the last import
+
+    def test_find_import_insert_position_after_docstring(self) -> None:
+        """Insert after module docstring when no imports."""
+        from reos.code_mode.optimization.fast_path import _find_import_insert_position
+
+        lines = [
+            '"""Module docstring."""\n',
+            "\n",
+            "def main():\n",
+        ]
+        pos = _find_import_insert_position(lines, "import json")
+        assert pos == 1  # After the docstring
+
+    def test_find_import_insert_position_at_beginning(self) -> None:
+        """Insert at beginning when no docstring or imports."""
+        from reos.code_mode.optimization.fast_path import _find_import_insert_position
+
+        lines = [
+            "def main():\n",
+            "    pass\n",
+        ]
+        pos = _find_import_insert_position(lines, "import json")
+        assert pos == 0  # At the beginning
+
+    def test_verify_python_syntax_valid(self) -> None:
+        """Valid Python syntax should return True."""
+        from reos.code_mode.optimization.fast_path import _verify_python_syntax
+
+        content = "import json\n\ndef main():\n    pass\n"
+        assert _verify_python_syntax(content, "test.py") is True
+
+    def test_verify_python_syntax_invalid(self) -> None:
+        """Invalid Python syntax should return False."""
+        from reos.code_mode.optimization.fast_path import _verify_python_syntax
+
+        content = "import json\n\ndef main(\n    pass\n"  # Missing closing paren
+        assert _verify_python_syntax(content, "test.py") is False
+
+    def test_build_import_edit_at_beginning(self) -> None:
+        """Build edit for inserting at beginning."""
+        from reos.code_mode.optimization.fast_path import _build_import_edit
+
+        lines = ["def main():\n", "    pass\n"]
+        old_str, new_str = _build_import_edit(lines, 0, "import json\n", "".join(lines))
+        assert old_str == "def main():\n"
+        assert new_str == "import json\ndef main():\n"
+
+    def test_build_import_edit_in_middle(self) -> None:
+        """Build edit for inserting in middle."""
+        from reos.code_mode.optimization.fast_path import _build_import_edit
+
+        lines = ["import os\n", "\n", "def main():\n"]
+        old_str, new_str = _build_import_edit(lines, 1, "import json\n", "".join(lines))
+        assert old_str == "import os\n"
+        assert new_str == "import os\nimport json\n"
+
+    def test_pattern_detection_add_import(self) -> None:
+        """Pattern detection should match ADD_IMPORT."""
+        from reos.code_mode.optimization.fast_path import (
+            detect_pattern,
+            FastPathPattern,
+        )
+
+        match = detect_pattern("add import json to file.py")
+        assert match.is_match
+        assert match.pattern == FastPathPattern.ADD_IMPORT
+
+    def test_available_patterns_includes_add_import(self) -> None:
+        """ADD_IMPORT should be in available patterns."""
+        from reos.code_mode.optimization.fast_path import (
+            get_available_patterns,
+            FastPathPattern,
+        )
+
+        available = get_available_patterns()
+        assert FastPathPattern.ADD_IMPORT in available
