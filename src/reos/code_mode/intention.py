@@ -2036,6 +2036,46 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
         ctx.metrics.complete(success)
         logger.info("Metrics: %s", ctx.metrics.summary())
 
+        # Persist metrics to database for continuous learning
+        try:
+            import sqlite3
+            from reos.settings import settings
+            from reos.code_mode.optimization.metrics import MetricsStore
+
+            # Create database connection
+            db_path = settings.data_dir / "riva.db"
+            settings.data_dir.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(db_path))
+
+            # Create a simple wrapper that provides both execute() and fetchall()
+            class DBWrapper:
+                def __init__(self, connection):
+                    self.conn = connection
+                    self.cursor = connection.cursor()
+
+                def execute(self, sql, params=None):
+                    if params:
+                        return self.cursor.execute(sql, params)
+                    return self.cursor.execute(sql)
+
+                def fetchall(self, sql=None, params=None):
+                    if sql:
+                        # Execute first, then fetchall
+                        self.execute(sql, params)
+                    return self.cursor.fetchall()
+
+            # Save metrics
+            db = DBWrapper(conn)
+            store = MetricsStore(db)
+            store.save(ctx.metrics)
+            conn.commit()
+            conn.close()
+
+            logger.info("Metrics persisted to database: %s", db_path)
+        except Exception as e:
+            # Don't fail the session if metrics persistence fails
+            logger.warning("Failed to persist metrics to database: %s", e)
+
     if ctx.on_intention_complete:
         ctx.on_intention_complete(intention)
 
