@@ -103,6 +103,11 @@ class TrustBudget:
         if risk.level == RiskLevel.LOW and self.remaining > 70:
             self.remaining -= cost // 2  # Partial cost for skipping
             self._record("skip", "low_risk_high_budget", cost // 2)
+            logger.info(
+                "Skipping verification: LOW risk, trust=%d (factors: %s)",
+                self.remaining,
+                ", ".join(risk.factors) if risk.factors else "none",
+            )
             self.verifications_skipped += 1
             return False
 
@@ -110,6 +115,11 @@ class TrustBudget:
         if risk.level == RiskLevel.MEDIUM and self.remaining > 85:
             self.remaining -= cost // 2
             self._record("skip", "medium_risk_very_high_budget", cost // 2)
+            logger.info(
+                "Skipping verification: MEDIUM risk, trust=%d (factors: %s)",
+                self.remaining,
+                ", ".join(risk.factors) if risk.factors else "none",
+            )
             self.verifications_skipped += 1
             return False
 

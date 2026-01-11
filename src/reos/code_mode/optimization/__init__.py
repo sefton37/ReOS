@@ -55,7 +55,7 @@ Modules
     risk            Action risk classification (HIGH/MEDIUM/LOW)
     trust           Session-level trust budget management
     verification    Batch verification for reduced LLM calls
-    pattern_success Pattern success tracking for learned trust
+    pattern_success Pattern success tracking for learned trust (scaffolded)
     fast_path       Optimized handlers for common patterns (scaffolded)
     model_selector  Task-appropriate model selection (scaffolded)
     status          Unified status reporting for observability

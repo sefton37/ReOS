@@ -1,7 +1,24 @@
 """Pattern success tracking for learned trust.
 
-This module tracks the success/failure rate of execution patterns
-over time. Patterns that consistently succeed can be trusted more.
+WARNING: THIS MODULE IS NOT INTEGRATED
+======================================
+While the tracking logic is implemented, this module is NEVER
+called from the main work() loop in intention.py. It exists as
+scaffolding for future integration.
+
+To use this module, work() would need to:
+1. Record successful/failed patterns via record_attempt()
+2. Query pattern trust via get_pattern_trust()
+3. Adjust verification decisions based on learned trust
+
+None of that integration exists yet. This is dead code.
+
+When integrated, remove this warning.
+======================================
+
+Design intent (not yet integrated):
+Track the success/failure rate of execution patterns over time.
+Patterns that consistently succeed can be trusted more.
 Patterns that fail lose trust.
 
 Important: We store success metrics, not code.
