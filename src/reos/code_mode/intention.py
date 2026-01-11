@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from reos.code_mode.optimization.verification import VerificationBatcher
     from reos.code_mode.optimization.pattern_success import PatternSuccessTracker
     from reos.code_mode.optimization.verification_layers import VerificationResult
+    from reos.code_mode.project_memory import ProjectMemoryStore
     from reos.providers import LLMProvider
 
 logger = logging.getLogger(__name__)
@@ -460,6 +461,7 @@ class WorkContext:
     trust_budget: "TrustBudget | None" = None  # Session trust for verification decisions
     verification_batcher: "VerificationBatcher | None" = None  # Batch low-risk verifications
     pattern_success_tracker: "PatternSuccessTracker | None" = None  # Learn from execution history
+    project_memory: "ProjectMemoryStore | None" = None  # Project decisions, patterns, learned corrections
     max_cycles_per_intention: int = 5
     max_depth: int = 10
 
@@ -972,6 +974,59 @@ def determine_next_action(intention: Intention, ctx: WorkContext) -> tuple[str, 
     if tool_context:
         existing_context += f"\n\n[Additional Context from Tools]\n{tool_context[:2000]}"
 
+    # Gather project memory context for fair evaluation
+    # This provides models the repo conventions they need to integrate correctly
+    project_memory_context = ""
+    if ctx.project_memory:
+        try:
+            repo_path = str(getattr(ctx.sandbox, 'repo_path', None) or getattr(ctx.sandbox, 'root_dir', '.'))
+            memory = ctx.project_memory.get_relevant_context(
+                repo_path=repo_path,
+                prompt=intention.what,
+                file_paths=None,  # Could pass related files if available
+                max_decisions=5,
+                max_patterns=5,
+                max_corrections=3,
+            )
+
+            # Inject decisions
+            if memory.relevant_decisions:
+                decisions_text = "\n".join(f"- {d.decision}" for d in memory.relevant_decisions)
+                project_memory_context += f"\n\nPROJECT DECISIONS (must respect):\n{decisions_text}"
+
+            # Inject patterns
+            if memory.applicable_patterns:
+                patterns_text = "\n".join(f"- {p.description}" for p in memory.applicable_patterns)
+                project_memory_context += f"\n\nCODE PATTERNS (must follow):\n{patterns_text}"
+
+            # Inject learned corrections
+            if memory.recent_corrections:
+                corrections_text = "\n".join(
+                    f"- {c.inferred_rule}" for c in memory.recent_corrections if c.inferred_rule
+                )
+                if corrections_text:
+                    project_memory_context += f"\n\nLEARNED (from previous corrections):\n{corrections_text}"
+
+            if project_memory_context:
+                logger.info(
+                    "Injected project memory: %d decisions, %d patterns, %d corrections",
+                    len(memory.relevant_decisions),
+                    len(memory.applicable_patterns),
+                    len(memory.recent_corrections),
+                )
+                if ctx.session_logger:
+                    ctx.session_logger.log_debug("riva", "project_memory_injected",
+                        f"Injected context: {len(project_memory_context)} chars", {
+                            "decisions_count": len(memory.relevant_decisions),
+                            "patterns_count": len(memory.applicable_patterns),
+                            "corrections_count": len(memory.recent_corrections),
+                        })
+        except Exception as e:
+            logger.warning("Failed to inject project memory: %s", e)
+            if ctx.session_logger:
+                ctx.session_logger.log_warning("riva", "project_memory_failed",
+                    f"Could not inject project memory: {e}")
+
     system_prompt = """You are determining the next action to satisfy an intention.
 
 CRITICAL RULES:
@@ -1004,7 +1059,7 @@ Be specific and concrete. Write REAL implementations, not stubs."""
 
 INTENTION: {intention.what}
 ACCEPTANCE: {intention.acceptance}
-{history}{existing_context}
+{history}{existing_context}{project_memory_context}
 
 What should we try next? Remember: write COMPLETE working code, not placeholders."""
 

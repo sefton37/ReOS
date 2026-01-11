@@ -48,6 +48,8 @@ def create_optimized_context(
     # Pattern success tracking
     db: "Database | None" = None,
     repo_path: str | None = None,
+    # Project memory (for fair context provision)
+    project_memory: Any = None,  # ProjectMemoryStore | None
     # Optimization settings
     enable_metrics: bool = True,
     enable_trust_budget: bool = True,
@@ -82,6 +84,7 @@ def create_optimized_context(
 
         db: Database connection for pattern success tracking (optional)
         repo_path: Repository path for pattern success tracking (optional)
+        project_memory: ProjectMemoryStore for providing repo context (optional)
 
         enable_metrics: Enable execution metrics collection
         enable_trust_budget: Enable trust budget for verification decisions
@@ -137,6 +140,7 @@ def create_optimized_context(
         trust_budget=trust_budget,
         verification_batcher=verification_batcher,
         pattern_success_tracker=pattern_success_tracker,
+        project_memory=project_memory,
         max_cycles_per_intention=max_cycles_per_intention,
         max_depth=max_depth,
         on_intention_start=on_intention_start,
