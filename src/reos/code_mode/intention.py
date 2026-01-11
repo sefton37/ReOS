@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from reos.code_mode.tools import ToolProvider
     from reos.code_mode.optimization.metrics import ExecutionMetrics
     from reos.code_mode.optimization.complexity import TaskComplexity
+    from reos.code_mode.optimization.risk import ActionRisk
     from reos.providers import LLMProvider
 
 logger = logging.getLogger(__name__)
@@ -1566,11 +1567,17 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
             # Determine next action
             thought, action = determine_next_action(intention, ctx)
 
+            # Assess risk before execution
+            from reos.code_mode.optimization.risk import assess_risk
+            action_risk = assess_risk(action)
+
             if ctx.session_logger:
                 ctx.session_logger.log_debug("riva", "cycle_start",
                     f"Thought: {thought[:50]}...", {
                         "action_type": action.type.value,
                         "action_content": action.content[:100],
+                        "risk_level": action_risk.level.value,
+                        "risk_factors": action_risk.factors,
                     })
 
             # Execute action
@@ -1587,14 +1594,16 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
             # Human/auto judgment
             cycle.judgment = ctx.checkpoint.judge_action(intention, cycle)
 
-            # Track verification in metrics
+            # Track verification in metrics with actual risk level
             if ctx.metrics:
-                ctx.metrics.record_verification("medium")  # Default risk level for now
+                ctx.metrics.record_verification(action_risk.level.value)
 
             if ctx.session_logger:
                 ctx.session_logger.log_info("riva", "cycle_complete",
                     f"Judgment: {cycle.judgment.value}", {
                         "result_preview": result[:200],
+                        "risk_level": action_risk.level.value,
+                        "requires_verification": action_risk.requires_verification,
                     })
 
             if cycle.judgment == Judgment.SUCCESS:
