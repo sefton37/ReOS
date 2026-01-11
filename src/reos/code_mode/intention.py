@@ -1856,10 +1856,33 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
                 if ctx.metrics:
                     ctx.metrics.record_verification(action_risk.level.value)
 
+            # ================================================================
+            # STAGE GATE: Cycle Complete
+            # ================================================================
             if ctx.session_logger:
+                # Build cycle completion summary (no truncation)
+                summary_parts = []
+                summary_parts.append("-" * 60)
+                summary_parts.append(f"CYCLE COMPLETE: {cycle.judgment.value}")
+                summary_parts.append("-" * 60)
+                summary_parts.append(f"Action: {action.type.value}")
+                if hasattr(action, "target") and action.target:
+                    summary_parts.append(f"Target: {action.target}")
+                summary_parts.append(f"Risk Level: {action_risk.level.value}")
+                summary_parts.append(f"Verified: {should_verify_action}")
+                if ctx.trust_budget:
+                    summary_parts.append(f"Trust Remaining: {ctx.trust_budget.remaining}")
+                summary_parts.append("")
+                summary_parts.append("Result:")
+                summary_parts.append(result)  # NO TRUNCATION - show full result
+                summary_parts.append("-" * 60)
+
                 ctx.session_logger.log_info("riva", "cycle_complete",
-                    f"Judgment: {cycle.judgment.value}", {
-                        "result_preview": result[:200],
+                    "\n".join(summary_parts), {
+                        "judgment": cycle.judgment.value,
+                        "action_type": action.type.value,
+                        "target": action.target if hasattr(action, "target") else None,
+                        "result": result,  # Full result, no truncation
                         "risk_level": action_risk.level.value,
                         "verified": should_verify_action,
                         "trust_remaining": ctx.trust_budget.remaining if ctx.trust_budget else None,

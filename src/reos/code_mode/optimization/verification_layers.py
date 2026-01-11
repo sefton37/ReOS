@@ -216,8 +216,32 @@ async def verify_action_multilayer(
     overall_passed = True
     total_tokens = 0
 
-    for layer in layers_to_run:
+    # Log verification start with full context
+    if ctx.session_logger:
+        ctx.session_logger.log_info(
+            "riva",
+            "verification_start",
+            f"Starting {strategy.value} verification for {action.type.value}",
+            {
+                "action_type": action.type.value,
+                "target": action.target if hasattr(action, "target") else None,
+                "strategy": strategy.value,
+                "layers_to_run": [layer.value for layer in layers_to_run],
+                "intention": intention.what,
+            },
+        )
+
+    for i, layer in enumerate(layers_to_run, 1):
         layer_start = time.perf_counter()
+
+        # Log layer start
+        if ctx.session_logger:
+            ctx.session_logger.log_info(
+                "riva",
+                "verification_layer_start",
+                f"[{i}/{len(layers_to_run)}] Running {layer.value} verification",
+                {"layer": layer.value, "layer_number": i, "total_layers": len(layers_to_run)},
+            )
 
         # Execute layer verification
         if layer == VerificationLayer.SYNTAX:
@@ -242,6 +266,24 @@ async def verify_action_multilayer(
         layer_results.append(result)
         total_tokens += result.tokens_used
 
+        # Log detailed layer result (NO TRUNCATION)
+        status_symbol = "✓" if result.passed else "✗"
+        if ctx.session_logger:
+            ctx.session_logger.log_info(
+                "riva",
+                "verification_layer_complete",
+                f"[{i}/{len(layers_to_run)}] {status_symbol} {layer.value}: {result.reason}",
+                {
+                    "layer": layer.value,
+                    "passed": result.passed,
+                    "confidence": result.confidence,
+                    "duration_ms": layer_duration,
+                    "reason": result.reason,  # Full reason, no truncation
+                    "details": result.details,  # Full details
+                    "tokens_used": result.tokens_used,
+                },
+            )
+
         logger.debug(
             "Verification layer %s: %s (%.2f confidence, %dms)",
             layer.value,
@@ -255,6 +297,17 @@ async def verify_action_multilayer(
             overall_passed = False
             if stop_on_failure:
                 logger.info("Stopping verification at layer %s (failed)", layer.value)
+                if ctx.session_logger:
+                    ctx.session_logger.log_info(
+                        "riva",
+                        "verification_stopped",
+                        f"Verification stopped at {layer.value} layer (fail-fast enabled)",
+                        {
+                            "stopped_at": layer.value,
+                            "reason": result.reason,
+                            "remaining_layers": [l.value for l in layers_to_run[i:]],
+                        },
+                    )
                 break
 
     # Calculate overall confidence (weighted average)
@@ -278,6 +331,68 @@ async def verify_action_multilayer(
     stopped_at = None
     if not overall_passed and stop_on_failure and layer_results:
         stopped_at = layer_results[-1].layer
+
+    # ========================================================================
+    # STAGE GATE SUMMARY: Verification Complete
+    # ========================================================================
+    if ctx.session_logger:
+        # Build detailed summary
+        summary_lines = []
+        summary_lines.append("=" * 60)
+        summary_lines.append("VERIFICATION COMPLETE")
+        summary_lines.append("=" * 60)
+        summary_lines.append(f"Strategy: {strategy.value}")
+        summary_lines.append(f"Overall Result: {'PASS' if overall_passed else 'FAIL'}")
+        summary_lines.append(f"Overall Confidence: {overall_confidence:.1%}")
+        summary_lines.append(f"Total Duration: {total_duration}ms")
+        summary_lines.append(f"Tokens Used: {total_tokens}")
+        summary_lines.append("")
+        summary_lines.append("Layer Results:")
+        summary_lines.append("-" * 60)
+
+        for i, result in enumerate(layer_results, 1):
+            status = "✓ PASS" if result.passed else "✗ FAIL"
+            summary_lines.append(
+                f"  [{i}] {result.layer.value.upper()}: {status} "
+                f"(confidence: {result.confidence:.1%}, {result.duration_ms}ms)"
+            )
+            summary_lines.append(f"      Reason: {result.reason}")
+            if result.details:
+                # Show full details, no truncation
+                for key, value in result.details.items():
+                    summary_lines.append(f"      {key}: {value}")
+
+        if stopped_at:
+            summary_lines.append("")
+            summary_lines.append(f"⚠ Stopped early at {stopped_at.value} layer (fail-fast)")
+
+        summary_lines.append("=" * 60)
+
+        # Log the complete summary
+        ctx.session_logger.log_info(
+            "riva",
+            "verification_summary",
+            "\n".join(summary_lines),
+            {
+                "overall_passed": overall_passed,
+                "overall_confidence": overall_confidence,
+                "total_duration_ms": total_duration,
+                "total_tokens": total_tokens,
+                "layers_run": len(layer_results),
+                "stopped_at": stopped_at.value if stopped_at else None,
+                "layer_results": [
+                    {
+                        "layer": r.layer.value,
+                        "passed": r.passed,
+                        "confidence": r.confidence,
+                        "duration_ms": r.duration_ms,
+                        "reason": r.reason,
+                        "details": r.details,
+                    }
+                    for r in layer_results
+                ],
+            },
+        )
 
     return VerificationResult(
         action=action,
@@ -424,7 +539,7 @@ async def _verify_semantic_layer(action: "Action", ctx: "WorkContext") -> LayerR
 
     if errors:
         # Semantic errors found - code won't work
-        error_messages = "; ".join(str(e) for e in errors[:3])  # First 3 errors
+        error_messages = "; ".join(str(e) for e in errors)  # Show all errors
         return LayerResult(
             layer=VerificationLayer.SEMANTIC,
             passed=False,
@@ -434,7 +549,7 @@ async def _verify_semantic_layer(action: "Action", ctx: "WorkContext") -> LayerR
         )
     elif warnings:
         # Warnings only - code might work but has issues
-        warning_messages = "; ".join(str(w) for w in warnings[:2])
+        warning_messages = "; ".join(str(w) for w in warnings)  # Show all warnings
         return LayerResult(
             layer=VerificationLayer.SEMANTIC,
             passed=True,
@@ -529,7 +644,7 @@ async def _run_python_tests(file_path: str, ctx: "WorkContext") -> LayerResult |
                 passed=True,
                 confidence=0.95,
                 reason=f"All tests passed ({test_count} tests)",
-                details={"test_count": test_count, "output": result.stdout[:500]},
+                details={"test_count": test_count, "output": result.stdout},
             )
         else:
             # Tests failed
@@ -539,7 +654,7 @@ async def _run_python_tests(file_path: str, ctx: "WorkContext") -> LayerResult |
                 passed=False,
                 confidence=0.0,
                 reason=f"Tests failed ({failed_count} failures)",
-                details={"failed_count": failed_count, "output": result.stdout[:500]},
+                details={"failed_count": failed_count, "output": result.stdout},
             )
 
     except subprocess.TimeoutExpired:
@@ -742,13 +857,13 @@ Does this code accomplish what was requested? Respond in the required format."""
 
         # If we couldn't parse alignment, treat as failure
         if aligned is None:
-            logger.warning("Could not parse ALIGNED status from LLM response: %s", response[:200])
+            logger.warning("Could not parse ALIGNED status from LLM response: %s", response)
             return LayerResult(
                 layer=VerificationLayer.INTENT,
                 passed=False,
                 confidence=0.3,
                 reason="Failed to parse LLM intent verification response",
-                details={"llm_response": response[:500]},
+                details={"llm_response": response},
                 tokens_used=100,  # Estimate
             )
 
@@ -765,7 +880,7 @@ Does this code accomplish what was requested? Respond in the required format."""
             confidence=confidence if aligned else (1.0 - confidence),
             reason=reason,
             details={
-                "llm_response": response[:500],
+                "llm_response": response,
                 "aligned": aligned,
             },
             tokens_used=100,  # Estimate - could track actual tokens if needed
@@ -777,7 +892,7 @@ Does this code accomplish what was requested? Respond in the required format."""
             layer=VerificationLayer.INTENT,
             passed=False,
             confidence=0.0,
-            reason=f"Intent verification error: {str(e)[:200]}",
+            reason=f"Intent verification error: {str(e)}",
             details={"error": str(e)},
             tokens_used=0,
         )
