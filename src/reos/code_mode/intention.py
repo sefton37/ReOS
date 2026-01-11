@@ -1741,6 +1741,16 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
 
                     cycle.judgment = _verification_to_judgment(verification_result)
 
+                    # Record verification layer results in metrics
+                    if ctx.metrics:
+                        ctx.metrics.record_verification_layers(verification_result)
+                        # Record confidence prediction (we'll track actual success later)
+                        # For now, record the prediction
+                        ctx.metrics.record_confidence_prediction(
+                            verification_result.overall_confidence,
+                            cycle.judgment == Judgment.SUCCESS
+                        )
+
                     if ctx.session_logger:
                         ctx.session_logger.log_info("riva", "multilayer_verification_complete",
                             f"Verification: {cycle.judgment.value} (confidence: {verification_result.overall_confidence:.2%})", {
@@ -1819,6 +1829,14 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
                     )
 
                     cycle.judgment = _verification_to_judgment(verification_result)
+
+                    # Record verification layer results in metrics
+                    if ctx.metrics:
+                        ctx.metrics.record_verification_layers(verification_result)
+                        ctx.metrics.record_confidence_prediction(
+                            verification_result.overall_confidence,
+                            cycle.judgment == Judgment.SUCCESS
+                        )
 
                     if ctx.session_logger:
                         ctx.session_logger.log_info("riva", "multilayer_verification_complete",
