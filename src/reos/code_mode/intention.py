@@ -16,6 +16,7 @@ This module implements:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -26,6 +27,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, TypeVar
 
 from reos.code_mode.json_utils import parse_llm_json
+from reos.code_mode.optimization.verification_layers import (
+    verify_action_multilayer,
+    VerificationStrategy,
+)
 
 if TYPE_CHECKING:
     from reos.code_mode.sandbox import CodeSandbox
@@ -38,6 +43,7 @@ if TYPE_CHECKING:
     from reos.code_mode.optimization.trust import TrustBudget
     from reos.code_mode.optimization.verification import VerificationBatcher
     from reos.code_mode.optimization.pattern_success import PatternSuccessTracker
+    from reos.code_mode.optimization.verification_layers import VerificationResult
     from reos.providers import LLMProvider
 
 logger = logging.getLogger(__name__)
@@ -1306,6 +1312,31 @@ def _merge_python_content(existing: str, new_content: str) -> str:
     return '\n'.join(result_lines)
 
 
+def _verification_to_judgment(verification_result: "VerificationResult") -> Judgment:
+    """Convert a VerificationResult to a Judgment.
+
+    Args:
+        verification_result: Result from verify_action_multilayer()
+
+    Returns:
+        Judgment based on verification outcome and confidence
+    """
+    if not verification_result.overall_passed:
+        # Verification failed at some layer
+        return Judgment.FAILURE
+
+    # Passed all layers, but check confidence
+    # High confidence (>=0.90) -> SUCCESS
+    # Medium confidence (0.70-0.89) -> PARTIAL (might need review)
+    # Low confidence (<0.70) -> FAILURE (not confident enough)
+    if verification_result.overall_confidence >= 0.90:
+        return Judgment.SUCCESS
+    elif verification_result.overall_confidence >= 0.70:
+        return Judgment.PARTIAL
+    else:
+        return Judgment.FAILURE
+
+
 def execute_action(action: Action, ctx: WorkContext) -> str:
     """Execute an action and return the result."""
     # Track execution time for metrics
@@ -1672,7 +1703,55 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
             # CRITICAL: Never assume success without SOME form of verification
             if should_verify_action:
                 # Immediate verification required (HIGH risk or low trust)
-                cycle.judgment = ctx.checkpoint.judge_action(intention, cycle)
+                # Use multi-layer verification for code actions (EDIT, CREATE)
+                if action.type in (ActionType.EDIT, ActionType.CREATE):
+                    # Choose verification strategy based on risk level
+                    from reos.code_mode.optimization.risk import RiskLevel
+                    if action_risk.level == RiskLevel.HIGH:
+                        strategy = VerificationStrategy.THOROUGH  # All 4 layers
+                    elif action_risk.level == RiskLevel.MEDIUM:
+                        strategy = VerificationStrategy.STANDARD  # Syntax + semantic + behavioral
+                    else:  # LOW
+                        strategy = VerificationStrategy.MINIMAL  # Syntax only
+
+                    if ctx.session_logger:
+                        ctx.session_logger.log_info("riva", "multilayer_verification_start",
+                            f"Starting {strategy.value} verification for {action.type.value}", {
+                                "strategy": strategy.value,
+                                "risk_level": action_risk.level.value,
+                            })
+
+                    # Run multi-layer verification
+                    # Call async function from sync context
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+
+                    verification_result = loop.run_until_complete(
+                        verify_action_multilayer(
+                            action=action,
+                            intention=intention,
+                            ctx=ctx,
+                            strategy=strategy,
+                            stop_on_failure=True,  # Fail fast to save tokens
+                        )
+                    )
+
+                    cycle.judgment = _verification_to_judgment(verification_result)
+
+                    if ctx.session_logger:
+                        ctx.session_logger.log_info("riva", "multilayer_verification_complete",
+                            f"Verification: {cycle.judgment.value} (confidence: {verification_result.overall_confidence:.2%})", {
+                                "judgment": cycle.judgment.value,
+                                "confidence": verification_result.overall_confidence,
+                                "layers_run": len(verification_result.layers),
+                                "duration_ms": verification_result.total_duration_ms,
+                            })
+                else:
+                    # Fall back to simple judgment for non-code actions (COMMAND, QUERY, DELETE)
+                    cycle.judgment = ctx.checkpoint.judge_action(intention, cycle)
 
                 # Track verification in metrics with actual risk level
                 if ctx.metrics:
@@ -1702,7 +1781,56 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
                             "can_batch": action_risk.can_batch,
                             "has_batcher": ctx.verification_batcher is not None,
                         })
-                cycle.judgment = ctx.checkpoint.judge_action(intention, cycle)
+
+                # Use multi-layer verification for code actions (EDIT, CREATE)
+                if action.type in (ActionType.EDIT, ActionType.CREATE):
+                    # Choose verification strategy based on risk level
+                    from reos.code_mode.optimization.risk import RiskLevel
+                    if action_risk.level == RiskLevel.HIGH:
+                        strategy = VerificationStrategy.THOROUGH  # All 4 layers
+                    elif action_risk.level == RiskLevel.MEDIUM:
+                        strategy = VerificationStrategy.STANDARD  # Syntax + semantic + behavioral
+                    else:  # LOW
+                        strategy = VerificationStrategy.MINIMAL  # Syntax only
+
+                    if ctx.session_logger:
+                        ctx.session_logger.log_info("riva", "multilayer_verification_start",
+                            f"Starting {strategy.value} verification (fallback) for {action.type.value}", {
+                                "strategy": strategy.value,
+                                "risk_level": action_risk.level.value,
+                            })
+
+                    # Run multi-layer verification
+                    # Call async function from sync context
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+
+                    verification_result = loop.run_until_complete(
+                        verify_action_multilayer(
+                            action=action,
+                            intention=intention,
+                            ctx=ctx,
+                            strategy=strategy,
+                            stop_on_failure=True,  # Fail fast to save tokens
+                        )
+                    )
+
+                    cycle.judgment = _verification_to_judgment(verification_result)
+
+                    if ctx.session_logger:
+                        ctx.session_logger.log_info("riva", "multilayer_verification_complete",
+                            f"Verification (fallback): {cycle.judgment.value} (confidence: {verification_result.overall_confidence:.2%})", {
+                                "judgment": cycle.judgment.value,
+                                "confidence": verification_result.overall_confidence,
+                                "layers_run": len(verification_result.layers),
+                                "duration_ms": verification_result.total_duration_ms,
+                            })
+                else:
+                    # Fall back to simple judgment for non-code actions (COMMAND, QUERY, DELETE)
+                    cycle.judgment = ctx.checkpoint.judge_action(intention, cycle)
 
                 if ctx.metrics:
                     ctx.metrics.record_verification(action_risk.level.value)
