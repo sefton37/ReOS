@@ -356,6 +356,8 @@ CAIRN uses this structure to:
 
 ## The Mission
 
+> **Don't rent a data center. Center your data around you.**
+
 Big tech companies want AI to be a subscription you pay forever. They collect your data, train on your conversations, and can change the rules anytime.
 
 We believe AI should be:

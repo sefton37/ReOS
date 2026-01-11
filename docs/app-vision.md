@@ -297,6 +297,8 @@ See [RIVA Performance Strategy](./riva-performance-strategy.md) for detailed opt
 
 ## Closing Thoughts
 
+> **Don't rent a data center. Center your data around you.**
+
 Talking Rock is **not trying to replace your terminal or your brain**.
 
 It's trying to make Linux **accessible**, life **organized**, and coding **assisted**—all through a local, private, transparent AI companion.

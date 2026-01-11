@@ -360,6 +360,8 @@ Users judge on:
 
 ## The Honest Pitch
 
+> **Don't rent a data center. Center your data around you.**
+
 Big tech has:
 - Billions in compute infrastructure
 - Proprietary models with trillion-parameter counts

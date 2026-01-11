@@ -4,6 +4,8 @@
 
 **Build the best AI assistant in the world. Then give it away.**
 
+> **Don't rent a data center. Center your data around you.**
+
 Talking Rock is a local-first AI assistant with three specialized agents:
 
 | Agent | Purpose | Kernel Principle |
