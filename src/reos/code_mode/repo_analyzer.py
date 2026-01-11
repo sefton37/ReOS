@@ -94,18 +94,46 @@ class ConventionAnalysis:
 
 
 @dataclass
+class TypeAnalysis:
+    """Analysis of type definitions and data models."""
+
+    data_models: list[dict[str, Any]] = field(default_factory=list)  # Core entities
+    config_types: list[dict[str, Any]] = field(default_factory=list)  # Configuration classes
+    error_types: list[dict[str, Any]] = field(default_factory=list)  # Exception classes
+    other_types: list[dict[str, Any]] = field(default_factory=list)  # Other classes/types
+    analyzed_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TypeAnalysis:
+        """Create from dictionary."""
+        return cls(
+            data_models=data.get("data_models", []),
+            config_types=data.get("config_types", []),
+            error_types=data.get("error_types", []),
+            other_types=data.get("other_types", []),
+            analyzed_at=data.get("analyzed_at", ""),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return asdict(self)
+
+
+@dataclass
 class RepoContext:
     """Complete repository analysis context."""
 
     structure: StructureAnalysis | None = None
     conventions: ConventionAnalysis | None = None
-    # Future: architecture, types, imports, antipatterns
+    types: TypeAnalysis | None = None
+    # Future: architecture, imports, antipatterns
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON storage."""
         return {
             "structure": self.structure.to_dict() if self.structure else None,
             "conventions": self.conventions.to_dict() if self.conventions else None,
+            "types": self.types.to_dict() if self.types else None,
             "version": "1.0",
             "last_updated": datetime.now(timezone.utc).isoformat(),
         }
@@ -116,6 +144,7 @@ class RepoContext:
         return cls(
             structure=StructureAnalysis.from_dict(data["structure"]) if data.get("structure") else None,
             conventions=ConventionAnalysis.from_dict(data["conventions"]) if data.get("conventions") else None,
+            types=TypeAnalysis.from_dict(data["types"]) if data.get("types") else None,
         )
 
 
@@ -217,7 +246,7 @@ class ActRepoAnalyzer:
     async def _analyze_full(self) -> RepoContext:
         """Run comprehensive repo analysis.
 
-        Phase 1: Structure + Convention analysis
+        Phase 1: Structure + Convention + Type analysis
         """
         logger.info("Running structure analysis...")
         structure = await self._analyze_structure()
@@ -225,7 +254,10 @@ class ActRepoAnalyzer:
         logger.info("Running convention analysis...")
         conventions = await self._analyze_conventions()
 
-        return RepoContext(structure=structure, conventions=conventions)
+        logger.info("Running type analysis...")
+        types = await self._analyze_types()
+
+        return RepoContext(structure=structure, conventions=conventions, types=types)
 
     async def _analyze_structure(self) -> StructureAnalysis:
         """Analyze repository structure and organization.
@@ -540,5 +572,216 @@ Be specific and include actual examples from the code when possible.
             logger.error("Convention analysis failed: %s", e, exc_info=True)
             # Return empty analysis rather than failing
             return ConventionAnalysis(
+                analyzed_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+    def _extract_types_ast(self) -> list[dict[str, Any]]:
+        """Extract type definitions using AST parsing.
+
+        Returns:
+            List of type definitions with name, fields, file path
+        """
+        import ast
+
+        if not self.repo_path.exists():
+            return []
+
+        type_defs = []
+
+        # Find all Python files
+        for py_file in self.repo_path.rglob("*.py"):
+            # Skip common noise
+            if any(
+                part in py_file.parts
+                for part in [".venv", "venv", "__pycache__", "node_modules", ".git", "build", "dist"]
+            ):
+                continue
+
+            # Skip test files
+            if "test" in py_file.name.lower():
+                continue
+
+            try:
+                content = py_file.read_text(encoding="utf-8", errors="ignore")
+                tree = ast.parse(content, filename=str(py_file))
+
+                # Extract class definitions
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ClassDef):
+                        class_info = {
+                            "name": node.name,
+                            "file": str(py_file.relative_to(self.repo_path)),
+                            "bases": [self._ast_name(base) for base in node.bases],
+                            "fields": [],
+                        }
+
+                        # Extract fields from class body
+                        for item in node.body:
+                            # AnnAssign = annotated assignment (e.g., name: str = "value")
+                            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                                field_name = item.target.id
+                                field_type = self._ast_annotation_to_str(item.annotation)
+                                class_info["fields"].append({
+                                    "name": field_name,
+                                    "type": field_type,
+                                })
+
+                        type_defs.append(class_info)
+
+            except SyntaxError:
+                # Skip files with syntax errors
+                pass
+            except Exception as e:
+                logger.debug("Could not parse %s: %s", py_file, e)
+
+        logger.info("Extracted %d type definitions from AST", len(type_defs))
+        return type_defs
+
+    def _ast_name(self, node: Any) -> str:
+        """Convert AST name node to string."""
+        import ast
+
+        if isinstance(node, ast.Name):
+            return node.id
+        elif isinstance(node, ast.Attribute):
+            return f"{self._ast_name(node.value)}.{node.attr}"
+        else:
+            return str(node)
+
+    def _ast_annotation_to_str(self, annotation: Any) -> str:
+        """Convert AST annotation to string representation."""
+        import ast
+
+        if isinstance(annotation, ast.Name):
+            return annotation.id
+        elif isinstance(annotation, ast.Constant):
+            return str(annotation.value)
+        elif isinstance(annotation, ast.Subscript):
+            # Handle list[str], dict[str, int], etc.
+            value = self._ast_annotation_to_str(annotation.value)
+            slice_val = annotation.slice
+            if isinstance(slice_val, ast.Tuple):
+                # Multiple subscripts like dict[str, int]
+                parts = [self._ast_annotation_to_str(elt) for elt in slice_val.elts]
+                return f"{value}[{', '.join(parts)}]"
+            else:
+                return f"{value}[{self._ast_annotation_to_str(slice_val)}]"
+        elif isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+            # Handle Union types like str | None
+            left = self._ast_annotation_to_str(annotation.left)
+            right = self._ast_annotation_to_str(annotation.right)
+            return f"{left} | {right}"
+        elif isinstance(annotation, ast.Attribute):
+            return f"{self._ast_name(annotation.value)}.{annotation.attr}"
+        else:
+            return "Any"
+
+    async def _analyze_types(self) -> TypeAnalysis:
+        """Analyze type definitions and data models.
+
+        Uses AST to extract types, then local LLM to categorize them:
+        - Data models (core entities like User, Post)
+        - Config types (Settings, Config)
+        - Error types (custom exceptions)
+        - Other types
+
+        Cost: ~4K tokens = $0.0004
+        """
+        logger.info("Analyzing types of %s", self.repo_path)
+
+        # Extract types using AST
+        type_defs = self._extract_types_ast()
+
+        if not type_defs:
+            logger.warning("No type definitions found")
+            return TypeAnalysis(analyzed_at=datetime.now(timezone.utc).isoformat())
+
+        # Limit to top 30 most interesting types (those with fields)
+        types_with_fields = [t for t in type_defs if t["fields"]]
+        types_with_fields.sort(key=lambda t: len(t["fields"]), reverse=True)
+        top_types = types_with_fields[:30]
+
+        # Format for LLM
+        types_text = []
+        for t in top_types:
+            bases = f" (extends {', '.join(t['bases'])})" if t["bases"] else ""
+            fields_text = "\n".join(f"  - {f['name']}: {f['type']}" for f in t["fields"])
+            types_text.append(f"class {t['name']}{bases}:\n{fields_text}\n  # File: {t['file']}")
+
+        combined_types = "\n\n".join(types_text)
+
+        # Ask local LLM to categorize
+        prompt = f"""Analyze these Python type definitions and categorize them:
+
+{combined_types}
+
+Categorize each type into ONE of these categories:
+
+1. **Data Models**: Core business entities (User, Post, Order, Product)
+2. **Config Types**: Configuration and settings classes
+3. **Error Types**: Custom exception classes
+4. **Other**: Everything else (utilities, base classes, etc.)
+
+For each type, note:
+- Category
+- Purpose (1 sentence)
+- Key fields and their types
+
+Respond with ONLY valid JSON in this exact format:
+{{
+  "data_models": [
+    {{"name": "User", "purpose": "User account entity", "file": "models/user.py", "key_fields": {{"id": "str", "email": "str"}}}},
+    {{"name": "Post", "purpose": "Blog post entity", "file": "models/post.py", "key_fields": {{"id": "int", "title": "str"}}}}
+  ],
+  "config_types": [
+    {{"name": "Settings", "purpose": "Application settings", "file": "config.py", "key_fields": {{"debug": "bool", "port": "int"}}}}
+  ],
+  "error_types": [
+    {{"name": "ValidationError", "purpose": "Input validation errors", "file": "errors.py", "key_fields": {{}}}}
+  ],
+  "other_types": [
+    {{"name": "BaseModel", "purpose": "Base class for models", "file": "base.py", "key_fields": {{}}}}
+  ]
+}}
+
+Be accurate and specific. Only include fields that are important for understanding the type.
+"""
+
+        try:
+            # Call local LLM (cheap!)
+            response = await asyncio.to_thread(
+                self.llm.chat_json,
+                system="You are a type analyzer. Respond with valid JSON only.",
+                user=prompt,
+                temperature=0.1,  # Low temperature for consistent analysis
+                timeout_seconds=45.0,
+            )
+
+            # Parse response
+            if isinstance(response, str):
+                data = json.loads(response)
+            else:
+                data = response
+
+            logger.info(
+                "Type analysis complete: %d data models, %d config, %d errors, %d other",
+                len(data.get("data_models", [])),
+                len(data.get("config_types", [])),
+                len(data.get("error_types", [])),
+                len(data.get("other_types", [])),
+            )
+
+            return TypeAnalysis(
+                data_models=data.get("data_models", []),
+                config_types=data.get("config_types", []),
+                error_types=data.get("error_types", []),
+                other_types=data.get("other_types", []),
+                analyzed_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+        except Exception as e:
+            logger.error("Type analysis failed: %s", e, exc_info=True)
+            # Return empty analysis rather than failing
+            return TypeAnalysis(
                 analyzed_at=datetime.now(timezone.utc).isoformat(),
             )
