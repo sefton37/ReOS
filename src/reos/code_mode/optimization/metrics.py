@@ -32,6 +32,10 @@ class ExecutionMetrics:
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
 
+    # LLM provider information (for model-specific learning)
+    llm_provider: str | None = None  # "ollama", "anthropic", "openai", etc.
+    llm_model: str | None = None     # "claude-sonnet-4", "gpt-4-turbo", "llama3-70b", etc.
+
     # Timing (milliseconds)
     total_duration_ms: int = 0
     llm_time_ms: int = 0
@@ -93,6 +97,16 @@ class ExecutionMetrics:
     semantic_layer_time_ms: int = 0
     behavioral_layer_time_ms: int = 0
     intent_layer_time_ms: int = 0
+
+    def set_llm_info(self, provider: str | None, model: str | None) -> None:
+        """Set LLM provider and model information.
+
+        Args:
+            provider: Provider type (ollama, anthropic, openai, etc.)
+            model: Model name (claude-sonnet-4, gpt-4-turbo, llama3-70b, etc.)
+        """
+        self.llm_provider = provider
+        self.llm_model = model
 
     def record_llm_call(
         self,
@@ -227,6 +241,8 @@ class ExecutionMetrics:
             "session_id": self.session_id,
             "started_at": self.started_at.isoformat(),
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "llm_provider": self.llm_provider,
+            "llm_model": self.llm_model,
             "timing": {
                 "total_ms": self.total_duration_ms,
                 "llm_ms": self.llm_time_ms,
@@ -457,6 +473,8 @@ class MetricsStore:
                 session_id TEXT PRIMARY KEY,
                 started_at TEXT NOT NULL,
                 completed_at TEXT,
+                llm_provider TEXT,
+                llm_model TEXT,
                 total_duration_ms INTEGER,
                 llm_time_ms INTEGER,
                 execution_time_ms INTEGER,
@@ -480,16 +498,19 @@ class MetricsStore:
             """
             INSERT OR REPLACE INTO riva_metrics (
                 session_id, started_at, completed_at,
+                llm_provider, llm_model,
                 total_duration_ms, llm_time_ms, execution_time_ms,
                 llm_calls_total, decomposition_count, max_depth_reached,
                 verifications_total, retry_count, failure_count,
                 success, first_try_success, metrics_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 metrics.session_id,
                 metrics.started_at.isoformat(),
                 metrics.completed_at.isoformat() if metrics.completed_at else None,
+                metrics.llm_provider,
+                metrics.llm_model,
                 metrics.total_duration_ms,
                 metrics.llm_time_ms,
                 metrics.execution_time_ms,

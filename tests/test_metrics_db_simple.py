@@ -42,6 +42,7 @@ def test_metrics_store_save_and_load():
 
         # Create metrics
         metrics = create_metrics("test_session_123")
+        metrics.set_llm_info(provider="anthropic", model="claude-sonnet-4")
         metrics.record_llm_call(purpose="action", duration_ms=500, tokens_in=100, tokens_out=50)
         metrics.record_verification(risk_level="medium")
         metrics.complete(success=True)
@@ -53,16 +54,18 @@ def test_metrics_store_save_and_load():
         # Verify it was saved
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT session_id, success, first_try_success, completed_at FROM riva_metrics WHERE session_id = ?",
+            "SELECT session_id, llm_provider, llm_model, success, first_try_success, completed_at FROM riva_metrics WHERE session_id = ?",
             (metrics.session_id,),
         )
         row = cursor.fetchone()
 
         assert row is not None, "Metrics should be saved"
         assert row[0] == "test_session_123"
-        assert row[1] == 1  # success = True
-        assert row[2] == 1  # first_try_success = True (no retries)
-        assert row[3] is not None  # completed_at is set
+        assert row[1] == "anthropic", "LLM provider should be saved"
+        assert row[2] == "claude-sonnet-4", "LLM model should be saved"
+        assert row[3] == 1  # success = True
+        assert row[4] == 1  # first_try_success = True (no retries)
+        assert row[5] is not None  # completed_at is set
 
         # Test get_baseline_stats
         baseline = store.get_baseline_stats(limit=10)

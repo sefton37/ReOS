@@ -38,6 +38,9 @@ def analyze_verification_effectiveness(db_path: Path) -> dict[str, Any]:
         ORDER BY started_at DESC
     """)
 
+    # Note: To filter by model, use:
+    # WHERE completed_at IS NOT NULL AND llm_provider = 'anthropic' AND llm_model = 'claude-sonnet-4'
+
     rows = cursor.fetchall()
 
     if not rows:
@@ -51,6 +54,8 @@ def analyze_verification_effectiveness(db_path: Path) -> dict[str, Any]:
         metrics_json = json.loads(row["metrics_json"])
         sessions.append({
             "session_id": row["session_id"],
+            "llm_provider": row.get("llm_provider"),
+            "llm_model": row.get("llm_model"),
             "success": bool(row["success"]),
             "first_try_success": bool(row["first_try_success"]),
             "total_time_ms": row["total_duration_ms"],
@@ -174,6 +179,14 @@ def analyze_verification_effectiveness(db_path: Path) -> dict[str, Any]:
             "sample_count": 0,
         }
 
+    # Group by model for model-specific insights
+    models_used = {}
+    for s in sessions:
+        model_key = f"{s['llm_provider'] or 'unknown'}/{s['llm_model'] or 'unknown'}"
+        if model_key not in models_used:
+            models_used[model_key] = 0
+        models_used[model_key] += 1
+
     conn.close()
 
     return {
@@ -181,6 +194,7 @@ def analyze_verification_effectiveness(db_path: Path) -> dict[str, Any]:
             "total_sessions": total_sessions,
             "success_rate": success_rate,
             "first_try_success_rate": first_try_rate,
+            "models_used": models_used,
         },
         "verification_impact": {
             "total_errors_caught": total_errors_caught,
@@ -215,6 +229,11 @@ def generate_markdown_report(analysis: dict[str, Any]) -> str:
     layer_stats = impact["layer_stats"]
     catch_rates = impact["layer_catch_rates"]
 
+    models_table = "\n".join([
+        f"| {model} | {count} |"
+        for model, count in sorted(summary.get('models_used', {}).items())
+    ])
+
     report = f"""# RIVA Verification Impact Report
 
 Generated from {summary['total_sessions']} real RIVA sessions.
@@ -226,6 +245,12 @@ Generated from {summary['total_sessions']} real RIVA sessions.
 | Total Sessions | {summary['total_sessions']} |
 | Overall Success Rate | {summary['success_rate']:.1%} |
 | First-Try Success Rate | {summary['first_try_success_rate']:.1%} |
+
+### Models Used
+
+| Model | Sessions |
+|-------|----------|
+{models_table}
 
 ## Verification Impact
 

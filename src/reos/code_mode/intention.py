@@ -1579,6 +1579,21 @@ def work(intention: Intention, ctx: WorkContext, depth: int = 0) -> None:
     if ctx.metrics:
         ctx.metrics.max_depth_reached = max(ctx.metrics.max_depth_reached, depth)
 
+        # Capture LLM provider and model info (only once, at start of session)
+        if depth == 0 and ctx.llm and ctx.metrics.llm_provider is None:
+            try:
+                ctx.metrics.set_llm_info(
+                    provider=ctx.llm.provider_type,
+                    model=getattr(ctx.llm, '_model', None)
+                )
+                logger.info(
+                    "Captured LLM info: provider=%s, model=%s",
+                    ctx.metrics.llm_provider,
+                    ctx.metrics.llm_model
+                )
+            except Exception as e:
+                logger.warning("Failed to capture LLM info: %s", e)
+
     # Log start
     if ctx.session_logger:
         ctx.session_logger.log_info("riva", "work_start",
