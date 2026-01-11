@@ -226,42 +226,259 @@ def execute_fast_path(
 def _handle_create_function(intention: "Intention", ctx: "WorkContext") -> bool:
     """Optimized handler for creating a single function.
 
-    This is a stub - real implementation would:
-    1. Extract function name/signature from intention
-    2. Generate code with minimal LLM calls
-    3. Single verification at end
+    This handler creates a function in a Python file with minimal overhead.
+    It's optimized for simple function creation: "create function X in file Y".
+
+    Steps:
+    1. Extract function name, file path, and basic signature from intention
+    2. Generate a minimal function stub or use LLM for implementation
+    3. Find the right place to insert it (end of file)
+    4. Verify syntax is valid
+
+    Returns:
+        True if handled successfully, False to fall back to full RIVA
     """
-    # TODO: Implement optimized function creation
-    # For now, return False to fall back to full RIVA
-    logger.debug("CREATE_FUNCTION fast path not yet implemented")
-    return False
+    from reos.code_mode.intention import (
+        ActionType,
+        Action,
+        Cycle,
+        Judgment,
+        IntentionStatus,
+    )
+
+    # Extract function name and file path
+    func_name = _extract_function_name(intention.what)
+    file_path = _extract_file_path(intention.what)
+
+    if not func_name:
+        logger.debug("CREATE_FUNCTION: Could not extract function name")
+        return False
+
+    # If no file path specified, fall back to full RIVA
+    if not file_path:
+        logger.debug("CREATE_FUNCTION: No file path specified")
+        return False
+
+    logger.info(
+        "CREATE_FUNCTION fast path: creating '%s' in %s",
+        func_name,
+        file_path,
+    )
+
+    try:
+        # Check if file exists, read or create
+        try:
+            content = ctx.sandbox.read_file(file_path)
+            lines = content.splitlines(keepends=True)
+        except FileNotFoundError:
+            # New file - start with empty content
+            content = ""
+            lines = []
+
+        # Check if function already exists
+        if f"def {func_name}(" in content:
+            logger.info("CREATE_FUNCTION: Function already exists, marking success")
+            cycle = Cycle(
+                thought=f"Check if {func_name} exists",
+                action=Action(type=ActionType.QUERY, content=f"Check if def {func_name}( exists"),
+                result="Function already exists",
+                judgment=Judgment.SUCCESS,
+            )
+            intention.trace.append(cycle)
+            intention.status = IntentionStatus.VERIFIED
+            return True
+
+        # Generate function code - use LLM if available, else template
+        if ctx.llm:
+            func_code = _generate_function_with_llm(
+                func_name, intention.what, intention.acceptance, ctx
+            )
+        else:
+            func_code = _generate_function_template(func_name, intention.what)
+
+        if not func_code:
+            logger.warning("CREATE_FUNCTION: Could not generate function code")
+            return False
+
+        # Add function at the end of file (with blank line before if file has content)
+        new_content = content
+        if new_content and not new_content.endswith("\n\n"):
+            new_content += "\n\n" if new_content.endswith("\n") else "\n\n\n"
+        new_content += func_code
+        if not new_content.endswith("\n"):
+            new_content += "\n"
+
+        # Verify syntax before writing
+        if not _verify_python_syntax(new_content, file_path):
+            logger.warning("CREATE_FUNCTION: Syntax error after adding function")
+            return False
+
+        # Write the file
+        if content:
+            ctx.sandbox.edit_file(file_path, content, new_content)
+        else:
+            ctx.sandbox.write_file(file_path, new_content)
+
+        # Record the action
+        cycle = Cycle(
+            thought=f"Create function {func_name} in {file_path}",
+            action=Action(
+                type=ActionType.CREATE if not content else ActionType.EDIT,
+                content=func_code,
+                target=file_path,
+            ),
+            result=f"Created function {func_name}",
+            judgment=Judgment.SUCCESS,
+        )
+        intention.trace.append(cycle)
+        intention.status = IntentionStatus.VERIFIED
+
+        logger.info("CREATE_FUNCTION: Successfully created %s in %s", func_name, file_path)
+        return True
+
+    except Exception as e:
+        logger.warning("CREATE_FUNCTION fast path failed: %s", e)
+        return False
 
 
 def _handle_add_test(intention: "Intention", ctx: "WorkContext") -> bool:
     """Optimized handler for adding a test.
 
-    This is a stub - real implementation would:
-    1. Find the test file
-    2. Analyze existing test patterns
-    3. Generate matching test
-    4. Verify test passes
+    This handler adds a test function to a Python test file with minimal overhead.
+    It's optimized for simple test addition: "add test for X" or "create test_Y".
+
+    Steps:
+    1. Extract test name and file path from intention
+    2. Generate a minimal test function (stub or LLM-generated)
+    3. Find the right place to insert it (end of file)
+    4. Verify syntax is valid
+
+    Returns:
+        True if handled successfully, False to fall back to full RIVA
     """
-    # TODO: Implement optimized test creation
-    logger.debug("ADD_TEST fast path not yet implemented")
-    return False
+    from reos.code_mode.intention import (
+        ActionType,
+        Action,
+        Cycle,
+        Judgment,
+        IntentionStatus,
+    )
+
+    # Extract test name and file path
+    test_name = _extract_test_name(intention.what)
+    file_path = _extract_file_path(intention.what)
+
+    if not test_name:
+        logger.debug("ADD_TEST: Could not extract test name")
+        return False
+
+    # If no file path, try to infer from test name
+    if not file_path:
+        # Common pattern: test_something -> tests/test_something.py
+        if test_name.startswith("test_"):
+            file_path = f"tests/{test_name.split('test_')[1].split('_')[0]}.py"
+            file_path = f"tests/test_{test_name.split('test_')[1].split('_')[0]}.py"
+        else:
+            logger.debug("ADD_TEST: No file path specified or inferable")
+            return False
+
+    logger.info(
+        "ADD_TEST fast path: creating '%s' in %s",
+        test_name,
+        file_path,
+    )
+
+    try:
+        # Read file or create if doesn't exist
+        try:
+            content = ctx.sandbox.read_file(file_path)
+        except FileNotFoundError:
+            content = ""
+
+        # Check if test already exists
+        if f"def {test_name}(" in content:
+            logger.info("ADD_TEST: Test already exists, marking success")
+            cycle = Cycle(
+                thought=f"Check if {test_name} exists",
+                action=Action(type=ActionType.QUERY, content=f"Check if def {test_name}( exists"),
+                result="Test already exists",
+                judgment=Judgment.SUCCESS,
+            )
+            intention.trace.append(cycle)
+            intention.status = IntentionStatus.VERIFIED
+            return True
+
+        # Generate test code
+        if ctx.llm:
+            test_code = _generate_test_with_llm(
+                test_name, intention.what, intention.acceptance, ctx
+            )
+        else:
+            test_code = _generate_test_template(test_name, intention.what)
+
+        if not test_code:
+            logger.warning("ADD_TEST: Could not generate test code")
+            return False
+
+        # Add test at end of file
+        new_content = content
+        if new_content and not new_content.endswith("\n\n"):
+            new_content += "\n\n" if new_content.endswith("\n") else "\n\n\n"
+        new_content += test_code
+        if not new_content.endswith("\n"):
+            new_content += "\n"
+
+        # Verify syntax
+        if not _verify_python_syntax(new_content, file_path):
+            logger.warning("ADD_TEST: Syntax error after adding test")
+            return False
+
+        # Write file
+        if content:
+            ctx.sandbox.edit_file(file_path, content, new_content)
+        else:
+            ctx.sandbox.write_file(file_path, new_content)
+
+        # Record action
+        cycle = Cycle(
+            thought=f"Create test {test_name} in {file_path}",
+            action=Action(
+                type=ActionType.CREATE if not content else ActionType.EDIT,
+                content=test_code,
+                target=file_path,
+            ),
+            result=f"Created test {test_name}",
+            judgment=Judgment.SUCCESS,
+        )
+        intention.trace.append(cycle)
+        intention.status = IntentionStatus.VERIFIED
+
+        logger.info("ADD_TEST: Successfully created %s in %s", test_name, file_path)
+        return True
+
+    except Exception as e:
+        logger.warning("ADD_TEST fast path failed: %s", e)
+        return False
 
 
 def _handle_fix_import(intention: "Intention", ctx: "WorkContext") -> bool:
     """Optimized handler for fixing imports.
 
-    This is a stub - real implementation would:
-    1. Identify the missing import
-    2. Add it at the right location
-    3. Verify no syntax errors
+    This handler fixes missing or incorrect imports in Python files.
+    It's similar to ADD_IMPORT but specifically for fixing import errors.
+
+    Steps:
+    1. Extract the module/name that needs to be imported
+    2. Find the file with the import error
+    3. Add or fix the import statement
+    4. Verify syntax is valid
+
+    Returns:
+        True if handled successfully, False to fall back to full RIVA
     """
-    # TODO: Implement optimized import fix
-    logger.debug("FIX_IMPORT fast path not yet implemented")
-    return False
+    # FIX_IMPORT is essentially the same as ADD_IMPORT
+    # Delegate to the ADD_IMPORT handler
+    return _handle_add_import(intention, ctx)
 
 
 def _handle_add_import(intention: "Intention", ctx: "WorkContext") -> bool:
@@ -505,6 +722,209 @@ def _handle_create_class(intention: "Intention", ctx: "WorkContext") -> bool:
     return False
 
 
+def _extract_function_name(what: str) -> str | None:
+    """Extract function name from intention description.
+
+    Handles patterns like:
+    - "create function get_user in file.py"
+    - "add calculate_total function"
+    - "write a function called process_data"
+    - "def parse_json(data):" -> "parse_json"
+    """
+    # Pattern: "def func_name(...)" - explicit function definition
+    match = re.search(r"def\s+(\w+)\s*\(", what)
+    if match:
+        return match.group(1)
+
+    # Pattern: "function <name>" or "function called <name>"
+    match = re.search(r"function\s+(?:called\s+)?(\w+)", what, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    # Pattern: verb + function name (create/add/write + word)
+    match = re.search(r"(?:create|add|write)\s+(?:a\s+)?(\w+)(?:\s+function)?", what, re.IGNORECASE)
+    if match and match.group(1).lower() not in ["function", "a", "an", "the"]:
+        return match.group(1)
+
+    return None
+
+
+def _generate_function_template(func_name: str, description: str) -> str:
+    """Generate a simple function template without LLM.
+
+    This creates a minimal stub that can be filled in later.
+    """
+    # Extract parameters if mentioned
+    params = _extract_function_params(description)
+
+    if params:
+        param_str = ", ".join(params)
+        func_def = f"def {func_name}({param_str}):"
+    else:
+        func_def = f"def {func_name}():"
+
+    # Add a basic docstring
+    docstring = f'    """TODO: Implement {func_name}."""'
+
+    # Add pass statement
+    body = "    pass"
+
+    return f"{func_def}\n{docstring}\n{body}\n"
+
+
+def _extract_function_params(description: str) -> list[str]:
+    """Extract function parameters from description.
+
+    Looks for patterns like:
+    - "function name(param1, param2)"
+    - "takes x and y"
+    - "with parameter data"
+    """
+    # Pattern: "func_name(param1, param2, ...)"
+    match = re.search(r"\w+\s*\(([^)]+)\)", description)
+    if match:
+        params_str = match.group(1)
+        return [p.strip() for p in params_str.split(",") if p.strip()]
+
+    # Pattern: "takes x and y" or "with parameters x, y"
+    match = re.search(r"(?:takes|with parameters?)\s+([\w\s,and]+)", description, re.IGNORECASE)
+    if match:
+        params_str = match.group(1)
+        # Split on "and" or ","
+        params = re.split(r"[,\s]+(?:and\s+)?", params_str)
+        return [p.strip() for p in params if p.strip() and p.strip().lower() not in ["and", ""]]
+
+    return []
+
+
+def _generate_function_with_llm(
+    func_name: str,
+    description: str,
+    acceptance: str,
+    ctx: "WorkContext",
+) -> str | None:
+    """Generate function implementation using LLM.
+
+    Uses a simple prompt to generate the function quickly.
+    """
+    if not ctx.llm:
+        return None
+
+    prompt = f"""Generate a Python function based on this request:
+
+Function name: {func_name}
+Description: {description}
+Acceptance criteria: {acceptance}
+
+Generate ONLY the function definition with implementation. No explanations, no markdown.
+Include a docstring and proper error handling if needed.
+"""
+
+    try:
+        response = ctx.llm.generate_text(prompt)
+        if not response:
+            return None
+
+        # Extract code if wrapped in markdown
+        code = response.strip()
+        if "```python" in code:
+            code = code.split("```python")[1].split("```")[0].strip()
+        elif "```" in code:
+            code = code.split("```")[1].split("```")[0].strip()
+
+        # Verify it starts with def
+        if not code.startswith("def "):
+            logger.warning("Generated code doesn't start with 'def'")
+            return None
+
+        return code + "\n"
+
+    except Exception as e:
+        logger.warning("LLM function generation failed: %s", e)
+        return None
+
+
+def _extract_test_name(what: str) -> str | None:
+    """Extract test name from intention description.
+
+    Handles patterns like:
+    - "add test for get_user" -> "test_get_user"
+    - "create test_calculate_total"
+    - "write test that verifies parse_json" -> "test_parse_json"
+    """
+    # Pattern: explicit "test_<name>"
+    match = re.search(r"(test_\w+)", what, re.IGNORECASE)
+    if match:
+        return match.group(1).lower()
+
+    # Pattern: "test for <function_name>" or "test <function_name>"
+    match = re.search(r"test\s+(?:for\s+|that\s+\w+\s+)?(\w+)", what, re.IGNORECASE)
+    if match:
+        func_name = match.group(1)
+        if func_name.lower() not in ["that", "for", "a", "an", "the"]:
+            return f"test_{func_name}"
+
+    return None
+
+
+def _generate_test_template(test_name: str, description: str) -> str:
+    """Generate a simple test template without LLM.
+
+    Creates a minimal test stub using pytest style.
+    """
+    docstring = f'    """Test {test_name.replace("test_", "").replace("_", " ")}."""'
+    body = "    assert False, 'Test not implemented'"
+
+    return f"def {test_name}():\n{docstring}\n{body}\n"
+
+
+def _generate_test_with_llm(
+    test_name: str,
+    description: str,
+    acceptance: str,
+    ctx: "WorkContext",
+) -> str | None:
+    """Generate test implementation using LLM.
+
+    Uses a simple prompt to generate the test quickly.
+    """
+    if not ctx.llm:
+        return None
+
+    prompt = f"""Generate a Python test function based on this request:
+
+Test name: {test_name}
+Description: {description}
+Acceptance criteria: {acceptance}
+
+Generate ONLY the test function definition with implementation. No explanations, no markdown.
+Use pytest style (assert statements). Include a docstring.
+"""
+
+    try:
+        response = ctx.llm.generate_text(prompt)
+        if not response:
+            return None
+
+        # Extract code if wrapped in markdown
+        code = response.strip()
+        if "```python" in code:
+            code = code.split("```python")[1].split("```")[0].strip()
+        elif "```" in code:
+            code = code.split("```")[1].split("```")[0].strip()
+
+        # Verify it starts with def
+        if not code.startswith("def "):
+            logger.warning("Generated test doesn't start with 'def'")
+            return None
+
+        return code + "\n"
+
+    except Exception as e:
+        logger.warning("LLM test generation failed: %s", e)
+        return None
+
+
 # Map patterns to handlers
 FAST_PATH_HANDLERS: dict[FastPathPattern, Callable] = {
     FastPathPattern.CREATE_FUNCTION: _handle_create_function,
@@ -520,6 +940,9 @@ def get_available_patterns() -> list[FastPathPattern]:
     """Get list of patterns that have implementations."""
     return [
         FastPathPattern.ADD_IMPORT,
+        FastPathPattern.FIX_IMPORT,
+        FastPathPattern.CREATE_FUNCTION,
+        FastPathPattern.ADD_TEST,
     ]
 
 

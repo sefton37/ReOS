@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from reos.code_mode.optimization.metrics import create_metrics
 from reos.code_mode.optimization.trust import create_trust_budget
 from reos.code_mode.optimization.verification import VerificationBatcher
+from reos.code_mode.optimization.pattern_success import PatternSuccessTracker
 
 if TYPE_CHECKING:
     from reos.code_mode.intention import WorkContext
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from reos.code_mode.quality import QualityTracker
     from reos.code_mode.tools import ToolProvider
     from reos.providers import LLMProvider
+    from reos.db import Database
 
 
 def create_optimized_context(
@@ -43,10 +45,14 @@ def create_optimized_context(
     session_logger: "SessionLogger | None" = None,
     quality_tracker: "QualityTracker | None" = None,
     tool_provider: "ToolProvider | None" = None,
+    # Pattern success tracking
+    db: "Database | None" = None,
+    repo_path: str | None = None,
     # Optimization settings
     enable_metrics: bool = True,
     enable_trust_budget: bool = True,
     enable_verification_batcher: bool = True,
+    enable_pattern_success: bool = True,
     # Trust budget tuning
     initial_trust: int = 100,
     trust_floor: int = 20,
@@ -74,9 +80,13 @@ def create_optimized_context(
         quality_tracker: Optional quality tracker
         tool_provider: Optional tool provider
 
+        db: Database connection for pattern success tracking (optional)
+        repo_path: Repository path for pattern success tracking (optional)
+
         enable_metrics: Enable execution metrics collection
         enable_trust_budget: Enable trust budget for verification decisions
         enable_verification_batcher: Enable batch verification
+        enable_pattern_success: Enable pattern success tracking (requires db and repo_path)
 
         initial_trust: Starting trust level (default 100)
         trust_floor: Minimum trust level (default 20)
@@ -110,6 +120,11 @@ def create_optimized_context(
         if enable_verification_batcher
         else None
     )
+    pattern_success_tracker = (
+        PatternSuccessTracker(db=db, repo_path=repo_path)
+        if enable_pattern_success and db and repo_path
+        else None
+    )
 
     return WorkContext(
         sandbox=sandbox,
@@ -121,6 +136,7 @@ def create_optimized_context(
         metrics=metrics,
         trust_budget=trust_budget,
         verification_batcher=verification_batcher,
+        pattern_success_tracker=pattern_success_tracker,
         max_cycles_per_intention=max_cycles_per_intention,
         max_depth=max_depth,
         on_intention_start=on_intention_start,
