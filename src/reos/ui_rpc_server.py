@@ -68,6 +68,7 @@ from .play_fs import write_me_markdown as play_write_me_markdown
 from .play_fs import set_active_act_id as play_set_active_act_id
 from .play_fs import update_act as play_update_act
 from .play_fs import update_beat as play_update_beat
+from .play_fs import move_beat as play_move_beat
 from .play_fs import update_scene as play_update_scene
 from .play_fs import assign_repo_to_act as play_assign_repo_to_act
 from .context_meter import calculate_context_stats, estimate_tokens
@@ -3115,9 +3116,11 @@ def _handle_play_beats_list(_db: Database, *, act_id: str, scene_id: str) -> dic
             {
                 "beat_id": b.beat_id,
                 "title": b.title,
-                "status": b.status,
+                "stage": b.stage,
                 "notes": b.notes,
                 "link": b.link,
+                "calendar_event_id": b.calendar_event_id,
+                "recurrence_rule": b.recurrence_rule,
             }
             for b in beats
         ]
@@ -3280,7 +3283,7 @@ def _handle_play_beats_create(
     act_id: str,
     scene_id: str,
     title: str,
-    status: str | None = None,
+    stage: str | None = None,
     notes: str | None = None,
     link: str | None = None,
 ) -> dict[str, Any]:
@@ -3289,7 +3292,7 @@ def _handle_play_beats_create(
             act_id=act_id,
             scene_id=scene_id,
             title=title,
-            status=status or "",
+            stage=stage or "",
             notes=notes or "",
             link=link,
         )
@@ -3300,9 +3303,11 @@ def _handle_play_beats_create(
             {
                 "beat_id": b.beat_id,
                 "title": b.title,
-                "status": b.status,
+                "stage": b.stage,
                 "notes": b.notes,
                 "link": b.link,
+                "calendar_event_id": b.calendar_event_id,
+                "recurrence_rule": b.recurrence_rule,
             }
             for b in beats
         ]
@@ -3316,7 +3321,7 @@ def _handle_play_beats_update(
     scene_id: str,
     beat_id: str,
     title: str | None = None,
-    status: str | None = None,
+    stage: str | None = None,
     notes: str | None = None,
     link: str | None = None,
 ) -> dict[str, Any]:
@@ -3326,7 +3331,7 @@ def _handle_play_beats_update(
             scene_id=scene_id,
             beat_id=beat_id,
             title=title,
-            status=status,
+            stage=stage,
             notes=notes,
             link=link,
         )
@@ -3337,13 +3342,38 @@ def _handle_play_beats_update(
             {
                 "beat_id": b.beat_id,
                 "title": b.title,
-                "status": b.status,
+                "stage": b.stage,
                 "notes": b.notes,
                 "link": b.link,
+                "calendar_event_id": b.calendar_event_id,
+                "recurrence_rule": b.recurrence_rule,
             }
             for b in beats
         ]
     }
+
+
+def _handle_play_beats_move(
+    _db: Database,
+    *,
+    beat_id: str,
+    source_act_id: str,
+    source_scene_id: str,
+    target_act_id: str,
+    target_scene_id: str,
+) -> dict[str, Any]:
+    """Move a Beat from one Scene to another."""
+    try:
+        result = play_move_beat(
+            beat_id=beat_id,
+            source_act_id=source_act_id,
+            source_scene_id=source_scene_id,
+            target_act_id=target_act_id,
+            target_scene_id=target_scene_id,
+        )
+    except ValueError as exc:
+        raise RpcError(code=-32602, message=str(exc)) from exc
+    return result
 
 
 def _handle_play_kb_list(
@@ -4065,6 +4095,11 @@ def _handle_cairn_attention(
 
     items = surfacer.surface_attention(hours=hours, limit=limit)
 
+    # Build act_id -> title lookup from play_fs
+    from . import play_fs
+    acts, _ = play_fs.list_acts()
+    act_titles = {a.act_id: a.title for a in acts}
+
     return {
         "count": len(items),
         "items": [
@@ -4078,6 +4113,10 @@ def _handle_cairn_attention(
                 "calendar_end": item.calendar_end.isoformat() if item.calendar_end else None,
                 "is_recurring": item.is_recurring,
                 "recurrence_frequency": item.recurrence_frequency,
+                "next_occurrence": item.next_occurrence.isoformat() if item.next_occurrence else None,
+                "act_id": item.act_id,
+                "scene_id": item.scene_id,
+                "act_title": act_titles.get(item.act_id) if item.act_id else None,
             }
             for item in items
         ],
@@ -5147,10 +5186,10 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                 raise RpcError(code=-32602, message="scene_id is required")
             if not isinstance(title, str) or not title.strip():
                 raise RpcError(code=-32602, message="title is required")
-            status = params.get("status")
+            stage = params.get("stage")
             notes = params.get("notes")
             link = params.get("link")
-            for k, v in {"status": status, "notes": notes, "link": link}.items():
+            for k, v in {"stage": stage, "notes": notes, "link": link}.items():
                 if v is not None and not isinstance(v, str):
                     raise RpcError(code=-32602, message=f"{k} must be a string or null")
             return _jsonrpc_result(
@@ -5160,7 +5199,7 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                     act_id=act_id,
                     scene_id=scene_id,
                     title=title,
-                    status=status,
+                    stage=stage,
                     notes=notes,
                     link=link,
                 ),
@@ -5179,10 +5218,10 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             if not isinstance(beat_id, str) or not beat_id:
                 raise RpcError(code=-32602, message="beat_id is required")
             title = params.get("title")
-            status = params.get("status")
+            stage = params.get("stage")
             notes = params.get("notes")
             link = params.get("link")
-            for k, v in {"title": title, "status": status, "notes": notes, "link": link}.items():
+            for k, v in {"title": title, "stage": stage, "notes": notes, "link": link}.items():
                 if v is not None and not isinstance(v, str):
                     raise RpcError(code=-32602, message=f"{k} must be a string or null")
             return _jsonrpc_result(
@@ -5193,9 +5232,39 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                     scene_id=scene_id,
                     beat_id=beat_id,
                     title=title,
-                    status=status,
+                    stage=stage,
                     notes=notes,
                     link=link,
+                ),
+            )
+
+        if method == "play/beats/move":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            beat_id = params.get("beat_id")
+            source_act_id = params.get("source_act_id")
+            source_scene_id = params.get("source_scene_id")
+            target_act_id = params.get("target_act_id")
+            target_scene_id = params.get("target_scene_id")
+            if not isinstance(beat_id, str) or not beat_id:
+                raise RpcError(code=-32602, message="beat_id is required")
+            if not isinstance(source_act_id, str) or not source_act_id:
+                raise RpcError(code=-32602, message="source_act_id is required")
+            if not isinstance(source_scene_id, str) or not source_scene_id:
+                raise RpcError(code=-32602, message="source_scene_id is required")
+            if not isinstance(target_act_id, str) or not target_act_id:
+                raise RpcError(code=-32602, message="target_act_id is required")
+            if not isinstance(target_scene_id, str) or not target_scene_id:
+                raise RpcError(code=-32602, message="target_scene_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_play_beats_move(
+                    db,
+                    beat_id=beat_id,
+                    source_act_id=source_act_id,
+                    source_scene_id=source_scene_id,
+                    target_act_id=target_act_id,
+                    target_scene_id=target_scene_id,
                 ),
             )
 

@@ -175,6 +175,115 @@ class CairnSurfacer:
         """
         return self._get_needs_priority(limit=limit)
 
+    def surface_attention(
+        self, hours: int = 168, limit: int = 10
+    ) -> list[SurfacedItem]:
+        """Surface items that need attention - Beats with upcoming calendar events.
+
+        This is designed for the "What Needs My Attention" section at app startup.
+        It shows Beats linked to calendar events (not raw calendar events).
+        For recurring events, shows the next occurrence.
+
+        Args:
+            hours: Look ahead this many hours for events (default 168 = 7 days).
+            limit: Maximum items to return.
+
+        Returns:
+            List of items needing attention, primarily Beats with calendar links.
+        """
+        candidates: list[SurfacedItem] = []
+
+        # 1. Sync calendar events to Beats (creates Beats for new events)
+        if self.thunderbird:
+            try:
+                from reos.cairn.beat_calendar_sync import sync_calendar_to_beats
+                new_beat_ids = sync_calendar_to_beats(self.thunderbird, self.store, hours)
+                if new_beat_ids:
+                    logger.debug("Created %d new Beats from calendar events", len(new_beat_ids))
+            except Exception as e:
+                logger.warning("Failed to sync calendar to beats: %s", e)
+
+        # 2. Get Beats with upcoming calendar events
+        beats_with_events = self.store.get_beats_with_upcoming_events(hours=hours)
+
+        for beat_info in beats_with_events:
+            # Determine the effective time (next occurrence for recurring, else start)
+            effective_time_str = beat_info.get("next_occurrence") or beat_info.get("start")
+            if effective_time_str:
+                if isinstance(effective_time_str, str):
+                    effective_time = datetime.fromisoformat(effective_time_str)
+                else:
+                    effective_time = effective_time_str
+            else:
+                continue  # Skip if no time info
+
+            time_until = effective_time - datetime.now()
+            minutes = int(time_until.total_seconds() / 60)
+
+            if minutes < 0:
+                reason = "Happening now"
+                urgency = "critical"
+            elif minutes < 60:
+                reason = f"In {minutes} minutes"
+                urgency = "high"
+            elif minutes < 120:
+                hours_until = minutes // 60
+                mins_remainder = minutes % 60
+                reason = f"In {hours_until}h {mins_remainder}m"
+                urgency = "high"
+            else:
+                # Format as "Jan 14, Wednesday at 9:30 AM"
+                event_date = effective_time.strftime("%b %d, %A")  # "Jan 14, Wednesday"
+                event_time = effective_time.strftime("%I:%M %p").lstrip("0")  # "9:30 AM"
+                reason = f"{event_date} at {event_time}"
+                urgency = "medium"
+
+            # Check if recurring
+            is_recurring = beat_info.get("recurrence_rule") is not None
+            recurrence_freq = None
+            if is_recurring and beat_info.get("recurrence_rule"):
+                rrule = beat_info["recurrence_rule"]
+                if "FREQ=" in rrule:
+                    recurrence_freq = rrule.split("FREQ=")[1].split(";")[0]
+
+            # Parse calendar times
+            cal_start = None
+            cal_end = None
+            if beat_info.get("start"):
+                cal_start = datetime.fromisoformat(beat_info["start"]) if isinstance(beat_info["start"], str) else beat_info["start"]
+            if beat_info.get("end"):
+                cal_end = datetime.fromisoformat(beat_info["end"]) if isinstance(beat_info["end"], str) else beat_info["end"]
+
+            # Parse next occurrence
+            next_occ = None
+            if beat_info.get("next_occurrence"):
+                next_occ = datetime.fromisoformat(beat_info["next_occurrence"]) if isinstance(beat_info["next_occurrence"], str) else beat_info["next_occurrence"]
+
+            candidates.append(
+                SurfacedItem(
+                    entity_type="beat",
+                    entity_id=beat_info["beat_id"],
+                    title=beat_info.get("title", "Untitled"),
+                    reason=reason,
+                    urgency=urgency,
+                    calendar_start=cal_start,
+                    calendar_end=cal_end,
+                    is_recurring=is_recurring,
+                    recurrence_frequency=recurrence_freq,
+                    next_occurrence=next_occ,
+                    act_id=beat_info.get("act_id"),
+                    scene_id=beat_info.get("scene_id"),
+                )
+            )
+
+        # 3. Add any overdue items (secondary)
+        candidates.extend(self._get_overdue_items()[:3])
+
+        # 4. Items due today
+        candidates.extend(self._get_due_today()[:3])
+
+        return self._rank_and_dedupe(candidates, max_items=limit)
+
     def surface_waiting(
         self, min_days: int | None = None, limit: int = 10
     ) -> list[SurfacedItem]:

@@ -488,6 +488,37 @@ body,
 	color: #ef4444;
 }
 
+/* Beat Stage badges (new architecture) */
+.beat-stage {
+	font-size: 9px;
+	font-weight: 600;
+	padding: 2px 6px;
+	border-radius: 4px;
+	margin-left: auto;
+	text-transform: uppercase;
+	letter-spacing: 0.3px;
+}
+
+.beat-stage-planning {
+	background: rgba(156, 163, 175, 0.2);
+	color: #9ca3af;
+}
+
+.beat-stage-in_progress {
+	background: rgba(59, 130, 246, 0.2);
+	color: #60a5fa;
+}
+
+.beat-stage-awaiting_data {
+	background: rgba(245, 158, 11, 0.2);
+	color: #f59e0b;
+}
+
+.beat-stage-complete {
+	background: rgba(34, 197, 94, 0.2);
+	color: #22c55e;
+}
+
 /* Scene count badge */
 .tree-count {
 	font-size: 10px;

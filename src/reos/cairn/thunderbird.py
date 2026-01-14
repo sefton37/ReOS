@@ -363,9 +363,17 @@ class ThunderbirdConfig:
                 self.address_book_path = abook
 
         if self.calendar_path is None:
-            cal = self.profile_path / "calendar-data" / "local.sqlite"
-            if cal.exists():
-                self.calendar_path = cal
+            # Check for calendar databases in order of preference:
+            # 1. cache.sqlite - synced calendars (CalDAV, Google, etc.) - most common
+            # 2. local.sqlite - purely local calendars
+            calendar_candidates = [
+                self.profile_path / "calendar-data" / "cache.sqlite",
+                self.profile_path / "calendar-data" / "local.sqlite",
+            ]
+            for cal in calendar_candidates:
+                if cal.exists():
+                    self.calendar_path = cal
+                    break
 
 
 @dataclass
@@ -410,6 +418,11 @@ class CalendarEvent:
     description: str | None = None
     status: str | None = None  # "TENTATIVE", "CONFIRMED", "CANCELLED"
     all_day: bool = False
+
+    # Recurrence info
+    is_recurring: bool = False
+    recurrence_rule: str | None = None  # Raw RRULE if present (e.g., "FREQ=WEEKLY;BYDAY=MO,WE,FR")
+    recurrence_frequency: str | None = None  # "DAILY", "WEEKLY", "MONTHLY", "YEARLY"
 
     # Raw icalendar data if needed
     ical_data: str | None = None
@@ -664,13 +677,117 @@ class ThunderbirdBridge:
     # Calendar Events
     # =========================================================================
 
+    def _open_calendar_db(self) -> sqlite3.Connection | None:
+        """Open calendar database with WAL support.
+
+        Returns:
+            SQLite connection or None if failed.
+        """
+        import tempfile
+        temp_dir = Path(tempfile.gettempdir()) / "cairn_calendar"
+        temp_dir.mkdir(exist_ok=True)
+        temp_db = temp_dir / "cache.sqlite"
+        try:
+            # Copy main database and WAL files
+            shutil.copy(self.config.calendar_path, temp_db)
+            for suffix in ["-wal", "-shm"]:
+                wal_file = Path(str(self.config.calendar_path) + suffix)
+                if wal_file.exists():
+                    shutil.copy(wal_file, temp_dir / f"cache.sqlite{suffix}")
+            db_path = temp_db
+        except (OSError, IOError) as e:
+            logger.debug("Could not copy calendar db, using original: %s", e)
+            db_path = self.config.calendar_path
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _expand_recurring_event(
+        self,
+        event: CalendarEvent,
+        rrule_str: str,
+        query_start: datetime,
+        query_end: datetime,
+    ) -> list[CalendarEvent]:
+        """Expand a recurring event into occurrences within the time window.
+
+        Args:
+            event: The base event with original start/end.
+            rrule_str: The RRULE string (e.g., "RRULE:FREQ=WEEKLY;BYDAY=MO").
+            query_start: Start of time window.
+            query_end: End of time window.
+
+        Returns:
+            List of event occurrences within the window.
+        """
+        try:
+            from dateutil.rrule import rrulestr
+        except ImportError:
+            logger.debug("dateutil not available, skipping recurrence expansion")
+            return []
+
+        occurrences = []
+        duration = event.end - event.start
+
+        try:
+            # Parse the RRULE - strip "RRULE:" prefix if present
+            rule_text = rrule_str
+            if rule_text.startswith("RRULE:"):
+                rule_text = rule_text[6:]
+
+            # Handle timezone issues: UNTIL with Z suffix needs timezone-aware dtstart
+            # Convert UNTIL from UTC to naive local time to avoid timezone conflicts
+            if "UNTIL=" in rule_text and "Z" in rule_text:
+                import re
+                # Extract and convert UNTIL to naive local time
+                match = re.search(r"UNTIL=(\d{8}T\d{6})Z", rule_text)
+                if match:
+                    until_str = match.group(1)
+                    # Parse as UTC, convert to local, format as naive
+                    from datetime import timezone
+                    until_utc = datetime.strptime(until_str, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+                    until_local = until_utc.astimezone().replace(tzinfo=None)
+                    # Replace in rule text (remove Z suffix)
+                    rule_text = rule_text.replace(
+                        f"UNTIL={until_str}Z",
+                        f"UNTIL={until_local.strftime('%Y%m%dT%H%M%S')}"
+                    )
+
+            # Create rrule with the event's original start as dtstart
+            rule = rrulestr(rule_text, dtstart=event.start)
+
+            # Get occurrences within the time window
+            for dt in rule.between(query_start, query_end, inc=True):
+                # Create a new event for this occurrence
+                occurrence = CalendarEvent(
+                    id=f"{event.id}_{dt.strftime('%Y%m%d%H%M')}",
+                    title=event.title,
+                    start=dt,
+                    end=dt + duration,
+                    location=event.location,
+                    description=event.description,
+                    status=event.status,
+                    all_day=event.all_day,
+                    is_recurring=True,
+                    recurrence_rule=rrule_str,
+                    recurrence_frequency=event.recurrence_frequency,
+                )
+                occurrences.append(occurrence)
+
+        except Exception as e:
+            logger.debug("Failed to expand recurrence for %s: %s", event.title, e)
+
+        return occurrences
+
     def list_events(
         self,
         start: datetime | None = None,
         end: datetime | None = None,
         include_past: bool = False,
     ) -> list[CalendarEvent]:
-        """List calendar events.
+        """List calendar events including expanded recurring events.
 
         Args:
             start: Start of date range (default: now).
@@ -693,31 +810,61 @@ class ThunderbirdBridge:
         end_us = int(end.timestamp() * 1_000_000)
 
         try:
-            conn = sqlite3.connect(
-                f"file:{self.config.calendar_path}?mode=ro",
-                uri=True,
-            )
-            conn.row_factory = sqlite3.Row
+            conn = self._open_calendar_db()
+            if conn is None:
+                return []
 
-            # Query events
+            events = []
+
+            # 1. Query non-recurring events in the time window
             rows = conn.execute(
                 """
-                SELECT id, title, event_start, event_end, event_stamp,
-                       flags, icalString
-                FROM cal_events
-                WHERE event_start <= ? AND event_end >= ?
-                ORDER BY event_start
+                SELECT e.id, e.title, e.event_start, e.event_end, e.event_stamp, e.flags
+                FROM cal_events e
+                LEFT JOIN cal_recurrence r ON e.id = r.item_id AND e.cal_id = r.cal_id
+                WHERE e.event_start <= ? AND e.event_end >= ?
+                  AND (r.icalString IS NULL OR r.icalString NOT LIKE 'RRULE:%')
+                ORDER BY e.event_start
                 """,
                 (end_us, start_us),
             ).fetchall()
-            conn.close()
 
-            events = []
             for row in rows:
                 event = self._parse_event(row)
                 if event:
                     events.append(event)
 
+            # 2. Query recurring events and expand them
+            recurring_rows = conn.execute(
+                """
+                SELECT DISTINCT e.id, e.title, e.event_start, e.event_end,
+                       e.event_stamp, e.flags, r.icalString as rrule
+                FROM cal_events e
+                JOIN cal_recurrence r ON e.id = r.item_id AND e.cal_id = r.cal_id
+                WHERE r.icalString LIKE 'RRULE:%'
+                """,
+            ).fetchall()
+
+            conn.close()
+
+            # Expand each recurring event
+            seen_ids = set()  # Avoid duplicate base events
+            for row in recurring_rows:
+                base_id = row["id"]
+                if base_id in seen_ids:
+                    continue
+                seen_ids.add(base_id)
+
+                base_event = self._parse_event(row)
+                if base_event:
+                    rrule_str = row["rrule"]
+                    occurrences = self._expand_recurring_event(
+                        base_event, rrule_str, start, end
+                    )
+                    events.extend(occurrences)
+
+            # Sort by start time
+            events.sort(key=lambda e: e.start)
             return events
 
         except sqlite3.Error as e:
@@ -772,15 +919,31 @@ class ThunderbirdBridge:
             # Check if all-day (duration is exactly days)
             all_day = (end - start).total_seconds() % 86400 == 0
 
-            # Parse iCal string for additional data
+            # Parse iCal string for additional data (if available)
             location = None
             description = None
             status = None
-            ical = row["icalString"]
-            if ical:
-                location = self._extract_ical_field(ical, "LOCATION")
-                description = self._extract_ical_field(ical, "DESCRIPTION")
-                status = self._extract_ical_field(ical, "STATUS")
+            ical = None
+            is_recurring = False
+            recurrence_rule = None
+            recurrence_frequency = None
+            try:
+                ical = row["icalString"]
+                if ical:
+                    location = self._extract_ical_field(ical, "LOCATION")
+                    description = self._extract_ical_field(ical, "DESCRIPTION")
+                    status = self._extract_ical_field(ical, "STATUS")
+                    # Extract recurrence info
+                    recurrence_rule = self._extract_ical_field(ical, "RRULE")
+                    if recurrence_rule:
+                        is_recurring = True
+                        # Extract frequency from RRULE (e.g., "FREQ=WEEKLY;BYDAY=MO" -> "WEEKLY")
+                        if "FREQ=" in recurrence_rule:
+                            freq_part = recurrence_rule.split("FREQ=")[1].split(";")[0]
+                            recurrence_frequency = freq_part
+            except (KeyError, IndexError):
+                # icalString column may not exist in all Thunderbird versions
+                pass
 
             return CalendarEvent(
                 id=row["id"],
@@ -791,6 +954,9 @@ class ThunderbirdBridge:
                 description=description,
                 status=status,
                 all_day=all_day,
+                is_recurring=is_recurring,
+                recurrence_rule=recurrence_rule,
+                recurrence_frequency=recurrence_frequency,
                 ical_data=ical,
             )
         except Exception as e:
@@ -823,20 +989,31 @@ class ThunderbirdBridge:
             )
             conn.row_factory = sqlite3.Row
 
+            # First check what columns exist in the table
+            try:
+                cursor = conn.execute("PRAGMA table_info(cal_todos)")
+                columns = {row[1] for row in cursor.fetchall()}
+            except sqlite3.Error:
+                columns = set()
+
+            # Build query based on available columns
+            if "icalString" in columns:
+                select_cols = "id, title, todo_entry, todo_due, todo_completed, flags, icalString"
+            else:
+                select_cols = "id, title, todo_entry, todo_due, todo_completed, flags"
+
             if include_completed:
                 rows = conn.execute(
-                    """
-                    SELECT id, title, todo_entry, todo_due, todo_completed,
-                           flags, icalString
+                    f"""
+                    SELECT {select_cols}
                     FROM cal_todos
                     ORDER BY todo_due
                     """
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    """
-                    SELECT id, title, todo_entry, todo_due, todo_completed,
-                           flags, icalString
+                    f"""
+                    SELECT {select_cols}
                     FROM cal_todos
                     WHERE todo_completed IS NULL
                     ORDER BY todo_due
@@ -887,20 +1064,24 @@ class ThunderbirdBridge:
                     row["todo_completed"] / 1_000_000
                 )
 
-            # Parse iCal string for additional data
+            # Parse iCal string for additional data (if available)
             status = None
             priority = None
             description = None
-            ical = row["icalString"]
-            if ical:
-                status = self._extract_ical_field(ical, "STATUS")
-                priority_str = self._extract_ical_field(ical, "PRIORITY")
-                if priority_str:
-                    try:
-                        priority = int(priority_str)
-                    except ValueError:
-                        pass
-                description = self._extract_ical_field(ical, "DESCRIPTION")
+            try:
+                ical = row["icalString"]
+                if ical:
+                    status = self._extract_ical_field(ical, "STATUS")
+                    priority_str = self._extract_ical_field(ical, "PRIORITY")
+                    if priority_str:
+                        try:
+                            priority = int(priority_str)
+                        except ValueError:
+                            pass
+                    description = self._extract_ical_field(ical, "DESCRIPTION")
+            except (KeyError, IndexError):
+                # icalString column may not exist in all Thunderbird versions
+                pass
 
             return CalendarTodo(
                 id=row["id"],
@@ -940,6 +1121,61 @@ class ThunderbirdBridge:
                 if len(parts) > 1:
                     return parts[1].strip()
         return None
+
+    @staticmethod
+    def get_next_occurrence(
+        rrule_str: str,
+        dtstart: datetime,
+        after: datetime | None = None,
+    ) -> datetime | None:
+        """Get the next occurrence of a recurring event.
+
+        Args:
+            rrule_str: The RRULE string (e.g., "RRULE:FREQ=WEEKLY;BYDAY=MO").
+            dtstart: The original start datetime of the event.
+            after: Find next occurrence after this time (default: now).
+
+        Returns:
+            The next occurrence datetime, or None if no more occurrences.
+        """
+        try:
+            from dateutil.rrule import rrulestr
+        except ImportError:
+            logger.debug("dateutil not available, cannot compute next occurrence")
+            return None
+
+        if after is None:
+            after = datetime.now()
+
+        try:
+            # Strip "RRULE:" prefix if present
+            rule_text = rrule_str
+            if rule_text.startswith("RRULE:"):
+                rule_text = rule_text[6:]
+
+            # Handle timezone issues: UNTIL with Z suffix needs conversion
+            if "UNTIL=" in rule_text and "Z" in rule_text:
+                match = re.search(r"UNTIL=(\d{8}T\d{6})Z", rule_text)
+                if match:
+                    until_str = match.group(1)
+                    from datetime import timezone
+                    until_utc = datetime.strptime(until_str, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+                    until_local = until_utc.astimezone().replace(tzinfo=None)
+                    rule_text = rule_text.replace(
+                        f"UNTIL={until_str}Z",
+                        f"UNTIL={until_local.strftime('%Y%m%dT%H%M%S')}"
+                    )
+
+            # Create rrule with the event's original start as dtstart
+            rule = rrulestr(rule_text, dtstart=dtstart)
+
+            # Get next occurrence after the specified time
+            next_dt = rule.after(after, inc=False)
+            return next_dt
+
+        except Exception as e:
+            logger.debug("Failed to compute next occurrence: %s", e)
+            return None
 
     def get_status(self) -> dict[str, Any]:
         """Get bridge status information.

@@ -425,8 +425,10 @@ export function createPlayOverlay(onClose: () => void): {
     });
     sidebar.appendChild(newActBtn);
 
-    // Acts
+    // Acts (filter out "your-story" - it's represented by The Play root)
     for (const act of state.actsCache) {
+      if (act.act_id === 'your-story') continue;
+
       const isExpanded = state.expandedActs.has(act.act_id);
       const isSelected = state.selectedLevel === 'act' && state.activeActId === act.act_id;
       const isActive = act.act_id === state.activeActId;
@@ -542,19 +544,19 @@ export function createPlayOverlay(onClose: () => void): {
 
               const bulletIcon = el('span');
               bulletIcon.className = 'tree-icon';
-              bulletIcon.textContent = beat.status === 'completed' ? '✓' : '•';
+              bulletIcon.textContent = beat.stage === 'complete' ? '✓' : '•';
               beatItem.appendChild(bulletIcon);
 
               const beatTitle = el('span');
               beatTitle.textContent = ` ${beat.title}`;
               beatItem.appendChild(beatTitle);
 
-              // Add status badge
-              if (beat.status && beat.status !== 'pending') {
-                const statusBadge = el('span');
-                statusBadge.className = `beat-status beat-status-${beat.status}`;
-                statusBadge.textContent = beat.status.replace('_', ' ');
-                beatItem.appendChild(statusBadge);
+              // Add stage badge
+              if (beat.stage && beat.stage !== 'planning') {
+                const stageBadge = el('span');
+                stageBadge.className = `beat-stage beat-stage-${beat.stage}`;
+                stageBadge.textContent = beat.stage.replace('_', ' ');
+                beatItem.appendChild(stageBadge);
               }
 
               beatItem.addEventListener('click', () =>
@@ -589,8 +591,8 @@ export function createPlayOverlay(onClose: () => void): {
 
     content.appendChild(titleInput);
 
-    // Repository Path (only for Acts)
-    if (state.selectedLevel === 'act' && state.activeActId) {
+    // Repository Path (only for Acts, not for "your-story")
+    if (state.selectedLevel === 'act' && state.activeActId && state.activeActId !== 'your-story') {
       const repoSection = el('div');
       repoSection.className = 'play-repo-section';
       repoSection.style.marginBottom = '16px';

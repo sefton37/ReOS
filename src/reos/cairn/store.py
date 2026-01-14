@@ -9,7 +9,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -141,6 +141,31 @@ class CairnStore:
                     updated_at TEXT NOT NULL
                 );
 
+                -- Beat to Calendar Event links (many-to-many)
+                -- A Beat can have multiple calendar events associated
+                CREATE TABLE IF NOT EXISTS beat_calendar_links (
+                    link_id TEXT PRIMARY KEY,
+                    beat_id TEXT NOT NULL,
+                    calendar_event_id TEXT NOT NULL,
+                    calendar_event_title TEXT,
+                    calendar_event_start TEXT,
+                    calendar_event_end TEXT,
+                    created_at TEXT NOT NULL,
+                    notes TEXT,
+                    recurrence_rule TEXT,       -- RRULE string for recurring events
+                    next_occurrence TEXT,       -- Computed next occurrence datetime
+                    act_id TEXT,                -- Act this Beat belongs to
+                    scene_id TEXT,              -- Scene this Beat belongs to
+                    UNIQUE(beat_id, calendar_event_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_beat_calendar_beat
+                    ON beat_calendar_links(beat_id);
+                CREATE INDEX IF NOT EXISTS idx_beat_calendar_event
+                    ON beat_calendar_links(calendar_event_id);
+                CREATE INDEX IF NOT EXISTS idx_beat_calendar_start
+                    ON beat_calendar_links(calendar_event_start);
+
                 -- Extended thinking traces (audit trail for CAIRN's reasoning)
                 CREATE TABLE IF NOT EXISTS extended_thinking_traces (
                     trace_id TEXT PRIMARY KEY,
@@ -169,6 +194,29 @@ class CairnStore:
                 CREATE INDEX IF NOT EXISTS idx_ext_thinking_decision
                     ON extended_thinking_traces(decision);
             """)
+
+            # Migrations for existing databases
+            self._run_migrations(conn)
+
+    def _run_migrations(self, conn: sqlite3.Connection) -> None:
+        """Run schema migrations for existing databases."""
+        # Add new columns to beat_calendar_links if they don't exist
+        columns_to_add = [
+            ("recurrence_rule", "TEXT"),
+            ("next_occurrence", "TEXT"),
+            ("act_id", "TEXT"),
+            ("scene_id", "TEXT"),
+        ]
+
+        for col_name, col_type in columns_to_add:
+            try:
+                conn.execute(
+                    f"ALTER TABLE beat_calendar_links ADD COLUMN {col_name} {col_type}"
+                )
+                logger.debug(f"Added column {col_name} to beat_calendar_links")
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
 
     # =========================================================================
     # Metadata CRUD
@@ -490,6 +538,400 @@ class CairnStore:
                     )
                 )
             return results
+
+    # =========================================================================
+    # Beat-Calendar Event Links
+    # =========================================================================
+
+    def link_beat_to_calendar_event(
+        self,
+        beat_id: str,
+        calendar_event_id: str,
+        calendar_event_title: str | None = None,
+        calendar_event_start: datetime | None = None,
+        calendar_event_end: datetime | None = None,
+        notes: str | None = None,
+    ) -> str:
+        """Link a Beat to a calendar event.
+
+        Args:
+            beat_id: The Beat ID from The Play.
+            calendar_event_id: The calendar event ID from Thunderbird.
+            calendar_event_title: Title of the event (cached for display).
+            calendar_event_start: Start time of the event.
+            calendar_event_end: End time of the event.
+            notes: Optional notes about this link.
+
+        Returns:
+            The link ID.
+        """
+        link_id = str(uuid.uuid4())
+        now = datetime.now()
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO beat_calendar_links (
+                    link_id, beat_id, calendar_event_id,
+                    calendar_event_title, calendar_event_start, calendar_event_end,
+                    created_at, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    link_id,
+                    beat_id,
+                    calendar_event_id,
+                    calendar_event_title,
+                    calendar_event_start.isoformat() if calendar_event_start else None,
+                    calendar_event_end.isoformat() if calendar_event_end else None,
+                    now.isoformat(),
+                    notes,
+                ),
+            )
+
+        return link_id
+
+    def unlink_beat_from_calendar_event(
+        self,
+        beat_id: str,
+        calendar_event_id: str,
+    ) -> bool:
+        """Remove link between Beat and calendar event.
+
+        Returns:
+            True if a link was removed, False otherwise.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM beat_calendar_links
+                WHERE beat_id = ? AND calendar_event_id = ?
+                """,
+                (beat_id, calendar_event_id),
+            )
+            return cursor.rowcount > 0
+
+    def get_calendar_events_for_beat(
+        self,
+        beat_id: str,
+    ) -> list[dict[str, Any]]:
+        """Get all calendar events linked to a Beat.
+
+        Returns:
+            List of calendar event info dicts.
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM beat_calendar_links
+                WHERE beat_id = ?
+                ORDER BY calendar_event_start
+                """,
+                (beat_id,),
+            ).fetchall()
+
+            return [
+                {
+                    "link_id": row["link_id"],
+                    "calendar_event_id": row["calendar_event_id"],
+                    "title": row["calendar_event_title"],
+                    "start": row["calendar_event_start"],
+                    "end": row["calendar_event_end"],
+                    "notes": row["notes"],
+                }
+                for row in rows
+            ]
+
+    def get_beat_for_calendar_event(
+        self,
+        calendar_event_id: str,
+    ) -> str | None:
+        """Get the Beat ID linked to a calendar event.
+
+        Returns:
+            Beat ID or None if not linked.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT beat_id FROM beat_calendar_links
+                WHERE calendar_event_id = ?
+                """,
+                (calendar_event_id,),
+            ).fetchone()
+
+            return row["beat_id"] if row else None
+
+    def get_upcoming_linked_events(
+        self,
+        hours: int = 24,
+    ) -> list[dict[str, Any]]:
+        """Get upcoming calendar events that are linked to Beats.
+
+        Returns:
+            List of event info with beat_id included.
+        """
+        now = datetime.now()
+        end = now + timedelta(hours=hours)
+
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM beat_calendar_links
+                WHERE calendar_event_start >= ? AND calendar_event_start <= ?
+                ORDER BY calendar_event_start
+                """,
+                (now.isoformat(), end.isoformat()),
+            ).fetchall()
+
+            return [
+                {
+                    "beat_id": row["beat_id"],
+                    "calendar_event_id": row["calendar_event_id"],
+                    "title": row["calendar_event_title"],
+                    "start": row["calendar_event_start"],
+                    "end": row["calendar_event_end"],
+                    "notes": row["notes"],
+                }
+                for row in rows
+            ]
+
+    def get_beats_with_upcoming_events(
+        self,
+        hours: int = 168,
+    ) -> list[dict[str, Any]]:
+        """Get Beats with upcoming calendar events for surfacing.
+
+        This method returns Beats that have linked calendar events occurring
+        within the specified time window. For recurring events, it uses the
+        next_occurrence field instead of calendar_event_start.
+
+        Args:
+            hours: Number of hours to look ahead (default 168 = 1 week).
+
+        Returns:
+            List of dicts with beat info, calendar event details, and location.
+        """
+        now = datetime.now()
+        end = now + timedelta(hours=hours)
+        now_iso = now.isoformat()
+        end_iso = end.isoformat()
+
+        with self._get_connection() as conn:
+            # Get beats where either:
+            # 1. next_occurrence is within window (for recurring events)
+            # 2. calendar_event_start is within window (for one-time events)
+            rows = conn.execute(
+                """
+                SELECT * FROM beat_calendar_links
+                WHERE (
+                    (next_occurrence IS NOT NULL AND next_occurrence >= ? AND next_occurrence <= ?)
+                    OR
+                    (next_occurrence IS NULL AND calendar_event_start >= ? AND calendar_event_start <= ?)
+                )
+                ORDER BY COALESCE(next_occurrence, calendar_event_start)
+                """,
+                (now_iso, end_iso, now_iso, end_iso),
+            ).fetchall()
+
+            return [
+                {
+                    "beat_id": row["beat_id"],
+                    "calendar_event_id": row["calendar_event_id"],
+                    "title": row["calendar_event_title"],
+                    "start": row["calendar_event_start"],
+                    "end": row["calendar_event_end"],
+                    "recurrence_rule": row["recurrence_rule"],
+                    "next_occurrence": row["next_occurrence"],
+                    "act_id": row["act_id"],
+                    "scene_id": row["scene_id"],
+                    "notes": row["notes"],
+                }
+                for row in rows
+            ]
+
+    def update_beat_calendar_link(
+        self,
+        beat_id: str,
+        calendar_event_id: str,
+        recurrence_rule: str | None = None,
+        next_occurrence: datetime | None = None,
+        act_id: str | None = None,
+        scene_id: str | None = None,
+    ) -> bool:
+        """Update a beat-calendar link with recurrence and location info.
+
+        Args:
+            beat_id: The Beat ID.
+            calendar_event_id: The calendar event ID.
+            recurrence_rule: RRULE string for recurring events.
+            next_occurrence: Computed next occurrence datetime.
+            act_id: Act this Beat belongs to.
+            scene_id: Scene this Beat belongs to.
+
+        Returns:
+            True if updated, False if link not found.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE beat_calendar_links
+                SET recurrence_rule = ?,
+                    next_occurrence = ?,
+                    act_id = ?,
+                    scene_id = ?
+                WHERE beat_id = ? AND calendar_event_id = ?
+                """,
+                (
+                    recurrence_rule,
+                    next_occurrence.isoformat() if next_occurrence else None,
+                    act_id,
+                    scene_id,
+                    beat_id,
+                    calendar_event_id,
+                ),
+            )
+            return cursor.rowcount > 0
+
+    def get_all_recurring_beats(self) -> list[dict[str, Any]]:
+        """Get all beats with recurrence rules for refreshing next_occurrence.
+
+        Returns:
+            List of dicts with beat_id, recurrence_rule, and calendar_event_start.
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT beat_id, recurrence_rule, calendar_event_start
+                FROM beat_calendar_links
+                WHERE recurrence_rule IS NOT NULL
+                """,
+            ).fetchall()
+
+            return [
+                {
+                    "beat_id": row["beat_id"],
+                    "recurrence_rule": row["recurrence_rule"],
+                    "calendar_event_start": row["calendar_event_start"],
+                }
+                for row in rows
+            ]
+
+    def update_beat_next_occurrence(
+        self,
+        beat_id: str,
+        next_occurrence: datetime,
+    ) -> bool:
+        """Update just the next_occurrence for a beat.
+
+        Args:
+            beat_id: The Beat ID.
+            next_occurrence: The computed next occurrence datetime.
+
+        Returns:
+            True if updated, False if not found.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE beat_calendar_links
+                SET next_occurrence = ?
+                WHERE beat_id = ?
+                """,
+                (next_occurrence.isoformat(), beat_id),
+            )
+            return cursor.rowcount > 0
+
+    def link_beat_to_calendar_event_full(
+        self,
+        beat_id: str,
+        calendar_event_id: str,
+        calendar_event_title: str | None = None,
+        calendar_event_start: datetime | None = None,
+        calendar_event_end: datetime | None = None,
+        recurrence_rule: str | None = None,
+        next_occurrence: datetime | None = None,
+        act_id: str | None = None,
+        scene_id: str | None = None,
+        notes: str | None = None,
+    ) -> str:
+        """Link a Beat to a calendar event with full metadata.
+
+        This is an extended version of link_beat_to_calendar_event that
+        includes recurrence and location fields.
+
+        Args:
+            beat_id: The Beat ID from The Play.
+            calendar_event_id: The calendar event ID from Thunderbird.
+            calendar_event_title: Title of the event (cached for display).
+            calendar_event_start: Start time of the event.
+            calendar_event_end: End time of the event.
+            recurrence_rule: RRULE string for recurring events.
+            next_occurrence: Computed next occurrence datetime.
+            act_id: Act this Beat belongs to.
+            scene_id: Scene this Beat belongs to.
+            notes: Optional notes about this link.
+
+        Returns:
+            The link ID.
+        """
+        link_id = str(uuid.uuid4())
+        now = datetime.now()
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO beat_calendar_links (
+                    link_id, beat_id, calendar_event_id,
+                    calendar_event_title, calendar_event_start, calendar_event_end,
+                    recurrence_rule, next_occurrence, act_id, scene_id,
+                    created_at, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    link_id,
+                    beat_id,
+                    calendar_event_id,
+                    calendar_event_title,
+                    calendar_event_start.isoformat() if calendar_event_start else None,
+                    calendar_event_end.isoformat() if calendar_event_end else None,
+                    recurrence_rule,
+                    next_occurrence.isoformat() if next_occurrence else None,
+                    act_id,
+                    scene_id,
+                    now.isoformat(),
+                    notes,
+                ),
+            )
+
+        return link_id
+
+    def get_beat_id_for_calendar_event(
+        self,
+        calendar_event_id: str,
+    ) -> dict[str, Any] | None:
+        """Get beat info for a calendar event, including location.
+
+        Returns:
+            Dict with beat_id, act_id, scene_id, or None if not linked.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT beat_id, act_id, scene_id FROM beat_calendar_links
+                WHERE calendar_event_id = ?
+                """,
+                (calendar_event_id,),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            return {
+                "beat_id": row["beat_id"],
+                "act_id": row["act_id"],
+                "scene_id": row["scene_id"],
+            }
 
     # =========================================================================
     # Kanban State Management

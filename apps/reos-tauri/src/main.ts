@@ -438,6 +438,48 @@ function buildUi() {
     kernelRequest,
   });
 
+  // Load attention items at startup for "What Needs My Attention" section (next 7 days)
+  void (async () => {
+    try {
+      const result = await kernelRequest('cairn/attention', { hours: 168, limit: 50 }) as {
+        count: number;
+        items: Array<{
+          entity_type: string;
+          entity_id: string;
+          title: string;
+          reason: string;
+          urgency: string;
+          calendar_start?: string;
+          calendar_end?: string;
+          is_recurring?: boolean;
+          recurrence_frequency?: string;
+          next_occurrence?: string;
+          act_id?: string;
+          scene_id?: string;
+          act_title?: string;
+        }>;
+      };
+      if (result.items && result.items.length > 0) {
+        cairnView.updateSurfaced(result.items.map(item => ({
+          title: item.title,
+          reason: item.reason,
+          urgency: item.urgency,
+          is_recurring: item.is_recurring,
+          recurrence_frequency: item.recurrence_frequency,
+          next_occurrence: item.next_occurrence,
+          entity_type: item.entity_type,
+          entity_id: item.entity_id,
+          act_id: item.act_id,
+          scene_id: item.scene_id,
+          act_title: item.act_title,
+        })));
+      }
+    } catch (e) {
+      console.log('Could not load attention items:', e);
+      // Silently fail - the panel will just show "Nothing surfaced yet"
+    }
+  })();
+
   // Handle CAIRN chat messages (default conversational mode)
   async function handleCairnMessage(message: string, options?: { extendedThinking?: boolean }): Promise<void> {
     // Show thinking indicator while waiting for response
@@ -1176,15 +1218,15 @@ function buildUi() {
 
         detail.appendChild(rowHeader('Beat Details'));
         const tTitle = textInput(b.title ?? '');
-        const tStatus = textInput(b.status ?? '');
+        const tStage = textInput(b.stage ?? '');
         const tLink = textInput(b.link ?? '');
         const tNotes = textArea(b.notes ?? '', 80);
         const save = smallButton('Save Beat');
 
         detail.appendChild(label('Title'));
         detail.appendChild(tTitle);
-        detail.appendChild(label('Status'));
-        detail.appendChild(tStatus);
+        detail.appendChild(label('Stage'));
+        detail.appendChild(tStage);
         detail.appendChild(label('Link'));
         detail.appendChild(tLink);
         detail.appendChild(label('Notes'));
@@ -1199,7 +1241,7 @@ function buildUi() {
               scene_id: selectedSceneId,
               beat_id: selectedBeatId,
               title: tTitle.value,
-              status: tStatus.value,
+              stage: tStage.value,
               link: tLink.value || null,
               notes: tNotes.value
             });
@@ -1411,6 +1453,9 @@ function buildUi() {
 
     actsList.innerHTML = '';
     for (const a of actsCache) {
+      // Skip "Your Story" - it's shown separately under The Play section
+      if (a.act_id === 'your-story') continue;
+
       const isActive = a.act_id === activeActId;
 
       const actRow = el('div');
@@ -1439,8 +1484,8 @@ function buildUi() {
         contextIndicator.innerHTML = '<span style="color: white; font-size: 10px; font-weight: bold;">✓</span>';
       }
       contextIndicator.title = isActive
-        ? 'In context (with all Scenes & Beats) - click to deselect'
-        : 'Click to add this Act and its Scenes & Beats to context';
+        ? 'In Context - click to remove from context'
+        : 'Click to add to context';
 
       // Act title
       const actTitle = el('span');
@@ -1463,6 +1508,20 @@ function buildUi() {
 
       actRow.appendChild(contextIndicator);
       actRow.appendChild(actTitle);
+
+      // Add "In Context" label when active
+      if (isActive) {
+        const inContextLabel = el('span');
+        inContextLabel.textContent = 'In Context';
+        inContextLabel.style.fontSize = '9px';
+        inContextLabel.style.padding = '2px 5px';
+        inContextLabel.style.borderRadius = '3px';
+        inContextLabel.style.background = 'rgba(34, 197, 94, 0.2)';
+        inContextLabel.style.color = '#22c55e';
+        inContextLabel.style.marginRight = '4px';
+        actRow.appendChild(inContextLabel);
+      }
+
       actRow.appendChild(openBtn);
 
       // Hover effects

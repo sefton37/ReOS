@@ -296,6 +296,27 @@ def list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="cairn_surface_attention",
+            description=(
+                "Get items that need attention - primarily upcoming calendar events. "
+                "Designed for the 'What Needs My Attention' section at app startup. "
+                "Shows the next 7 days by default."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "hours": {
+                        "type": "number",
+                        "description": "Look ahead this many hours (default: 168 = 7 days)",
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Max items (default: 10)",
+                    },
+                },
+            },
+        ),
         # =====================================================================
         # Contact Knowledge Graph
         # =====================================================================
@@ -412,7 +433,11 @@ def list_tools() -> list[Tool]:
         ),
         Tool(
             name="cairn_get_todos",
-            description="Get Thunderbird calendar todos.",
+            description=(
+                "Get todos (Beats) from The Play with CAIRN metadata. "
+                "Beats are tasks within Scenes within Acts. "
+                "Returns priority, due dates, kanban state, and linked calendar events."
+            ),
             input_schema={
                 "type": "object",
                 "properties": {
@@ -420,7 +445,54 @@ def list_tools() -> list[Tool]:
                         "type": "boolean",
                         "description": "Include completed todos (default: false)",
                     },
+                    "kanban_state": {
+                        "type": "string",
+                        "enum": ["active", "backlog", "waiting", "someday", "done"],
+                        "description": "Filter by kanban state (optional)",
+                    },
                 },
+            },
+        ),
+        # =====================================================================
+        # Beat-Calendar Linking
+        # =====================================================================
+        Tool(
+            name="cairn_link_beat_to_event",
+            description=(
+                "Link a Beat (todo) to a calendar event. "
+                "A Beat can have multiple calendar events linked to it."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "beat_id": {"type": "string", "description": "The Beat ID to link"},
+                    "calendar_event_id": {"type": "string", "description": "The calendar event ID"},
+                    "notes": {"type": "string", "description": "Optional notes about this link"},
+                },
+                "required": ["beat_id", "calendar_event_id"],
+            },
+        ),
+        Tool(
+            name="cairn_unlink_beat_from_event",
+            description="Remove link between a Beat and a calendar event.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "beat_id": {"type": "string"},
+                    "calendar_event_id": {"type": "string"},
+                },
+                "required": ["beat_id", "calendar_event_id"],
+            },
+        ),
+        Tool(
+            name="cairn_get_beat_events",
+            description="Get all calendar events linked to a Beat.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "beat_id": {"type": "string"},
+                },
+                "required": ["beat_id"],
             },
         ),
         # =====================================================================
@@ -625,6 +697,9 @@ class CairnToolHandler:
         if name == "cairn_surface_waiting":
             return self._surface_waiting(args)
 
+        if name == "cairn_surface_attention":
+            return self._surface_attention(args)
+
         # =====================================================================
         # Contact Management
         # =====================================================================
@@ -657,6 +732,18 @@ class CairnToolHandler:
 
         if name == "cairn_get_todos":
             return self._get_todos(args)
+
+        # =====================================================================
+        # Beat-Calendar Linking
+        # =====================================================================
+        if name == "cairn_link_beat_to_event":
+            return self._link_beat_to_event(args)
+
+        if name == "cairn_unlink_beat_from_event":
+            return self._unlink_beat_from_event(args)
+
+        if name == "cairn_get_beat_events":
+            return self._get_beat_events(args)
 
         # =====================================================================
         # Analytics
@@ -913,6 +1000,30 @@ class CairnToolHandler:
             ],
         }
 
+    def _surface_attention(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Surface items needing attention - primarily calendar events (next 7 days)."""
+        hours = args.get("hours", 168)  # 7 days
+        limit = args.get("limit", 10)
+
+        items = self.surfacer.surface_attention(hours=hours, limit=limit)
+
+        return {
+            "count": len(items),
+            "items": [
+                {
+                    "entity_type": item.entity_type,
+                    "entity_id": item.entity_id,
+                    "title": item.title,
+                    "reason": item.reason,
+                    "urgency": item.urgency,
+                    "calendar_start": item.calendar_start.isoformat() if item.calendar_start else None,
+                    "calendar_end": item.calendar_end.isoformat() if item.calendar_end else None,
+                    "metadata": item.metadata.to_dict() if item.metadata else None,
+                }
+                for item in items
+            ],
+        }
+
     def _link_contact(self, args: dict[str, Any]) -> dict[str, Any]:
         """Link a contact."""
         link = self.store.link_contact(
@@ -1058,25 +1169,176 @@ class CairnToolHandler:
         }
 
     def _get_todos(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Get Thunderbird todos."""
-        if self.thunderbird is None:
-            return {"available": False, "todos": []}
+        """Get todos (Beats) from The Play with CAIRN metadata.
+
+        Beats are the todos in ReOS - they come from The Play hierarchy.
+        This returns Beats with their CAIRN attention metadata and linked calendar events.
+        """
+        from reos import play_fs
 
         include_completed = args.get("include_completed", False)
-        todos = self.thunderbird.list_todos(include_completed=include_completed)
+        kanban_filter = args.get("kanban_state")  # Optional: "active", "backlog", etc.
+
+        todos = []
+
+        # Get all Acts
+        acts = play_fs.list_acts()
+        for act in acts:
+            # Get all Scenes in this Act
+            scenes = play_fs.list_scenes(act_id=act.act_id)
+            for scene in scenes:
+                # Get all Beats in this Scene
+                beats = play_fs.list_beats(act_id=act.act_id, scene_id=scene.scene_id)
+                for beat in beats:
+                    # Get CAIRN metadata for this Beat
+                    metadata = self.store.get_metadata("beat", beat.beat_id)
+
+                    # Filter by kanban state
+                    if kanban_filter:
+                        if metadata is None or metadata.kanban_state.value != kanban_filter:
+                            continue
+
+                    # Filter completed if requested
+                    if not include_completed:
+                        if beat.status.lower() in ("done", "completed", "complete"):
+                            continue
+                        if metadata and metadata.kanban_state.value == "done":
+                            continue
+
+                    # Get linked calendar events
+                    calendar_events = self.store.get_calendar_events_for_beat(beat.beat_id)
+
+                    todo_item = {
+                        "id": beat.beat_id,
+                        "title": beat.title,
+                        "status": beat.status,
+                        "notes": beat.notes,
+                        "link": beat.link,
+                        # Context
+                        "act_id": act.act_id,
+                        "act_title": act.title,
+                        "scene_id": scene.scene_id,
+                        "scene_title": scene.title,
+                    }
+
+                    # Add CAIRN metadata if available
+                    if metadata:
+                        todo_item.update({
+                            "kanban_state": metadata.kanban_state.value,
+                            "priority": metadata.priority,
+                            "due_date": metadata.due_date.isoformat() if metadata.due_date else None,
+                            "waiting_on": metadata.waiting_on,
+                            "last_touched": metadata.last_touched.isoformat() if metadata.last_touched else None,
+                        })
+                    else:
+                        todo_item.update({
+                            "kanban_state": "backlog",
+                            "priority": None,
+                            "due_date": None,
+                            "waiting_on": None,
+                            "last_touched": None,
+                        })
+
+                    # Add linked calendar events
+                    if calendar_events:
+                        todo_item["calendar_events"] = calendar_events
+
+                    todos.append(todo_item)
+
+        # Sort by priority (high first), then by due date
+        def sort_key(t):
+            priority = t.get("priority") or 0
+            due = t.get("due_date") or "9999-12-31"
+            return (-priority, due)
+
+        todos.sort(key=sort_key)
 
         return {
             "count": len(todos),
-            "todos": [
-                {
-                    "id": t.id,
-                    "title": t.title,
-                    "due_date": t.due_date.isoformat() if t.due_date else None,
-                    "status": t.status,
-                    "priority": t.priority,
-                }
-                for t in todos
-            ],
+            "todos": todos,
+        }
+
+    def _link_beat_to_event(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Link a Beat to a calendar event."""
+        beat_id = args.get("beat_id")
+        calendar_event_id = args.get("calendar_event_id")
+        notes = args.get("notes")
+
+        if not beat_id or not calendar_event_id:
+            raise CairnToolError(
+                code="MISSING_PARAMS",
+                message="beat_id and calendar_event_id are required",
+            )
+
+        # Try to get calendar event details from Thunderbird
+        event_title = None
+        event_start = None
+        event_end = None
+
+        if self.thunderbird:
+            # Search for the event to get its details
+            events = self.thunderbird.list_events()
+            for e in events:
+                if e.id == calendar_event_id:
+                    event_title = e.title
+                    event_start = e.start
+                    event_end = e.end
+                    break
+
+        link_id = self.store.link_beat_to_calendar_event(
+            beat_id=beat_id,
+            calendar_event_id=calendar_event_id,
+            calendar_event_title=event_title,
+            calendar_event_start=event_start,
+            calendar_event_end=event_end,
+            notes=notes,
+        )
+
+        return {
+            "success": True,
+            "link_id": link_id,
+            "beat_id": beat_id,
+            "calendar_event_id": calendar_event_id,
+        }
+
+    def _unlink_beat_from_event(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Remove link between Beat and calendar event."""
+        beat_id = args.get("beat_id")
+        calendar_event_id = args.get("calendar_event_id")
+
+        if not beat_id or not calendar_event_id:
+            raise CairnToolError(
+                code="MISSING_PARAMS",
+                message="beat_id and calendar_event_id are required",
+            )
+
+        removed = self.store.unlink_beat_from_calendar_event(
+            beat_id=beat_id,
+            calendar_event_id=calendar_event_id,
+        )
+
+        return {
+            "success": removed,
+            "beat_id": beat_id,
+            "calendar_event_id": calendar_event_id,
+        }
+
+    def _get_beat_events(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Get all calendar events linked to a Beat."""
+        beat_id = args.get("beat_id")
+
+        if not beat_id:
+            raise CairnToolError(
+                code="MISSING_PARAMS",
+                message="beat_id is required",
+            )
+
+        events = self.store.get_calendar_events_for_beat(beat_id)
+
+        return {
+            "beat_id": beat_id,
+            "count": len(events),
+            "events": events,
         }
 
     def _activity_summary(self, args: dict[str, Any]) -> dict[str, Any]:

@@ -5,6 +5,7 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -14,6 +15,48 @@ from .settings import settings
 
 
 _JSON = dict[str, Any]
+
+# =============================================================================
+# Constants for "Your Story" Act and Stage Direction
+# =============================================================================
+
+YOUR_STORY_ACT_ID = "your-story"
+STAGE_DIRECTION_SCENE_ID_PREFIX = "stage-direction-"
+
+
+def _get_stage_direction_scene_id(act_id: str) -> str:
+    """Get the Stage Direction scene ID for an Act."""
+    return f"{STAGE_DIRECTION_SCENE_ID_PREFIX}{act_id[:12]}"
+
+
+class BeatStage(Enum):
+    """The stage/state of a Beat in The Play.
+
+    Beats progress through these stages:
+    - PLANNING: No date set, still being organized
+    - IN_PROGRESS: Has a date, actively working on it
+    - AWAITING_DATA: Waiting for external input/data
+    - COMPLETE: Done
+    """
+    PLANNING = "planning"
+    IN_PROGRESS = "in_progress"
+    AWAITING_DATA = "awaiting_data"
+    COMPLETE = "complete"
+
+
+def _migrate_status_to_stage(status: str) -> str:
+    """Migrate old Beat status values to new stage values."""
+    mapping = {
+        "pending": BeatStage.PLANNING.value,
+        "todo": BeatStage.PLANNING.value,
+        "in_progress": BeatStage.IN_PROGRESS.value,
+        "active": BeatStage.IN_PROGRESS.value,
+        "blocked": BeatStage.AWAITING_DATA.value,
+        "waiting": BeatStage.AWAITING_DATA.value,
+        "completed": BeatStage.COMPLETE.value,
+        "done": BeatStage.COMPLETE.value,
+    }
+    return mapping.get(status.lower().strip(), BeatStage.PLANNING.value)
 
 
 @dataclass(frozen=True)
@@ -46,11 +89,19 @@ class Scene:
 
 @dataclass(frozen=True)
 class Beat:
+    """A Beat in The Play - an atomic task or event.
+
+    Beats can be linked to calendar events. For recurring events,
+    ONE Beat represents the entire series (not expanded occurrences).
+    """
     beat_id: str
     title: str
-    status: str
+    stage: str  # BeatStage value
     notes: str
     link: str | None = None
+    # Calendar integration fields
+    calendar_event_id: str | None = None  # Source calendar event ID
+    recurrence_rule: str | None = None    # RRULE string if recurring
 
 
 @dataclass(frozen=True)
@@ -119,6 +170,100 @@ def ensure_play_skeleton() -> None:
     acts = _acts_path()
     if not acts.exists():
         acts.write_text(json.dumps({"acts": []}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _ensure_stage_direction_scene(act_id: str) -> None:
+    """Ensure an Act has a Stage Direction scene as its first scene.
+
+    Stage Direction is the default container for Beats that haven't been
+    assigned to a specific Scene within the Act.
+    """
+    scenes_path = _scenes_path(act_id)
+    scenes_path.parent.mkdir(parents=True, exist_ok=True)
+
+    stage_direction_id = _get_stage_direction_scene_id(act_id)
+
+    if scenes_path.exists():
+        data = _load_json(scenes_path)
+        scenes_raw = data.get("scenes", [])
+        if not isinstance(scenes_raw, list):
+            scenes_raw = []
+
+        # Check if Stage Direction already exists
+        for scene in scenes_raw:
+            if isinstance(scene, dict) and scene.get("scene_id") == stage_direction_id:
+                return  # Already exists
+
+        # Insert Stage Direction as the first scene
+        stage_direction = {
+            "scene_id": stage_direction_id,
+            "title": "Stage Direction",
+            "intent": "Default container for unassigned Beats",
+            "status": "",
+            "time_horizon": "",
+            "notes": "",
+            "beats": [],
+            "is_stage_direction": True,
+        }
+        scenes_raw.insert(0, stage_direction)
+        _write_json(scenes_path, {"scenes": scenes_raw})
+    else:
+        # Create new scenes file with Stage Direction
+        stage_direction = {
+            "scene_id": stage_direction_id,
+            "title": "Stage Direction",
+            "intent": "Default container for unassigned Beats",
+            "status": "",
+            "time_horizon": "",
+            "notes": "",
+            "beats": [],
+            "is_stage_direction": True,
+        }
+        _write_json(scenes_path, {"scenes": [stage_direction]})
+
+
+def ensure_your_story_act() -> tuple[list["Act"], str]:
+    """Ensure 'Your Story' Act exists.
+
+    'Your Story' is a special default Act that always exists. All other Acts
+    relate to it conceptually (life projects vs. the story of your life).
+    Unassigned Beats live in 'Your Story' under its 'Stage Direction' scene.
+
+    Returns:
+        Tuple of (all acts, your_story_act_id).
+    """
+    ensure_play_skeleton()
+    data = _load_json(_acts_path())
+    acts_raw = data.get("acts", [])
+    if not isinstance(acts_raw, list):
+        acts_raw = []
+
+    # Check if "Your Story" exists
+    your_story_exists = any(
+        isinstance(a, dict) and a.get("act_id") == YOUR_STORY_ACT_ID
+        for a in acts_raw
+    )
+
+    if not your_story_exists:
+        # Create "Your Story" Act
+        your_story = {
+            "act_id": YOUR_STORY_ACT_ID,
+            "title": "Your Story",
+            "active": len(acts_raw) == 0,  # Active if no other acts
+            "notes": "The overarching narrative of your life. Unassigned Beats live here.",
+        }
+        # Insert at the beginning
+        acts_raw.insert(0, your_story)
+        _write_json(_acts_path(), {"acts": acts_raw})
+
+        # Create the Act directory and Stage Direction scene
+        _act_dir(YOUR_STORY_ACT_ID).mkdir(parents=True, exist_ok=True)
+        _ensure_stage_direction_scene(YOUR_STORY_ACT_ID)
+
+    # Return the acts list (use list_acts to get proper Act objects)
+    from . import play_fs  # Avoid circular import
+    acts, _ = list_acts()
+    return acts, YOUR_STORY_ACT_ID
 
 
 def read_me_markdown() -> str:
@@ -325,9 +470,22 @@ def list_beats(*, act_id: str, scene_id: str) -> list[Beat]:
                 continue
             beat_id = b.get("beat_id")
             title = b.get("title")
-            status = b.get("status")
             notes = b.get("notes")
             link = b.get("link")
+
+            # Migration: convert old 'status' to new 'stage'
+            stage = b.get("stage")
+            if stage is None:
+                old_status = b.get("status", "")
+                stage = _migrate_status_to_stage(old_status)
+
+            # Calendar integration fields
+            calendar_event_id = b.get("calendar_event_id")
+            if calendar_event_id is not None and not isinstance(calendar_event_id, str):
+                calendar_event_id = None
+            recurrence_rule = b.get("recurrence_rule")
+            if recurrence_rule is not None and not isinstance(recurrence_rule, str):
+                recurrence_rule = None
 
             if not isinstance(beat_id, str) or not beat_id:
                 continue
@@ -340,9 +498,11 @@ def list_beats(*, act_id: str, scene_id: str) -> list[Beat]:
                 Beat(
                     beat_id=beat_id,
                     title=title,
-                    status=str(status or ""),
+                    stage=str(stage or BeatStage.PLANNING.value),
                     notes=str(notes or ""),
                     link=link,
+                    calendar_event_id=calendar_event_id,
+                    recurrence_rule=recurrence_rule,
                 )
             )
         return beats
@@ -362,12 +522,12 @@ def _new_id(prefix: str) -> str:
 
 
 def create_act(*, title: str, notes: str = "") -> tuple[list[Act], str]:
-    """Create a new Act.
+    """Create a new Act with its mandatory Stage Direction scene.
 
     - Generates a stable act_id.
     - If no act is active yet, the new act becomes active.
+    - Auto-creates a 'Stage Direction' scene as the default Beat container.
     """
-
     if not isinstance(title, str) or not title.strip():
         raise ValueError("title is required")
     if not isinstance(notes, str):
@@ -382,6 +542,9 @@ def create_act(*, title: str, notes: str = "") -> tuple[list[Act], str]:
 
     # Ensure the act directory exists for scenes/kb.
     _act_dir(act_id).mkdir(parents=True, exist_ok=True)
+
+    # Auto-create Stage Direction scene
+    _ensure_stage_direction_scene(act_id)
 
     return acts, act_id
 
@@ -650,22 +813,42 @@ def create_beat(
     act_id: str,
     scene_id: str,
     title: str,
-    status: str = "",
+    stage: str = "",
     notes: str = "",
     link: str | None = None,
+    calendar_event_id: str | None = None,
+    recurrence_rule: str | None = None,
 ) -> list[Beat]:
-    """Create a Beat under a Scene."""
+    """Create a Beat under a Scene.
 
+    Args:
+        act_id: The Act containing the Scene.
+        scene_id: The Scene to add the Beat to.
+        title: Beat title.
+        stage: BeatStage value (planning, in_progress, awaiting_data, complete).
+        notes: Optional notes.
+        link: Optional external link.
+        calendar_event_id: Optional calendar event ID this Beat is linked to.
+        recurrence_rule: Optional RRULE string for recurring events.
+    """
     _validate_id(name="act_id", value=act_id)
     _validate_id(name="scene_id", value=scene_id)
     if not isinstance(title, str) or not title.strip():
         raise ValueError("title is required")
-    if not isinstance(status, str):
-        raise ValueError("status must be a string")
+    if not isinstance(stage, str):
+        raise ValueError("stage must be a string")
     if not isinstance(notes, str):
         raise ValueError("notes must be a string")
     if link is not None and not isinstance(link, str):
         raise ValueError("link must be a string or null")
+    if calendar_event_id is not None and not isinstance(calendar_event_id, str):
+        raise ValueError("calendar_event_id must be a string or null")
+    if recurrence_rule is not None and not isinstance(recurrence_rule, str):
+        raise ValueError("recurrence_rule must be a string or null")
+
+    # Default stage to PLANNING if not specified
+    if not stage:
+        stage = BeatStage.PLANNING.value
 
     scenes_path = _ensure_scenes_file(act_id=act_id)
     data = _load_json(scenes_path)
@@ -687,15 +870,21 @@ def create_beat(
         beats = item.get("beats")
         if not isinstance(beats, list):
             beats = []
-        beats.append(
-            {
-                "beat_id": beat_id,
-                "title": title.strip(),
-                "status": status,
-                "notes": notes,
-                "link": link,
-            }
-        )
+
+        beat_data: dict[str, Any] = {
+            "beat_id": beat_id,
+            "title": title.strip(),
+            "stage": stage,
+            "notes": notes,
+            "link": link,
+        }
+        # Only include calendar fields if set
+        if calendar_event_id:
+            beat_data["calendar_event_id"] = calendar_event_id
+        if recurrence_rule:
+            beat_data["recurrence_rule"] = recurrence_rule
+
+        beats.append(beat_data)
         item = dict(item)
         item["beats"] = beats
         out.append(item)
@@ -713,19 +902,28 @@ def update_beat(
     scene_id: str,
     beat_id: str,
     title: str | None = None,
-    status: str | None = None,
+    stage: str | None = None,
     notes: str | None = None,
     link: str | None = None,
 ) -> list[Beat]:
-    """Update a Beat's fields."""
+    """Update a Beat's fields.
 
+    Args:
+        act_id: The Act containing the Beat.
+        scene_id: The Scene containing the Beat.
+        beat_id: The Beat to update.
+        title: New title (optional).
+        stage: New BeatStage value (optional).
+        notes: New notes (optional).
+        link: New external link (optional).
+    """
     _validate_id(name="act_id", value=act_id)
     _validate_id(name="scene_id", value=scene_id)
     _validate_id(name="beat_id", value=beat_id)
     if title is not None and (not isinstance(title, str) or not title.strip()):
         raise ValueError("title must be a non-empty string")
-    if status is not None and not isinstance(status, str):
-        raise ValueError("status must be a string")
+    if stage is not None and not isinstance(stage, str):
+        raise ValueError("stage must be a string")
     if notes is not None and not isinstance(notes, str):
         raise ValueError("notes must be a string")
     if link is not None and not isinstance(link, str):
@@ -763,15 +961,25 @@ def update_beat(
             if not new_title.strip():
                 raise ValueError("title must be a non-empty string")
 
-            out_beats.append(
-                {
-                    "beat_id": beat_id,
-                    "title": new_title,
-                    "status": (status if isinstance(status, str) else str(b.get("status") or "")),
-                    "notes": (notes if isinstance(notes, str) else str(b.get("notes") or "")),
-                    "link": (link if isinstance(link, str) else b.get("link")),
-                }
-            )
+            # Preserve stage or migrate from old status field
+            existing_stage = b.get("stage")
+            if existing_stage is None:
+                existing_stage = _migrate_status_to_stage(str(b.get("status") or ""))
+
+            beat_data: dict[str, Any] = {
+                "beat_id": beat_id,
+                "title": new_title,
+                "stage": (stage if isinstance(stage, str) else existing_stage),
+                "notes": (notes if isinstance(notes, str) else str(b.get("notes") or "")),
+                "link": (link if isinstance(link, str) else b.get("link")),
+            }
+            # Preserve calendar fields
+            if b.get("calendar_event_id"):
+                beat_data["calendar_event_id"] = b["calendar_event_id"]
+            if b.get("recurrence_rule"):
+                beat_data["recurrence_rule"] = b["recurrence_rule"]
+
+            out_beats.append(beat_data)
 
         item = dict(item)
         item["beats"] = out_beats
@@ -784,6 +992,130 @@ def update_beat(
 
     _write_json(scenes_path, {"scenes": out_scenes})
     return list_beats(act_id=act_id, scene_id=scene_id)
+
+
+def move_beat(
+    *,
+    beat_id: str,
+    source_act_id: str,
+    source_scene_id: str,
+    target_act_id: str,
+    target_scene_id: str,
+) -> dict[str, Any]:
+    """Move a Beat from one Scene to another (possibly different Acts).
+
+    Args:
+        beat_id: The Beat to move.
+        source_act_id: The source Act.
+        source_scene_id: The source Scene.
+        target_act_id: The target Act.
+        target_scene_id: The target Scene.
+
+    Returns:
+        Dict with moved beat_id and target location.
+
+    Raises:
+        ValueError: If beat, source, or target not found.
+    """
+    _validate_id(name="beat_id", value=beat_id)
+    _validate_id(name="source_act_id", value=source_act_id)
+    _validate_id(name="source_scene_id", value=source_scene_id)
+    _validate_id(name="target_act_id", value=target_act_id)
+    _validate_id(name="target_scene_id", value=target_scene_id)
+
+    # 1. Find and remove the beat from the source scene
+    source_scenes_path = _scenes_path(source_act_id)
+    if not source_scenes_path.exists():
+        raise ValueError("source act not found")
+
+    source_data = _load_json(source_scenes_path)
+    source_scenes_raw = source_data.get("scenes", [])
+    if not isinstance(source_scenes_raw, list):
+        source_scenes_raw = []
+
+    beat_data: dict[str, Any] | None = None
+    new_source_scenes: list[dict[str, Any]] = []
+
+    for scene in source_scenes_raw:
+        if not isinstance(scene, dict):
+            continue
+        if scene.get("scene_id") != source_scene_id:
+            new_source_scenes.append(scene)
+            continue
+
+        # Found source scene - look for the beat
+        beats = scene.get("beats", [])
+        if not isinstance(beats, list):
+            beats = []
+
+        new_beats: list[dict[str, Any]] = []
+        for b in beats:
+            if not isinstance(b, dict):
+                continue
+            if b.get("beat_id") == beat_id:
+                beat_data = dict(b)  # Extract the beat
+            else:
+                new_beats.append(b)
+
+        scene_copy = dict(scene)
+        scene_copy["beats"] = new_beats
+        new_source_scenes.append(scene_copy)
+
+    if beat_data is None:
+        raise ValueError("beat not found in source scene")
+
+    # 2. Add the beat to the target scene
+    if source_act_id == target_act_id:
+        # Same act - work with the same scenes list
+        target_scenes_raw = new_source_scenes
+    else:
+        target_scenes_path = _scenes_path(target_act_id)
+        if not target_scenes_path.exists():
+            raise ValueError("target act not found")
+        target_data = _load_json(target_scenes_path)
+        target_scenes_raw = target_data.get("scenes", [])
+        if not isinstance(target_scenes_raw, list):
+            target_scenes_raw = []
+
+    target_found = False
+    new_target_scenes: list[dict[str, Any]] = []
+
+    for scene in target_scenes_raw:
+        if not isinstance(scene, dict):
+            continue
+        if scene.get("scene_id") != target_scene_id:
+            new_target_scenes.append(scene)
+            continue
+
+        target_found = True
+        # Found target scene - add the beat
+        beats = scene.get("beats", [])
+        if not isinstance(beats, list):
+            beats = []
+        beats.append(beat_data)
+
+        scene_copy = dict(scene)
+        scene_copy["beats"] = beats
+        new_target_scenes.append(scene_copy)
+
+    if not target_found:
+        raise ValueError("target scene not found")
+
+    # 3. Write changes
+    if source_act_id == target_act_id:
+        # Same act - write once
+        _write_json(source_scenes_path, {"scenes": new_target_scenes})
+    else:
+        # Different acts - write both
+        _write_json(source_scenes_path, {"scenes": new_source_scenes})
+        target_scenes_path = _scenes_path(target_act_id)
+        _write_json(target_scenes_path, {"scenes": new_target_scenes})
+
+    return {
+        "beat_id": beat_id,
+        "target_act_id": target_act_id,
+        "target_scene_id": target_scene_id,
+    }
 
 
 def _kb_root_for(*, act_id: str, scene_id: str | None = None, beat_id: str | None = None) -> Path:

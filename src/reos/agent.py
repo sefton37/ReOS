@@ -106,6 +106,8 @@ class ChatResponse:
     has_uncertainties: bool = False
     # Extended thinking trace (CAIRN)
     extended_thinking_trace: dict[str, Any] | None = None
+    # Additional metadata (intent tracking, etc.)
+    metadata: dict[str, Any] | None = None
 
 
 class ChatAgent:
@@ -1028,16 +1030,99 @@ class ChatAgent:
 
         llm = self._get_provider()
 
+        # Use new Intent Engine for CAIRN (multi-stage processing)
+        if agent_type == "cairn":
+            import sys
+            print(f"[CAIRN] Using IntentEngine for: {user_text[:100]!r}", file=sys.stderr)
+
+            from reos.cairn.intent_engine import CairnIntentEngine
+
+            # Get available tool names
+            available_tools = {t.name for t in tools}
+
+            # Create tool executor function
+            def execute_tool(name: str, args: dict) -> dict:
+                from reos.mcp_tools import call_tool, ToolError
+                try:
+                    return call_tool(self._db, name=name, arguments=args)
+                except ToolError as e:
+                    return {"error": e.message, "code": e.code}
+
+            # Process through intent engine
+            intent_engine = CairnIntentEngine(llm=llm, available_tools=available_tools)
+            result = intent_engine.process(
+                user_input=user_text,
+                execute_tool=execute_tool,
+                persona_context=play_context if play_context else "",
+            )
+
+            # Build response in expected format
+            tool_results = []
+            if result.tool_result is not None:
+                tool_results.append({
+                    "name": result.verified_intent.tool_name,
+                    "arguments": result.verified_intent.tool_args,
+                    "ok": "error" not in result.tool_result,
+                    "result": result.tool_result,
+                })
+
+            # Validate response certainty
+            try:
+                certain_response = self._certainty.wrap_response(
+                    response=result.response,
+                    system_state=self._steady_state.current if self._steady_state._current else None,
+                    tool_outputs=tool_results,
+                    user_input=user_text,
+                )
+                confidence = certain_response.overall_confidence
+                evidence_summary = certain_response.evidence_summary or ""
+            except Exception as e:
+                logger.warning("Certainty validation failed: %s", e)
+                confidence = 1.0
+                evidence_summary = ""
+
+            # Generate message ID and store response
+            assistant_message_id = _generate_id()
+            self._db.add_message(
+                message_id=assistant_message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=result.response,
+                message_type="text",
+            )
+
+            return ChatResponse(
+                answer=result.response,
+                conversation_id=conversation_id,
+                message_id=assistant_message_id,
+                thinking_steps=result.thinking_steps or [],
+                tool_calls=tool_results or [],
+                metadata=({
+                    "intent": {
+                        "category": result.verified_intent.intent.category.name,
+                        "action": result.verified_intent.intent.action.name,
+                        "target": result.verified_intent.intent.target,
+                        "confidence": result.verified_intent.intent.confidence,
+                    },
+                    "verified": result.verified_intent.verified,
+                }) if result.verified_intent else None,
+                confidence=confidence,
+                evidence_summary=evidence_summary,
+                extended_thinking_trace=extended_thinking_trace,
+            )
+
         wants_diff = self._user_opted_into_diff(user_text)
 
         # Detect personal questions - skip tool selection for these
         # Personal questions should be answered directly from THE_PLAY context
         is_personal = self._is_personal_question(user_text)
+        import sys
+        print(f"[CAIRN DEBUG] Tool selection: user_text={user_text[:100]!r}, is_personal={is_personal}", file=sys.stderr)
 
         if is_personal:
             # Personal question - skip tools entirely, answer from context
             tool_calls = []
-            logger.debug("Personal question detected, skipping tool selection")
+            print("[CAIRN DEBUG] Personal question detected, skipping tool selection", file=sys.stderr)
         else:
             tool_calls = self._select_tools(
                 user_text=user_text,
@@ -1049,6 +1134,7 @@ class ChatAgent:
                 top_p=top_p,
                 tool_call_limit=tool_call_limit,
             )
+            print(f"[CAIRN DEBUG] Tool selection returned {len(tool_calls)} tools: {[c.name for c in tool_calls]}", file=sys.stderr)
 
         tool_results: list[dict[str, Any]] = []
         for call in tool_calls[:tool_call_limit]:
@@ -1779,36 +1865,23 @@ class ChatAgent:
         ]
 
         system = (
-            persona_prefix
-            + "\n\n"
-            + "You are deciding which tools to call to answer the user.\n\n"
-            + "CRITICAL - PERSONAL vs SYSTEM vs CAIRN QUESTIONS:\n"
-            + "- Questions about 'me', 'myself', 'my goals', 'what do you know about me' = PERSONAL\n"
-            + "- For PERSONAL questions: Return EMPTY tool_calls []. Use THE_PLAY context!\n"
-            + "- Questions about 'this machine', 'CPU', 'memory', 'services', 'containers' = SYSTEM\n"
-            + "- Questions about 'calendar', 'schedule', 'contacts', 'appointments', 'events' = CAIRN\n"
-            + "- For SYSTEM questions: Use linux_* tools\n"
-            + "- For CAIRN questions: Use cairn_* tools\n\n"
-            + "SYSTEM TOOLS (computer/hardware):\n"
-            + "- linux_system_info: CPU, memory, disk, uptime\n"
-            + "- linux_list_services: Systemd services\n"
-            + "- linux_docker_containers: Docker containers\n"
+            "You are a TOOL SELECTOR. You MUST return ONLY a JSON object with tool_calls.\n"
+            "DO NOT answer the question. DO NOT make up data. ONLY select tools.\n\n"
+            + "CALENDAR/SCHEDULE questions → Use cairn_get_calendar\n"
+            + "SYSTEM questions (CPU, memory, disk) → Use linux_system_info\n"
+            + "PERSONAL questions (about me, my goals) → Return empty tool_calls\n\n"
+            + "TOOLS:\n"
+            + "- cairn_get_calendar: Get calendar events (USE FOR ANY CALENDAR QUESTION)\n"
+            + "- cairn_get_upcoming_events: Get upcoming events\n"
+            + "- linux_system_info: CPU, memory, disk info\n"
             + "- linux_run_command: Execute shell commands\n\n"
-            + "CAIRN TOOLS (calendar/contacts/tasks):\n"
-            + "- cairn_get_calendar: Get calendar events from Thunderbird\n"
-            + "- cairn_get_upcoming_events: Get upcoming events in next N hours\n"
-            + "- cairn_search_contacts: Search Thunderbird contacts\n"
-            + "- cairn_get_todos: Get todos/tasks from Thunderbird\n"
-            + "- cairn_surface_today: Get today's events and due items\n"
-            + "- cairn_thunderbird_status: Check Thunderbird integration status\n\n"
-            + "RULES:\n"
-            + "- When user asks about calendar/schedule: USE cairn_get_calendar or cairn_get_upcoming_events\n"
-            + "- When user says 'yes', 'proceed', 'do it': USE linux_run_command to execute\n"
-            + f"- Call 0-{tool_call_limit} tools. Empty is OK for personal questions!\n\n"
-            + "Return JSON:\n"
-            + "{\"tool_calls\": [{\"name\": \"tool_name\", \"arguments\": {}}]}\n"
-            + "OR for personal questions:\n"
-            + "{\"tool_calls\": []}\n"
+            + "OUTPUT FORMAT (STRICT - no other format allowed):\n"
+            + "{\"tool_calls\": [{\"name\": \"TOOL_NAME\", \"arguments\": {}}]}\n\n"
+            + "EXAMPLES:\n"
+            + "User: 'what does my calendar look like' → {\"tool_calls\": [{\"name\": \"cairn_get_calendar\", \"arguments\": {}}]}\n"
+            + "User: 'show me my schedule' → {\"tool_calls\": [{\"name\": \"cairn_get_calendar\", \"arguments\": {}}]}\n"
+            + "User: 'how much RAM do I have' → {\"tool_calls\": [{\"name\": \"linux_system_info\", \"arguments\": {}}]}\n"
+            + "User: 'what are my goals' → {\"tool_calls\": []}\n"
         )
 
         user = (
@@ -1816,19 +1889,25 @@ class ChatAgent:
             "USER_MESSAGE:\n" + user_text
         )
 
+        import sys
         raw = llm.chat_json(system=system, user=user, temperature=temperature, top_p=top_p)
+        print(f"[CAIRN DEBUG] LLM tool selection raw response: {raw[:500] if raw else 'None'}", file=sys.stderr)
         try:
             payload = json.loads(raw)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             # Fallback: return empty - don't assume system tools
+            print(f"[CAIRN DEBUG] LLM returned invalid JSON for tool selection: {e}", file=sys.stderr)
             return []
 
         # Handle case where LLM returns a list directly instead of dict
         if not isinstance(payload, dict):
+            print(f"[CAIRN DEBUG] LLM returned non-dict for tool selection: {type(payload)}", file=sys.stderr)
             return []
 
         calls = payload.get("tool_calls")
+        print(f"[CAIRN DEBUG] LLM tool_calls parsed: {calls}", file=sys.stderr)
         if not isinstance(calls, list):
+            print(f"[CAIRN DEBUG] LLM tool_calls is not a list: {type(calls)}", file=sys.stderr)
             return []
 
         out: list[ToolCall] = []
@@ -1959,7 +2038,18 @@ class ChatAgent:
                 "Do NOT say you don't have information - THE_PLAY IS your information source."
             )
 
+        # Debug: trace what we're sending to the LLM
+        import sys
+        print(f"[CAIRN DEBUG] _answer called with {len(tool_dump)} tool results", file=sys.stderr)
+        if tool_dump:
+            print(f"[CAIRN DEBUG] Tool results preview: {json.dumps(tool_dump, indent=2)[:1000]}", file=sys.stderr)
+        print(f"[CAIRN DEBUG] User message preview: {user[:500]}", file=sys.stderr)
+
         raw = llm.chat_text(system=system, user=user, temperature=temperature, top_p=top_p)
+
+        # Debug: trace LLM response
+        print(f"[CAIRN DEBUG] LLM _answer raw response: {raw[:1000] if raw else 'None'}", file=sys.stderr)
+
         return self._parse_thinking_answer(raw)
 
     def _parse_thinking_answer(self, raw: str) -> tuple[str, list[str]]:

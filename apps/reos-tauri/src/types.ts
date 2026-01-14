@@ -360,8 +360,21 @@ export type PlayScenesListResult = {
   }>;
 };
 
+// Beat stage types
+export type BeatStage = 'planning' | 'in_progress' | 'awaiting_data' | 'complete';
+
+export type PlayBeat = {
+  beat_id: string;
+  title: string;
+  stage: BeatStage;
+  notes: string;
+  link: string | null;
+  calendar_event_id: string | null;
+  recurrence_rule: string | null;
+};
+
 export type PlayBeatsListResult = {
-  beats: Array<{ beat_id: string; title: string; status: string; notes: string; link: string | null }>;
+  beats: PlayBeat[];
 };
 
 export type PlayActsCreateResult = {
@@ -702,4 +715,25 @@ export type CodeExecCleanupResult = {
   ok: boolean;
   cleaned?: number;
   message?: string;
+};
+
+// CAIRN Attention types (What Needs My Attention)
+export type CairnAttentionItem = {
+  entity_type: string;  // 'beat', 'calendar_event', etc.
+  entity_id: string;
+  title: string;
+  reason: string;
+  urgency: 'critical' | 'high' | 'medium' | 'low';
+  calendar_start: string | null;
+  calendar_end: string | null;
+  is_recurring: boolean;
+  recurrence_frequency: string | null;
+  next_occurrence: string | null;
+  act_id: string | null;
+  scene_id: string | null;
+};
+
+export type CairnAttentionResult = {
+  count: number;
+  items: CairnAttentionItem[];
 };

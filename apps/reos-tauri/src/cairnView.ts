@@ -56,7 +56,7 @@ export function createCairnView(
   hideThinking: () => void;
   clearChat: () => void;
   getChatInput: () => HTMLInputElement;
-  updateSurfaced: (items: Array<{ title: string; reason: string; urgency: string }>) => void;
+  updateSurfaced: (items: Array<{ title: string; reason: string; urgency: string; is_recurring?: boolean; recurrence_frequency?: string }>) => void;
 } {
   const state: CairnViewState = {
     chatMessages: [],
@@ -128,52 +128,8 @@ export function createCairnView(
     padding: 12px;
   `;
 
-  // Quick actions
-  const quickActions = el('div');
-  quickActions.style.cssText = `
-    padding: 12px;
-    border-top: 1px solid rgba(255,255,255,0.1);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  `;
-
-  const actionButtons = [
-    { label: "What's next?", icon: '🎯', action: "What should I focus on next?" },
-    { label: "Today's plan", icon: '📅', action: "What's on my calendar today?" },
-    { label: 'Waiting on', icon: '⏳', action: "What am I waiting on?" },
-    { label: 'Stale items', icon: '📦', action: "What have I been neglecting?" },
-  ];
-
-  actionButtons.forEach(({ label, icon, action }) => {
-    const btn = el('button');
-    btn.innerHTML = `${icon} ${label}`;
-    btn.style.cssText = `
-      padding: 10px 12px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 6px;
-      color: rgba(255,255,255,0.8);
-      cursor: pointer;
-      font-size: 12px;
-      text-align: left;
-      transition: background 0.2s;
-    `;
-    btn.addEventListener('mouseenter', () => {
-      btn.style.background = 'rgba(255,255,255,0.1)';
-    });
-    btn.addEventListener('mouseleave', () => {
-      btn.style.background = 'rgba(255,255,255,0.05)';
-    });
-    btn.addEventListener('click', () => {
-      callbacks.onSendMessage(action);
-    });
-    quickActions.appendChild(btn);
-  });
-
   surfacedPanel.appendChild(surfacedHeader);
   surfacedPanel.appendChild(surfacedList);
-  surfacedPanel.appendChild(quickActions);
 
   // ============ RIGHT: Chat Panel ============
   const chatPanel = el('div');
@@ -1019,7 +975,19 @@ export function createCairnView(
     return chatInput;
   }
 
-  function updateSurfaced(items: Array<{ title: string; reason: string; urgency: string }>): void {
+  function updateSurfaced(items: Array<{
+    title: string;
+    reason: string;
+    urgency: string;
+    is_recurring?: boolean;
+    recurrence_frequency?: string;
+    next_occurrence?: string;
+    entity_type?: string;
+    entity_id?: string;
+    act_id?: string;
+    scene_id?: string;
+    act_title?: string;
+  }>): void {
     state.surfacedItems = items;
     surfacedList.innerHTML = '';
 
@@ -1053,13 +1021,25 @@ export function createCairnView(
         : item.urgency === 'medium' ? '#eab308'
         : '#22c55e';
 
+      // Recurring icon (just the icon, no date)
+      const recurringIcon = item.is_recurring
+        ? `<span title="Recurring ${item.recurrence_frequency?.toLowerCase() || ''}" style="font-size: 11px; margin-left: 4px;">🔄</span>`
+        : '';
+
+      // Act label
+      const actLabel = item.act_title
+        ? `<span style="font-size: 10px; margin-left: 6px; padding: 2px 6px; background: rgba(147, 51, 234, 0.2); color: #a78bfa; border-radius: 4px;">Act: ${escapeHtml(item.act_title)}</span>`
+        : '';
+
       itemEl.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
           <span style="width: 8px; height: 8px; border-radius: 50%; background: ${urgencyColor};"></span>
-          <span style="font-weight: 500; color: #fff; font-size: 13px;">${item.title}</span>
+          <span style="font-weight: 500; color: #fff; font-size: 13px;">${escapeHtml(item.title)}</span>
+          ${recurringIcon}
+          ${actLabel}
         </div>
         <div style="font-size: 12px; color: rgba(255,255,255,0.5); padding-left: 16px;">
-          ${item.reason}
+          ${escapeHtml(item.reason)}
         </div>
       `;
 
@@ -1069,6 +1049,21 @@ export function createCairnView(
       itemEl.addEventListener('mouseleave', () => {
         itemEl.style.background = 'rgba(255,255,255,0.05)';
       });
+
+      // Click to navigate to Beat in The Play
+      if (item.entity_type === 'beat' && item.act_id && item.scene_id) {
+        itemEl.addEventListener('click', () => {
+          // Dispatch custom event to open The Play at this Beat
+          const event = new CustomEvent('openPlayBeat', {
+            detail: {
+              actId: item.act_id,
+              sceneId: item.scene_id,
+              beatId: item.entity_id,
+            },
+          });
+          window.dispatchEvent(event);
+        });
+      }
 
       surfacedList.appendChild(itemEl);
     });
