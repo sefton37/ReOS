@@ -25,7 +25,8 @@ class Settings:
     """
 
     root_dir: Path = Path(__file__).resolve().parents[2]
-    data_dir: Path = root_dir / ".reos-data"
+    # Always use ~/.reos-data - ONE source of truth
+    data_dir: Path = Path(os.environ.get("REOS_DATA_DIR", Path.home() / ".reos-data"))
     events_path: Path = data_dir / "events.jsonl"
     audit_path: Path = data_dir / "audit.log"
     log_path: Path = data_dir / "reos.log"

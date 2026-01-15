@@ -663,6 +663,219 @@ def list_tools() -> list[Tool]:
                 },
             },
         ),
+        # --- Play CRUD Tools (Acts, Scenes, Beats management) ---
+        Tool(
+            name="cairn_list_acts",
+            description="List all Acts in The Play. Shows the organizational structure.",
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="cairn_create_act",
+            description="Create a new Act in The Play. An Act is a major area of life/work.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Title for the new Act"},
+                },
+                "required": ["title"],
+            },
+        ),
+        Tool(
+            name="cairn_update_act",
+            description="Update an Act's title. Use fuzzy matching for act_name.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {"type": "string", "description": "Name of the Act to update (fuzzy matched)"},
+                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
+                    "new_title": {"type": "string", "description": "New title for the Act"},
+                },
+                "required": ["new_title"],
+            },
+        ),
+        Tool(
+            name="cairn_delete_act",
+            description="Delete an Act and all its contents. Cannot delete 'Your Story' act.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {"type": "string", "description": "Name of the Act to delete (fuzzy matched)"},
+                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
+                },
+            },
+        ),
+        Tool(
+            name="cairn_set_active_act",
+            description="Set the active Act for the current session.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {"type": "string", "description": "Name of the Act to set active (fuzzy matched)"},
+                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
+                },
+            },
+        ),
+        Tool(
+            name="cairn_list_scenes",
+            description="List all Scenes in an Act.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {"type": "string", "description": "Name of the Act (fuzzy matched)"},
+                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
+                },
+            },
+        ),
+        Tool(
+            name="cairn_create_scene",
+            description="Create a new Scene in an Act.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {"type": "string", "description": "Name of the Act (fuzzy matched)"},
+                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
+                    "title": {"type": "string", "description": "Title for the new Scene"},
+                },
+                "required": ["title"],
+            },
+        ),
+        Tool(
+            name="cairn_update_scene",
+            description="Update a Scene's title.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the Scene to update (fuzzy matched)"},
+                    "scene_id": {"type": "string", "description": "Scene ID (alternative to scene_name)"},
+                    "act_name": {"type": "string", "description": "Name of the Act containing the Scene"},
+                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
+                    "new_title": {"type": "string", "description": "New title for the Scene"},
+                },
+                "required": ["new_title"],
+            },
+        ),
+        Tool(
+            name="cairn_delete_scene",
+            description="Delete a Scene and all its Beats. Cannot delete 'Stage Direction' scene.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "scene_name": {"type": "string", "description": "Name of the Scene to delete (fuzzy matched)"},
+                    "scene_id": {"type": "string", "description": "Scene ID (alternative to scene_name)"},
+                    "act_name": {"type": "string", "description": "Name of the Act containing the Scene"},
+                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
+                },
+            },
+        ),
+        Tool(
+            name="cairn_list_beats",
+            description="List Beats, optionally filtered by Act.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {"type": "string", "description": "Filter by Act name (fuzzy matched)"},
+                    "act_id": {"type": "string", "description": "Filter by Act ID"},
+                },
+            },
+        ),
+        Tool(
+            name="cairn_create_beat",
+            description="Create a new Beat (task/item) in a Scene.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Title for the Beat"},
+                    "act_name": {"type": "string", "description": "Act name (fuzzy matched, default: Your Story)"},
+                    "scene_name": {"type": "string", "description": "Scene name (fuzzy matched, default: Stage Direction)"},
+                    "stage": {"type": "string", "enum": ["planning", "in_progress", "awaiting_data", "complete"], "description": "Stage (default: planning)"},
+                    "notes": {"type": "string", "description": "Notes for the Beat"},
+                },
+                "required": ["title"],
+            },
+        ),
+        Tool(
+            name="cairn_update_beat",
+            description="Update a Beat's title, stage, or notes.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "beat_name": {"type": "string", "description": "Name of the Beat to update (fuzzy matched)"},
+                    "beat_id": {"type": "string", "description": "Beat ID (alternative to beat_name)"},
+                    "new_title": {"type": "string", "description": "New title for the Beat"},
+                    "stage": {"type": "string", "enum": ["planning", "in_progress", "awaiting_data", "complete"], "description": "New stage"},
+                    "notes": {"type": "string", "description": "New notes"},
+                },
+            },
+        ),
+        Tool(
+            name="cairn_delete_beat",
+            description="Delete a Beat.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "beat_name": {"type": "string", "description": "Name of the Beat to delete (fuzzy matched)"},
+                    "beat_id": {"type": "string", "description": "Beat ID (alternative to beat_name)"},
+                },
+            },
+        ),
+        Tool(
+            name="cairn_move_beat_to_act",
+            description="Move a Beat to a different Act. Uses fuzzy matching for names.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "beat_name": {"type": "string", "description": "Name of the Beat to move (fuzzy matched)"},
+                    "beat_id": {"type": "string", "description": "Beat ID (alternative to beat_name)"},
+                    "target_act_name": {"type": "string", "description": "Target Act name (fuzzy matched)"},
+                    "target_act_id": {"type": "string", "description": "Target Act ID (alternative to target_act_name)"},
+                },
+            },
+        ),
+        # --- Self-Knowledge Tools (RAG for codebase understanding) ---
+        Tool(
+            name="reos_search_codebase",
+            description=(
+                "Search the ReOS codebase for relevant code. Use this to understand how "
+                "features are implemented, find function definitions, or locate relevant files. "
+                "Returns functions, classes, and modules matching the query."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Natural language search query (e.g., 'intent engine', 'calendar sync')"},
+                    "limit": {"type": "number", "description": "Max results to return (default: 10)"},
+                    "entity_types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Filter by type: function, class, module, method, type",
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="reos_get_architecture",
+            description=(
+                "Get the ReOS architecture blueprint. Returns a comprehensive overview of "
+                "the system including data models, component architecture, MCP tools, and "
+                "file index. Use this to understand how ReOS works."
+            ),
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="reos_file_summary",
+            description=(
+                "Get a summary of a specific source file. Shows functions, classes, and "
+                "their purposes. Useful for understanding what a file does."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Relative path (e.g., 'src/reos/cairn/intent_engine.py')"},
+                },
+                "required": ["file_path"],
+            },
+        ),
     ])
 
     return tools
@@ -688,8 +901,140 @@ def _repo_root(db: Database) -> Path:
     )
 
 
+# =============================================================================
+# Tool Handler Registry
+# =============================================================================
+# Simple handlers that just wrap linux_tools functions.
+# Complex handlers with validation remain in call_tool for now.
+
+def _handle_linux_system_info(db: Database, args: dict) -> Any:
+    return asdict(linux_tools.get_system_info())
+
+def _handle_linux_network_info(db: Database, args: dict) -> Any:
+    return linux_tools.get_network_info()
+
+def _handle_linux_list_processes(db: Database, args: dict) -> Any:
+    sort_by = args.get("sort_by", "cpu")
+    limit = int(args.get("limit", 20))
+    return [asdict(p) for p in linux_tools.list_processes(sort_by=sort_by, limit=limit)]
+
+def _handle_linux_list_services(db: Database, args: dict) -> Any:
+    filter_active = bool(args.get("filter_active", False))
+    return [asdict(s) for s in linux_tools.list_services(filter_active=filter_active)]
+
+def _handle_linux_list_installed_packages(db: Database, args: dict) -> Any:
+    search = args.get("search")
+    packages = linux_tools.list_installed_packages(search=search)
+    return {"packages": packages, "count": len(packages)}
+
+def _handle_linux_disk_usage(db: Database, args: dict) -> Any:
+    return linux_tools.get_disk_usage(args.get("path", "/"))
+
+def _handle_linux_environment(db: Database, args: dict) -> Any:
+    return linux_tools.get_environment()
+
+def _handle_linux_package_manager(db: Database, args: dict) -> Any:
+    pm = linux_tools.detect_package_manager()
+    return {"name": pm.name, "command": pm.command, "install_cmd": pm.install_cmd}
+
+def _handle_linux_docker_containers(db: Database, args: dict) -> Any:
+    all_containers = bool(args.get("all_containers", False))
+    containers = linux_tools.list_docker_containers(all_containers=all_containers)
+    return {"containers": containers, "docker_available": len(containers) > 0 or linux_tools.check_docker_available()}
+
+def _handle_linux_docker_images(db: Database, args: dict) -> Any:
+    images = linux_tools.list_docker_images()
+    return {"images": images, "docker_available": len(images) > 0 or linux_tools.check_docker_available()}
+
+def _handle_linux_environment(db: Database, args: dict) -> Any:
+    return linux_tools.get_environment_info()
+
+def _handle_linux_package_manager(db: Database, args: dict) -> Any:
+    pm = linux_tools.detect_package_manager()
+    distro = linux_tools.detect_distro()
+    return {"package_manager": pm, "distro": distro}
+
+def _handle_linux_container_runtime(db: Database, args: dict) -> Any:
+    runtime = linux_tools.detect_container_runtime()
+    return {"runtime": runtime, "available": runtime is not None}
+
+def _handle_linux_containers(db: Database, args: dict) -> Any:
+    all_containers = bool(args.get("all_containers", False))
+    containers = linux_tools.list_containers(all_containers=all_containers)
+    runtime = linux_tools.detect_container_runtime()
+    return {"runtime": runtime, "containers": containers, "count": len(containers)}
+
+def _handle_linux_container_images(db: Database, args: dict) -> Any:
+    images = linux_tools.list_container_images()
+    runtime = linux_tools.detect_container_runtime()
+    return {"runtime": runtime, "images": images, "count": len(images)}
+
+def _handle_linux_list_users(db: Database, args: dict) -> Any:
+    system_users = bool(args.get("system_users", False))
+    users = linux_tools.list_users(system_users=system_users)
+    return {
+        "count": len(users),
+        "users": [
+            {"username": u.username, "uid": u.uid, "gid": u.gid,
+             "home": u.home, "shell": u.shell, "groups": u.groups}
+            for u in users
+        ],
+    }
+
+def _handle_linux_list_groups(db: Database, args: dict) -> Any:
+    groups = linux_tools.list_groups()
+    return {"count": len(groups), "groups": groups}
+
+def _handle_linux_failed_services(db: Database, args: dict) -> Any:
+    services = linux_tools.get_failed_services()
+    return {"count": len(services), "services": [asdict(s) for s in services]}
+
+def _handle_linux_firewall_status(db: Database, args: dict) -> Any:
+    status = linux_tools.get_firewall_status()
+    return {
+        "enabled": status.enabled,
+        "backend": status.backend,
+        "default_policy": status.default_policy,
+        "rules": status.rules,
+    }
+
+
+# Registry of simple handlers - maps tool name to handler function
+SIMPLE_TOOL_HANDLERS: dict[str, Any] = {
+    "linux_system_info": _handle_linux_system_info,
+    "linux_network_info": _handle_linux_network_info,
+    "linux_list_processes": _handle_linux_list_processes,
+    "linux_list_services": _handle_linux_list_services,
+    "linux_list_installed_packages": _handle_linux_list_installed_packages,
+    "linux_disk_usage": _handle_linux_disk_usage,
+    "linux_environment": _handle_linux_environment,
+    "linux_package_manager": _handle_linux_package_manager,
+    "linux_docker_containers": _handle_linux_docker_containers,
+    "linux_docker_images": _handle_linux_docker_images,
+    "linux_container_runtime": _handle_linux_container_runtime,
+    "linux_containers": _handle_linux_containers,
+    "linux_container_images": _handle_linux_container_images,
+    "linux_list_users": _handle_linux_list_users,
+    "linux_list_groups": _handle_linux_list_groups,
+    "linux_failed_services": _handle_linux_failed_services,
+    "linux_firewall_status": _handle_linux_firewall_status,
+}
+
+
 def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> Any:
+    """Dispatch tool calls to appropriate handlers.
+
+    Simple tools use SIMPLE_TOOL_HANDLERS registry.
+    Complex tools with validation use inline handlers below.
+    CAIRN tools delegate to CairnToolHandler.
+    """
     args = arguments or {}
+
+    # Fast path: check simple handlers registry first
+    if name in SIMPLE_TOOL_HANDLERS:
+        return SIMPLE_TOOL_HANDLERS[name](db, args)
+
+    # Complex handlers with validation logic follow...
 
     if name == "reos_repo_discover":
         repos = discover_git_repos()
@@ -830,23 +1175,8 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
             "undo_command": preview.undo_command,
         }
 
-    if name == "linux_system_info":
-        info = linux_tools.get_system_info()
-        return asdict(info)
-
-    if name == "linux_network_info":
-        return linux_tools.get_network_info()
-
-    if name == "linux_list_processes":
-        sort_by = args.get("sort_by", "cpu")
-        limit = int(args.get("limit", 20))
-        processes = linux_tools.list_processes(sort_by=sort_by, limit=limit)
-        return [asdict(p) for p in processes]
-
-    if name == "linux_list_services":
-        filter_active = bool(args.get("filter_active", False))
-        services = linux_tools.list_services(filter_active=filter_active)
-        return [asdict(s) for s in services]
+    # linux_system_info, linux_network_info, linux_list_processes, linux_list_services
+    # now handled by SIMPLE_TOOL_HANDLERS registry above
 
     if name == "linux_service_status":
         service_name = args.get("service_name")
@@ -893,14 +1223,7 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
             "stderr": result.stderr,
         }
 
-    if name == "linux_list_installed_packages":
-        search = args.get("search")
-        packages = linux_tools.list_installed_packages(search=search)
-        return {"packages": packages, "count": len(packages)}
-
-    if name == "linux_disk_usage":
-        path = args.get("path", "/")
-        return linux_tools.get_disk_usage(path)
+    # linux_list_installed_packages, linux_disk_usage now in SIMPLE_TOOL_HANDLERS
 
     if name == "linux_list_directory":
         path = args.get("path")
@@ -939,22 +1262,8 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
 
         return linux_tools.read_log_file(path, lines=lines, filter_pattern=filter_pattern)
 
-    if name == "linux_docker_containers":
-        all_containers = bool(args.get("all_containers", False))
-        containers = linux_tools.list_docker_containers(all_containers=all_containers)
-        return {"containers": containers, "docker_available": len(containers) > 0 or linux_tools.check_docker_available()}
-
-    if name == "linux_docker_images":
-        images = linux_tools.list_docker_images()
-        return {"images": images, "docker_available": len(images) > 0 or linux_tools.check_docker_available()}
-
-    if name == "linux_environment":
-        return linux_tools.get_environment_info()
-
-    if name == "linux_package_manager":
-        pm = linux_tools.detect_package_manager()
-        distro = linux_tools.detect_distro()
-        return {"package_manager": pm, "distro": distro}
+    # linux_docker_containers, linux_docker_images, linux_environment, linux_package_manager
+    # now handled by SIMPLE_TOOL_HANDLERS registry
 
     # --- System Index (RAG) ---
 
@@ -1020,15 +1329,7 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
         }
 
     # --- Firewall Management ---
-
-    if name == "linux_firewall_status":
-        status = linux_tools.get_firewall_status()
-        return {
-            "enabled": status.enabled,
-            "backend": status.backend,
-            "default_policy": status.default_policy,
-            "rules": status.rules,
-        }
+    # linux_firewall_status now in SIMPLE_TOOL_HANDLERS
 
     if name == "linux_firewall_allow":
         port = args.get("port")
@@ -1158,40 +1459,8 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
             ],
         }
 
-    if name == "linux_failed_services":
-        services = linux_tools.get_failed_services()
-        return {
-            "count": len(services),
-            "services": [asdict(s) for s in services],
-        }
-
-    # --- Container Management (Docker + Podman) ---
-
-    if name == "linux_container_runtime":
-        runtime = linux_tools.detect_container_runtime()
-        return {
-            "runtime": runtime,
-            "available": runtime is not None,
-        }
-
-    if name == "linux_containers":
-        all_containers = bool(args.get("all_containers", False))
-        containers = linux_tools.list_containers(all_containers=all_containers)
-        runtime = linux_tools.detect_container_runtime()
-        return {
-            "runtime": runtime,
-            "containers": containers,
-            "count": len(containers),
-        }
-
-    if name == "linux_container_images":
-        images = linux_tools.list_container_images()
-        runtime = linux_tools.detect_container_runtime()
-        return {
-            "runtime": runtime,
-            "images": images,
-            "count": len(images),
-        }
+    # linux_failed_services, linux_container_runtime, linux_containers, linux_container_images
+    # now handled by SIMPLE_TOOL_HANDLERS registry
 
     if name == "linux_container_logs":
         container_id = args.get("container_id")
@@ -1229,28 +1498,7 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
         }
 
     # --- User and Group Management ---
-
-    if name == "linux_list_users":
-        system_users = bool(args.get("system_users", False))
-        users = linux_tools.list_users(system_users=system_users)
-        return {
-            "count": len(users),
-            "users": [
-                {
-                    "username": u.username,
-                    "uid": u.uid,
-                    "gid": u.gid,
-                    "home": u.home,
-                    "shell": u.shell,
-                    "groups": u.groups,
-                }
-                for u in users
-            ],
-        }
-
-    if name == "linux_list_groups":
-        groups = linux_tools.list_groups()
-        return {"count": len(groups), "groups": groups}
+    # linux_list_users, linux_list_groups now in SIMPLE_TOOL_HANDLERS
 
     if name == "linux_add_user":
         username = args.get("username")
@@ -1330,6 +1578,60 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
             "returncode": result.returncode,
             "stdout": result.stdout,
             "stderr": result.stderr,
+        }
+
+    # --- Self-Knowledge Tools (RAG for codebase understanding) ---
+    if name == "reos_search_codebase":
+        from .architecture.code_index import search_codebase
+
+        query = args.get("query", "")
+        if not query:
+            raise ToolError(code="invalid_args", message="query is required")
+
+        limit = int(args.get("limit", 10))
+        entity_types = args.get("entity_types")
+
+        results = search_codebase(query, limit=limit)
+
+        if entity_types:
+            results = [r for r in results if r.entity_type in entity_types]
+
+        return {
+            "query": query,
+            "count": len(results),
+            "results": [asdict(r) for r in results],
+        }
+
+    if name == "reos_get_architecture":
+        from pathlib import Path
+        arch_path = Path(__file__).parent / "architecture" / "ARCHITECTURE.md"
+
+        if arch_path.exists():
+            content = arch_path.read_text(encoding="utf-8")
+            return {
+                "success": True,
+                "architecture": content,
+                "file": str(arch_path),
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Architecture document not found",
+            }
+
+    if name == "reos_file_summary":
+        from .architecture.code_index import get_indexer
+
+        file_path = args.get("file_path", "")
+        if not file_path:
+            raise ToolError(code="invalid_args", message="file_path is required")
+
+        indexer = get_indexer()
+        summary = indexer.get_file_summary(file_path)
+
+        return {
+            "file_path": file_path,
+            "summary": summary,
         }
 
     # --- CAIRN Tools (Knowledge Management & Thunderbird Integration) ---

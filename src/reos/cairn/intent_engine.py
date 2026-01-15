@@ -40,6 +40,7 @@ class IntentCategory(Enum):
     PERSONAL = auto()      # Personal questions (about user)
     TASKS = auto()         # Task/todo questions
     KNOWLEDGE = auto()     # Knowledge base questions
+    PLAY = auto()          # The Play hierarchy (Acts, Scenes, Beats)
     UNKNOWN = auto()       # Cannot determine
 
 
@@ -110,30 +111,54 @@ INTENT_PATTERNS: dict[IntentCategory, list[str]] = {
         "about me", "my goals", "my values", "who am i",
         "my story", "my identity", "tell me about myself",
     ],
+    IntentCategory.PLAY: [
+        # Acts
+        "act", "acts", "create act", "new act", "delete act", "remove act",
+        "list acts", "show acts", "my acts", "all acts",
+        # Scenes
+        "scene", "scenes", "create scene", "new scene", "delete scene",
+        "list scenes", "show scenes",
+        # Beats
+        "beat", "beats", "create beat", "new beat", "delete beat",
+        "list beats", "show beats", "move beat", "move to",
+        # Organization
+        "should be in", "belongs to", "put in", "organize", "reorganize",
+        "not your story", "wrong act", "different act",
+        # The Play
+        "the play", "my play",
+    ],
 }
 
-# Tool mappings for each category
+# Tool mappings for each category (default tool - may be refined in _verify_intent)
 CATEGORY_TOOLS: dict[IntentCategory, str] = {
     IntentCategory.CALENDAR: "cairn_get_calendar",
     IntentCategory.CONTACTS: "cairn_search_contacts",
     IntentCategory.SYSTEM: "linux_system_info",
     IntentCategory.TASKS: "cairn_get_todos",
     IntentCategory.KNOWLEDGE: "cairn_list_items",
+    IntentCategory.PLAY: "cairn_list_acts",  # Default, refined based on action/target
 }
 
 
 class CairnIntentEngine:
     """Multi-stage intent processing for CAIRN."""
 
-    def __init__(self, llm: LLMProvider, available_tools: set[str] | None = None):
+    def __init__(
+        self,
+        llm: LLMProvider,
+        available_tools: set[str] | None = None,
+        play_data: dict[str, Any] | None = None,
+    ):
         """Initialize the intent engine.
 
         Args:
             llm: LLM provider for intent extraction
             available_tools: Set of available tool names (for verification)
+            play_data: Dictionary with 'acts' and 'beats' lists for context
         """
         self.llm = llm
         self.available_tools = available_tools or set()
+        self.play_data = play_data or {}
 
     def process(
         self,
@@ -166,11 +191,28 @@ class CairnIntentEngine:
 
         # Stage 3: Execute tool if verified
         tool_result = None
+        all_tool_results = []  # Track all tool calls for recovery
         if verified.verified and verified.tool_name and execute_tool:
             print(f"[INTENT] Stage 3: Executing tool {verified.tool_name} with args {verified.tool_args}", file=sys.stderr)
             try:
                 tool_result = execute_tool(verified.tool_name, verified.tool_args)
+                all_tool_results.append({"tool": verified.tool_name, "result": tool_result})
                 print(f"[INTENT] Stage 3 result: {json.dumps(tool_result, default=str)[:500]}", file=sys.stderr)
+
+                # Stage 3.5: Recovery - if tool failed or returned error, try to recover
+                if tool_result and tool_result.get("error"):
+                    print(f"[INTENT] Stage 3.5: Tool returned error, attempting recovery", file=sys.stderr)
+                    recovery_result = self._attempt_recovery(
+                        user_input=user_input,
+                        intent=intent,
+                        failed_tool=verified.tool_name,
+                        error=tool_result.get("error"),
+                        execute_tool=execute_tool,
+                    )
+                    if recovery_result:
+                        tool_result = recovery_result
+                        all_tool_results.append({"tool": "recovery", "result": recovery_result})
+
             except Exception as e:
                 print(f"[INTENT] Stage 3 error: {e}", file=sys.stderr)
                 tool_result = {"error": str(e)}
@@ -181,6 +223,8 @@ class CairnIntentEngine:
             verified_intent=verified,
             tool_result=tool_result,
             persona_context=persona_context,
+            user_input=user_input,
+            execute_tool=execute_tool,
         )
         print(f"[INTENT] Stage 4 response: {response[:200]}...", file=sys.stderr)
 
@@ -191,8 +235,46 @@ class CairnIntentEngine:
             thinking_steps=thinking,
         )
 
+    def _attempt_recovery(
+        self,
+        user_input: str,
+        intent: ExtractedIntent,
+        failed_tool: str,
+        error: str,
+        execute_tool: Any,
+    ) -> dict[str, Any] | None:
+        """Attempt to recover from a tool failure.
+
+        Instead of giving up, try alternative strategies:
+        1. For beat operations: search for the beat first
+        2. For missing data: gather more context
+        """
+        import sys
+
+        # For beat move failures, try to find the beat first
+        if failed_tool == "cairn_move_beat_to_act" and "not found" in error.lower():
+            print(f"[INTENT] Recovery: Beat not found, searching...", file=sys.stderr)
+            try:
+                # List all beats to find the one the user mentioned
+                beats_result = execute_tool("cairn_list_beats", {})
+                if beats_result and not beats_result.get("error"):
+                    return {
+                        "recovery": True,
+                        "action": "search_beats",
+                        "beats": beats_result,
+                        "original_error": error,
+                    }
+            except Exception as e:
+                print(f"[INTENT] Recovery failed: {e}", file=sys.stderr)
+
+        return None
+
     def _extract_intent(self, user_input: str) -> ExtractedIntent:
-        """Stage 1: Extract intent from user input."""
+        """Stage 1: Extract intent from user input.
+
+        For PLAY operations, also extracts entity names (beat_name, act_name, etc.)
+        in the same pass to avoid redundant extraction later.
+        """
         user_lower = user_input.lower()
 
         # Fast path: pattern matching for common cases
@@ -205,17 +287,24 @@ class CairnIntentEngine:
                         action = IntentAction.CREATE
                     elif any(w in user_lower for w in ["find", "search", "look for", "where"]):
                         action = IntentAction.SEARCH
-                    elif any(w in user_lower for w in ["update", "change", "modify", "edit"]):
+                    elif any(w in user_lower for w in ["update", "change", "modify", "edit", "move", "assign", "put"]):
                         action = IntentAction.UPDATE
                     elif any(w in user_lower for w in ["delete", "remove", "cancel"]):
                         action = IntentAction.DELETE
                     elif any(w in user_lower for w in ["status", "how is", "check"]):
                         action = IntentAction.STATUS
 
+                    # For PLAY category with UPDATE action, extract entity names NOW
+                    # This avoids redundant extraction in _build_tool_args
+                    parameters: dict[str, Any] = {}
+                    if category == IntentCategory.PLAY and action == IntentAction.UPDATE:
+                        parameters = self._extract_beat_move_args(user_input)
+
                     return ExtractedIntent(
                         category=category,
                         action=action,
                         target=pattern,
+                        parameters=parameters,
                         confidence=0.85,  # High confidence for pattern match
                         raw_input=user_input,
                         reasoning=f"Pattern matched: '{pattern}' indicates {category.name}",
@@ -291,6 +380,10 @@ Be precise. Output ONLY valid JSON."""
         # Check if we have a tool for this category
         tool_name = CATEGORY_TOOLS.get(intent.category)
 
+        # For PLAY category, choose tool based on action and target
+        if intent.category == IntentCategory.PLAY:
+            tool_name = self._select_play_tool(intent)
+
         # For PERSONAL category, no tool needed - answer from context
         if intent.category == IntentCategory.PERSONAL:
             return VerifiedIntent(
@@ -332,28 +425,500 @@ Be precise. Output ONLY valid JSON."""
         )
 
     def _build_tool_args(self, intent: ExtractedIntent, tool_name: str) -> dict[str, Any]:
-        """Build tool arguments based on the intent."""
-        args: dict[str, Any] = {}
+        """Build tool arguments based on the intent.
+
+        Uses intent.parameters if already extracted, otherwise extracts from raw_input.
+        This avoids redundant extraction passes.
+        """
+        # Start with any parameters already extracted during intent parsing
+        args: dict[str, Any] = dict(intent.parameters)
 
         # Calendar tools might need date ranges
         if tool_name == "cairn_get_calendar":
-            # Default: show today and upcoming
-            # Could parse "tomorrow", "next week" etc from intent
             pass
 
         # Contacts might need a search query
         if tool_name == "cairn_search_contacts":
-            args["query"] = intent.target
+            if "query" not in args:
+                args["query"] = intent.target
+
+        # Beat organization - use already-extracted params or extract now
+        if tool_name == "cairn_move_beat_to_act":
+            if "beat_name" not in args or "target_act_name" not in args:
+                args.update(self._extract_beat_move_args(intent.raw_input))
+
+        # Play CRUD tools
+        if tool_name == "cairn_list_beats":
+            # Check if filtering by act
+            if intent.target and intent.target != "beats":
+                args["act_name"] = intent.target
+
+        if tool_name == "cairn_list_scenes":
+            # Extract act name for filtering
+            act_name = self._extract_act_name(intent.raw_input)
+            if act_name:
+                args["act_name"] = act_name
+
+        if tool_name == "cairn_create_act":
+            # Extract title for new act
+            title = self._extract_entity_title(intent.raw_input, "act")
+            if title:
+                args["title"] = title
+
+        if tool_name == "cairn_update_act":
+            # Extract act name and new title
+            act_name = self._extract_act_name(intent.raw_input)
+            new_title = self._extract_new_title(intent.raw_input)
+            if act_name:
+                args["act_name"] = act_name
+            if new_title:
+                args["new_title"] = new_title
+
+        if tool_name == "cairn_delete_act":
+            # Extract act name to delete
+            act_name = self._extract_act_name(intent.raw_input)
+            if act_name:
+                args["act_name"] = act_name
+
+        if tool_name == "cairn_create_scene":
+            # Extract act name and scene title
+            act_name = self._extract_act_name(intent.raw_input)
+            title = self._extract_entity_title(intent.raw_input, "scene")
+            if act_name:
+                args["act_name"] = act_name
+            if title:
+                args["title"] = title
+
+        if tool_name == "cairn_update_scene":
+            # Extract scene name and new title
+            scene_name = self._extract_scene_name(intent.raw_input)
+            new_title = self._extract_new_title(intent.raw_input)
+            if scene_name:
+                args["scene_name"] = scene_name
+            if new_title:
+                args["new_title"] = new_title
+
+        if tool_name == "cairn_delete_scene":
+            # Extract scene name
+            scene_name = self._extract_scene_name(intent.raw_input)
+            if scene_name:
+                args["scene_name"] = scene_name
+
+        if tool_name == "cairn_create_beat":
+            # Extract beat details
+            beat_args = self._extract_beat_create_args(intent.raw_input)
+            args.update(beat_args)
+
+        if tool_name == "cairn_update_beat":
+            # Extract beat name and updates
+            beat_args = self._extract_beat_update_args(intent.raw_input)
+            args.update(beat_args)
+
+        if tool_name == "cairn_delete_beat":
+            # Extract beat name
+            beat_name = self._extract_beat_name(intent.raw_input)
+            if beat_name:
+                args["beat_name"] = beat_name
 
         return args
+
+    def _extract_act_name(self, user_input: str) -> str | None:
+        """Extract an act name from user input."""
+        user_lower = user_input.lower()
+
+        # Pattern: "the X act" or "X act"
+        match = re.search(r"(?:the\s+)?([A-Za-z][A-Za-z\s]+?)\s+act", user_input, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+        # Pattern: "act called/named X"
+        match = re.search(r"act\s+(?:called|named)\s+[\"']?([^\"']+)[\"']?", user_lower)
+        if match:
+            return match.group(1).strip()
+
+        # Pattern: "in X" (act context)
+        if "act" in user_lower:
+            match = re.search(r"(?:in|from|to)\s+(?:the\s+)?([A-Za-z][A-Za-z\s]+?)(?:\s+act|\s*$|,|\.)", user_input, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+
+        return None
+
+    def _extract_scene_name(self, user_input: str) -> str | None:
+        """Extract a scene name from user input."""
+        # Pattern: "the X scene" or "X scene"
+        match = re.search(r"(?:the\s+)?([A-Za-z][A-Za-z\s]+?)\s+scene", user_input, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+        # Pattern: "scene called/named X"
+        match = re.search(r"scene\s+(?:called|named)\s+[\"']?([^\"']+)[\"']?", user_input.lower())
+        if match:
+            return match.group(1).strip()
+
+        return None
+
+    def _extract_beat_name(self, user_input: str) -> str | None:
+        """Extract a beat name from user input."""
+        # Pattern: "the X beat" or "X beat"
+        match = re.search(r"(?:the\s+)?([A-Za-z][A-Za-z\s]+?)\s+(?:beat|event)", user_input, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+        # Pattern: "beat called/named X"
+        match = re.search(r"(?:beat|event)\s+(?:called|named)\s+[\"']?([^\"']+)[\"']?", user_input.lower())
+        if match:
+            return match.group(1).strip()
+
+        return None
+
+    def _extract_entity_title(self, user_input: str, entity_type: str) -> str | None:
+        """Extract a title for creating a new entity (act, scene, beat)."""
+        user_lower = user_input.lower()
+
+        # Pattern: "create/add/new X called/named Y"
+        match = re.search(
+            rf"(?:create|add|new|make)\s+(?:a\s+)?(?:new\s+)?{entity_type}\s+(?:called|named)\s+[\"']?([^\"']+)[\"']?",
+            user_lower
+        )
+        if match:
+            return match.group(1).strip()
+
+        # Pattern: "create/add/new X Y" (title after entity type)
+        match = re.search(
+            rf"(?:create|add|new|make)\s+(?:a\s+)?(?:new\s+)?{entity_type}\s+([A-Za-z][A-Za-z\s]+?)(?:\s+in|\s+for|$|,|\.)",
+            user_input,
+            re.IGNORECASE
+        )
+        if match:
+            title = match.group(1).strip()
+            # Filter out common words
+            if title.lower() not in ("called", "named", "in", "for", "the"):
+                return title
+
+        # Pattern: "X as a new act/scene/beat"
+        match = re.search(
+            rf"([A-Za-z][A-Za-z\s]+?)\s+(?:as\s+)?(?:a\s+)?(?:new\s+)?{entity_type}",
+            user_input,
+            re.IGNORECASE
+        )
+        if match:
+            return match.group(1).strip()
+
+        return None
+
+    def _extract_new_title(self, user_input: str) -> str | None:
+        """Extract a new title for updating an entity."""
+        user_lower = user_input.lower()
+
+        # Pattern: "rename to X" or "change to X"
+        match = re.search(r"(?:rename|change|update)\s+(?:it\s+)?to\s+[\"']?([^\"']+)[\"']?", user_lower)
+        if match:
+            return match.group(1).strip()
+
+        # Pattern: "new name X" or "new title X"
+        match = re.search(r"new\s+(?:name|title)\s+[\"']?([^\"']+)[\"']?", user_lower)
+        if match:
+            return match.group(1).strip()
+
+        return None
+
+    def _extract_beat_create_args(self, user_input: str) -> dict[str, Any]:
+        """Extract arguments for creating a beat."""
+        args: dict[str, Any] = {}
+
+        # Extract title
+        title = self._extract_entity_title(user_input, "beat")
+        if title:
+            args["title"] = title
+
+        # Extract act name if specified
+        act_name = self._extract_act_name(user_input)
+        if act_name:
+            args["act_name"] = act_name
+
+        # Extract scene name if specified
+        scene_name = self._extract_scene_name(user_input)
+        if scene_name:
+            args["scene_name"] = scene_name
+
+        # Extract stage if specified
+        user_lower = user_input.lower()
+        if "planning" in user_lower:
+            args["stage"] = "planning"
+        elif "in progress" in user_lower or "in_progress" in user_lower:
+            args["stage"] = "in_progress"
+        elif "awaiting" in user_lower or "waiting" in user_lower:
+            args["stage"] = "awaiting_data"
+        elif "complete" in user_lower or "done" in user_lower:
+            args["stage"] = "complete"
+
+        return args
+
+    def _extract_beat_update_args(self, user_input: str) -> dict[str, Any]:
+        """Extract arguments for updating a beat."""
+        args: dict[str, Any] = {}
+
+        # Extract beat name
+        beat_name = self._extract_beat_name(user_input)
+        if beat_name:
+            args["beat_name"] = beat_name
+
+        # Extract new title if renaming
+        new_title = self._extract_new_title(user_input)
+        if new_title:
+            args["new_title"] = new_title
+
+        # Extract new stage if changing status
+        user_lower = user_input.lower()
+        if any(w in user_lower for w in ["mark as", "set to", "change to", "move to"]):
+            if "planning" in user_lower:
+                args["stage"] = "planning"
+            elif "in progress" in user_lower or "in_progress" in user_lower or "started" in user_lower:
+                args["stage"] = "in_progress"
+            elif "awaiting" in user_lower or "waiting" in user_lower or "blocked" in user_lower:
+                args["stage"] = "awaiting_data"
+            elif "complete" in user_lower or "done" in user_lower or "finished" in user_lower:
+                args["stage"] = "complete"
+
+        return args
+
+    def _extract_beat_move_args(self, user_input: str) -> dict[str, Any]:
+        """Extract beat_name and target_act_name from user input.
+
+        Uses LLM-based extraction with Play context as the primary method.
+        Falls back to regex only if LLM extraction fails.
+        """
+        import sys
+
+        # PRIMARY: LLM-based extraction using Play context
+        # This is the preferred method because it understands context
+        if self.play_data and (self.play_data.get("acts") or self.play_data.get("all_beats")):
+            print(f"[INTENT] Using LLM extraction with Play context", file=sys.stderr)
+            llm_args = self._llm_extract_beat_move_args(user_input)
+            if llm_args.get("beat_name") and llm_args.get("target_act_name"):
+                print(f"[INTENT] LLM extracted: beat={llm_args.get('beat_name')!r}, act={llm_args.get('target_act_name')!r}", file=sys.stderr)
+                return llm_args
+            print(f"[INTENT] LLM extraction incomplete, trying regex fallback", file=sys.stderr)
+
+        # FALLBACK: Regex-based extraction (only if LLM fails or no play_data)
+        return self._regex_extract_beat_move_args(user_input)
+
+    def _llm_extract_beat_move_args(self, user_input: str) -> dict[str, Any]:
+        """Use LLM with Play context to extract beat and act names.
+
+        The LLM knows about all existing acts and beats, so it can match
+        user's natural language ("Career act") to actual entities ("Career").
+        """
+        # Build context about available acts and beats
+        acts_list = self.play_data.get("acts", [])
+        beats_list = self.play_data.get("all_beats", [])
+
+        act_names = [a["title"] for a in acts_list]
+        beat_info = [f"'{b['title']}' (in {b['act_title']} act)" for b in beats_list[:20]]  # Limit for context
+
+        system = f"""You are an ENTITY EXTRACTOR. Extract the beat name and target act from the user's request.
+
+AVAILABLE ACTS in The Play:
+{json.dumps(act_names, indent=2)}
+
+EXISTING BEATS:
+{chr(10).join(beat_info) if beat_info else "No beats yet"}
+
+The user wants to move a beat to an act. Extract:
+1. beat_name: The EXACT title of the beat (match from EXISTING BEATS list if possible)
+2. target_act_name: The EXACT title of the target act (match from AVAILABLE ACTS list)
+
+Return ONLY a JSON object:
+{{"beat_name": "exact beat title", "target_act_name": "exact act title"}}
+
+IMPORTANT:
+- Match to existing entities using fuzzy matching
+- "Career act" → "Career"
+- "Job Search Activities" → find closest match in beats list
+- If you can't find an exact match, use the closest match
+- Never include "act" or "beat" as part of the name"""
+
+        user = f"USER REQUEST: {user_input}"
+
+        try:
+            raw = self.llm.chat_json(system=system, user=user, temperature=0.1, top_p=0.9)
+            data = json.loads(raw)
+            return {
+                "beat_name": data.get("beat_name", "").strip(),
+                "target_act_name": data.get("target_act_name", "").strip(),
+            }
+        except (json.JSONDecodeError, Exception) as e:
+            import sys
+            print(f"[INTENT] LLM extraction failed: {e}", file=sys.stderr)
+            return {}
+
+    def _regex_extract_beat_move_args(self, user_input: str) -> dict[str, Any]:
+        """Regex-based extraction as fallback when LLM fails."""
+        user_lower = user_input.lower()
+        args: dict[str, Any] = {}
+
+        # Pattern 1: "X should be in/for the Y act"
+        match = re.search(
+            r"(.+?)\s+(?:beat|event)?\s*(?:should be|belongs to|goes in|should go)\s+(?:in|to|for|under)?\s*(?:the\s+)?(.+?)\s*(?:act)?(?:,|\.|$|not)",
+            user_lower
+        )
+        if match:
+            args["beat_name"] = match.group(1).strip()
+            args["target_act_name"] = match.group(2).strip()
+            return args
+
+        # Pattern 2: "move X to Y"
+        match = re.search(
+            r"(?:move|put|assign|organize)\s+(?:the\s+)?(.+?)\s+(?:beat|event)?\s*(?:to|in|into|under)\s+(?:the\s+)?(.+?)\s*(?:act)?(?:,|\.|$)",
+            user_lower
+        )
+        if match:
+            args["beat_name"] = match.group(1).strip()
+            args["target_act_name"] = match.group(2).strip()
+            return args
+
+        # Pattern 3: "X beat/event for Y act"
+        match = re.search(
+            r"(.+?)\s+(?:beat|event)\s+(?:for|to)\s+(?:the\s+)?(.+?)\s*(?:act)?(?:,|\.|$)",
+            user_lower
+        )
+        if match:
+            args["beat_name"] = match.group(1).strip()
+            args["target_act_name"] = match.group(2).strip()
+            return args
+
+        # Pattern 4: Extract capitalized phrases as last resort
+        words = user_input.split()
+        beat_candidates = []
+        act_candidates = []
+
+        i = 0
+        while i < len(words):
+            if words[i].lower() in ("the", "move", "put"):
+                i += 1
+                continue
+
+            if words[i] and words[i][0].isupper():
+                phrase = [words[i]]
+                j = i + 1
+                while j < len(words) and words[j] and words[j][0].isupper():
+                    phrase.append(words[j])
+                    j += 1
+                if phrase:
+                    full_phrase = " ".join(phrase)
+                    if j < len(words) and words[j].lower() in ("act", "act,", "act."):
+                        act_candidates.append(full_phrase)
+                    elif j < len(words) and words[j].lower() in ("beat", "event", "beat,", "event,"):
+                        beat_candidates.append(full_phrase)
+                    else:
+                        if not beat_candidates:
+                            beat_candidates.append(full_phrase)
+                        else:
+                            act_candidates.append(full_phrase)
+                i = j
+            else:
+                i += 1
+
+        if beat_candidates:
+            args["beat_name"] = beat_candidates[0]
+        if act_candidates:
+            args["target_act_name"] = act_candidates[0]
+
+        return args
+
+    def _select_play_tool(self, intent: ExtractedIntent) -> str:
+        """Select the appropriate Play tool based on action and target entity.
+
+        Analyzes the user's input to determine:
+        1. The entity type: act, scene, or beat
+        2. The action: create, update, delete, view/list, move
+
+        Returns:
+            Tool name (e.g., cairn_create_act, cairn_delete_beat)
+        """
+        user_lower = intent.raw_input.lower()
+
+        # Determine entity type
+        entity = None
+        if any(w in user_lower for w in ["act ", "acts", " act", "act,"]):
+            entity = "act"
+        elif any(w in user_lower for w in ["scene ", "scenes", " scene", "scene,"]):
+            entity = "scene"
+        elif any(w in user_lower for w in ["beat ", "beats", " beat", "beat,", "event "]):
+            entity = "beat"
+
+        # Determine action from intent
+        action = intent.action
+
+        # Override action based on keywords for beat movement
+        # Check for move patterns FIRST, regardless of detected entity
+        # "move X to Y" pattern - if "move" is near the start, it's a move operation
+        if user_lower.startswith("move ") or " move " in user_lower:
+            return "cairn_move_beat_to_act"
+
+        move_patterns = [
+            "should be in", "should be for", "belongs to", "tied to",
+            "put in", "wrong act", "not your story", "different act",
+            "reorganize", "assign to", "assign my", "link to", "associate with",
+        ]
+        if any(w in user_lower for w in move_patterns):
+            # This is a beat move operation
+            return "cairn_move_beat_to_act"
+
+        # Map action and entity to tool
+        tool_map = {
+            # Acts
+            ("act", IntentAction.VIEW): "cairn_list_acts",
+            ("act", IntentAction.SEARCH): "cairn_list_acts",
+            ("act", IntentAction.CREATE): "cairn_create_act",
+            ("act", IntentAction.UPDATE): "cairn_update_act",
+            ("act", IntentAction.DELETE): "cairn_delete_act",
+            # Scenes
+            ("scene", IntentAction.VIEW): "cairn_list_scenes",
+            ("scene", IntentAction.SEARCH): "cairn_list_scenes",
+            ("scene", IntentAction.CREATE): "cairn_create_scene",
+            ("scene", IntentAction.UPDATE): "cairn_update_scene",
+            ("scene", IntentAction.DELETE): "cairn_delete_scene",
+            # Beats
+            ("beat", IntentAction.VIEW): "cairn_list_beats",
+            ("beat", IntentAction.SEARCH): "cairn_list_beats",
+            ("beat", IntentAction.CREATE): "cairn_create_beat",
+            ("beat", IntentAction.UPDATE): "cairn_update_beat",
+            ("beat", IntentAction.DELETE): "cairn_delete_beat",
+        }
+
+        # Look up the tool
+        if entity and (entity, action) in tool_map:
+            return tool_map[(entity, action)]
+
+        # Default fallback based on entity
+        if entity == "act":
+            return "cairn_list_acts"
+        elif entity == "scene":
+            return "cairn_list_scenes"
+        elif entity == "beat":
+            return "cairn_list_beats"
+
+        # Ultimate fallback - list acts to show The Play structure
+        return "cairn_list_acts"
 
     def _generate_response(
         self,
         verified_intent: VerifiedIntent,
         tool_result: dict[str, Any] | None,
         persona_context: str,
+        user_input: str = "",
+        execute_tool: Any | None = None,
     ) -> tuple[str, list[str]]:
-        """Stage 4: Generate response strictly from tool results."""
+        """Stage 4: Generate response strictly from tool results.
+
+        If hallucination is detected, this method will:
+        1. Try to gather more data (e.g., search for beats)
+        2. Ask for clarification if needed
+        3. Never just give up silently
+        """
+        import sys
 
         # If not verified, return fallback
         if not verified_intent.verified:
@@ -423,7 +988,6 @@ No data was retrieved. Explain that you couldn't get the requested information."
             response, thinking = self._parse_response(raw)
 
             # Stage 5: Hallucination check (cheap local LLM verification)
-            import sys
             print(f"[INTENT] Stage 5: Verifying response for hallucination", file=sys.stderr)
 
             is_valid, rejection_reason = self._verify_no_hallucination(
@@ -434,18 +998,88 @@ No data was retrieved. Explain that you couldn't get the requested information."
 
             if not is_valid:
                 print(f"[INTENT] Stage 5: REJECTED - {rejection_reason}", file=sys.stderr)
-                # Generate a safer response
-                safe_response = self._generate_safe_response(
-                    tool_result=tool_result,
+
+                # Stage 5.5: Recovery - try to get more data instead of giving up
+                if execute_tool and verified_intent.intent.category == IntentCategory.PLAY:
+                    print(f"[INTENT] Stage 5.5: Attempting recovery for PLAY category", file=sys.stderr)
+                    recovery_response = self._recover_with_clarification(
+                        user_input=user_input or verified_intent.intent.raw_input,
+                        intent=verified_intent.intent,
+                        rejection_reason=rejection_reason,
+                        execute_tool=execute_tool,
+                    )
+                    if recovery_response:
+                        return recovery_response, thinking + [f"[Recovery: {rejection_reason}]"]
+
+                # Fallback: ask for clarification instead of generic message
+                clarification = self._ask_for_clarification(
+                    user_input=user_input or verified_intent.intent.raw_input,
                     intent=verified_intent.intent,
+                    rejection_reason=rejection_reason,
                 )
-                return safe_response, thinking + [f"[Hallucination prevented: {rejection_reason}]"]
+                return clarification, thinking + [f"[Clarification needed: {rejection_reason}]"]
 
             print(f"[INTENT] Stage 5: Response verified OK", file=sys.stderr)
             return response, thinking
 
         except Exception as e:
             return f"I encountered an error generating a response: {e}", []
+
+    def _recover_with_clarification(
+        self,
+        user_input: str,
+        intent: ExtractedIntent,
+        rejection_reason: str,
+        execute_tool: Any,
+    ) -> str | None:
+        """Try to recover by gathering more data."""
+        import sys
+
+        # For beat operations, try to list all beats to help the user
+        if "beat" in user_input.lower() or intent.action == IntentAction.UPDATE:
+            try:
+                print(f"[INTENT] Recovery: Searching for beats...", file=sys.stderr)
+                beats_result = execute_tool("cairn_list_beats", {})
+                if beats_result and not beats_result.get("error"):
+                    beats = beats_result.get("beats", [])
+                    if beats:
+                        beat_names = [b.get("title", "Unknown") for b in beats[:10]]
+                        return (
+                            f"I couldn't find the exact beat you mentioned. "
+                            f"Here are your current beats:\n\n"
+                            f"• " + "\n• ".join(beat_names) +
+                            f"\n\nWhich one would you like to move? "
+                            f"Please use the exact name from the list above."
+                        )
+            except Exception as e:
+                print(f"[INTENT] Recovery search failed: {e}", file=sys.stderr)
+
+        return None
+
+    def _ask_for_clarification(
+        self,
+        user_input: str,
+        intent: ExtractedIntent,
+        rejection_reason: str,
+    ) -> str:
+        """Generate a clarification request instead of giving up."""
+        # Extract what the user was trying to do
+        action = intent.action.name.lower()
+        category = intent.category.name.lower()
+
+        if "not in the provided data" in rejection_reason.lower():
+            # User mentioned something we don't have
+            return (
+                f"I want to help you {action} that, but I couldn't find it in my data. "
+                f"Could you please check the exact name? You can ask me to 'list beats' "
+                f"or 'list acts' to see what's available."
+            )
+
+        # Generic clarification
+        return (
+            f"I'm not sure I understood correctly. You wanted to {action} something "
+            f"related to {category}. Could you rephrase that or provide more details?"
+        )
 
     def _verify_no_hallucination(
         self,

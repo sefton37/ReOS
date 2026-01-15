@@ -22,6 +22,7 @@ from reos.cairn.models import (
     SurfaceContext,
     SurfacedItem,
 )
+from reos.play_fs import find_beat_location
 
 if TYPE_CHECKING:
     from reos.cairn.store import CairnStore
@@ -259,6 +260,11 @@ class CairnSurfacer:
             if beat_info.get("next_occurrence"):
                 next_occ = datetime.fromisoformat(beat_info["next_occurrence"]) if isinstance(beat_info["next_occurrence"], str) else beat_info["next_occurrence"]
 
+            # Get beat location from CANONICAL source (play_fs), not stale CAIRN cache
+            beat_location = find_beat_location(beat_info["beat_id"])
+            act_id = beat_location["act_id"] if beat_location else None
+            scene_id = beat_location["scene_id"] if beat_location else None
+
             candidates.append(
                 SurfacedItem(
                     entity_type="beat",
@@ -271,8 +277,8 @@ class CairnSurfacer:
                     is_recurring=is_recurring,
                     recurrence_frequency=recurrence_freq,
                     next_occurrence=next_occ,
-                    act_id=beat_info.get("act_id"),
-                    scene_id=beat_info.get("scene_id"),
+                    act_id=act_id,
+                    scene_id=scene_id,
                 )
             )
 

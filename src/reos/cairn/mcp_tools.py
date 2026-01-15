@@ -496,6 +496,323 @@ def list_tools() -> list[Tool]:
             },
         ),
         # =====================================================================
+        # Beat Organization
+        # =====================================================================
+        Tool(
+            name="cairn_move_beat_to_act",
+            description=(
+                "Move a Beat to a different Act. Use this when the user wants to "
+                "reorganize their Beats, e.g., 'Career Coaching should be in the Career act'. "
+                "Uses fuzzy matching for beat and act names."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "beat_name": {
+                        "type": "string",
+                        "description": "Name/title of the Beat to move (fuzzy matched)",
+                    },
+                    "target_act_name": {
+                        "type": "string",
+                        "description": "Name of the Act to move the Beat to (fuzzy matched)",
+                    },
+                    "target_scene_name": {
+                        "type": "string",
+                        "description": "Optional: Scene within the Act (defaults to Stage Direction)",
+                    },
+                },
+                "required": ["beat_name", "target_act_name"],
+            },
+        ),
+        Tool(
+            name="cairn_list_beats",
+            description=(
+                "List all Beats with their current Act and Scene locations. "
+                "Useful for seeing what Beats exist and where they are organized."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {
+                        "type": "string",
+                        "description": "Optional: Filter to Beats in a specific Act (fuzzy matched)",
+                    },
+                },
+            },
+        ),
+        # =====================================================================
+        # The Play CRUD - Acts
+        # =====================================================================
+        Tool(
+            name="cairn_list_acts",
+            description=(
+                "List all Acts in The Play. Shows each Act's title, notes, "
+                "and whether it's the active Act."
+            ),
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="cairn_create_act",
+            description=(
+                "Create a new Act in The Play. An Act represents a major life domain "
+                "or project (e.g., 'Career', 'Health', 'Family')."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "The Act title (e.g., 'Career', 'Health')",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional notes about this Act",
+                    },
+                },
+                "required": ["title"],
+            },
+        ),
+        Tool(
+            name="cairn_update_act",
+            description="Update an Act's title or notes.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {
+                        "type": "string",
+                        "description": "Name of the Act to update (fuzzy matched)",
+                    },
+                    "new_title": {
+                        "type": "string",
+                        "description": "New title for the Act",
+                    },
+                    "new_notes": {
+                        "type": "string",
+                        "description": "New notes for the Act",
+                    },
+                },
+                "required": ["act_name"],
+            },
+        ),
+        Tool(
+            name="cairn_delete_act",
+            description=(
+                "Delete an Act and all its Scenes and Beats. "
+                "WARNING: This is permanent. The 'Your Story' Act cannot be deleted."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {
+                        "type": "string",
+                        "description": "Name of the Act to delete (fuzzy matched)",
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true to confirm deletion",
+                    },
+                },
+                "required": ["act_name", "confirm"],
+            },
+        ),
+        Tool(
+            name="cairn_set_active_act",
+            description="Set which Act is currently active/in-focus.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {
+                        "type": "string",
+                        "description": "Name of the Act to make active (fuzzy matched)",
+                    },
+                },
+                "required": ["act_name"],
+            },
+        ),
+        # =====================================================================
+        # The Play CRUD - Scenes
+        # =====================================================================
+        Tool(
+            name="cairn_list_scenes",
+            description="List all Scenes in an Act.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {
+                        "type": "string",
+                        "description": "Name of the Act (fuzzy matched)",
+                    },
+                },
+                "required": ["act_name"],
+            },
+        ),
+        Tool(
+            name="cairn_create_scene",
+            description=(
+                "Create a new Scene within an Act. A Scene represents a specific "
+                "area or phase within an Act (e.g., 'Job Search', 'Interviews')."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {
+                        "type": "string",
+                        "description": "Name of the Act to add Scene to (fuzzy matched)",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "The Scene title",
+                    },
+                    "intent": {
+                        "type": "string",
+                        "description": "Optional: The Scene's purpose/intent",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional notes about this Scene",
+                    },
+                },
+                "required": ["act_name", "title"],
+            },
+        ),
+        Tool(
+            name="cairn_update_scene",
+            description="Update a Scene's title, intent, or notes.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {
+                        "type": "string",
+                        "description": "Name of the Act (fuzzy matched)",
+                    },
+                    "scene_name": {
+                        "type": "string",
+                        "description": "Name of the Scene to update (fuzzy matched)",
+                    },
+                    "new_title": {
+                        "type": "string",
+                        "description": "New title for the Scene",
+                    },
+                    "new_intent": {
+                        "type": "string",
+                        "description": "New intent for the Scene",
+                    },
+                    "new_notes": {
+                        "type": "string",
+                        "description": "New notes for the Scene",
+                    },
+                },
+                "required": ["act_name", "scene_name"],
+            },
+        ),
+        Tool(
+            name="cairn_delete_scene",
+            description=(
+                "Delete a Scene and all its Beats. "
+                "WARNING: This is permanent. Stage Direction scenes cannot be deleted."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {
+                        "type": "string",
+                        "description": "Name of the Act (fuzzy matched)",
+                    },
+                    "scene_name": {
+                        "type": "string",
+                        "description": "Name of the Scene to delete (fuzzy matched)",
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true to confirm deletion",
+                    },
+                },
+                "required": ["act_name", "scene_name", "confirm"],
+            },
+        ),
+        # =====================================================================
+        # The Play CRUD - Beats
+        # =====================================================================
+        Tool(
+            name="cairn_create_beat",
+            description=(
+                "Create a new Beat within a Scene. A Beat represents a specific "
+                "task, event, or action item."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "act_name": {
+                        "type": "string",
+                        "description": "Name of the Act (fuzzy matched)",
+                    },
+                    "scene_name": {
+                        "type": "string",
+                        "description": "Name of the Scene (fuzzy matched, defaults to Stage Direction)",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "The Beat title",
+                    },
+                    "stage": {
+                        "type": "string",
+                        "enum": ["planning", "in_progress", "awaiting_data", "complete"],
+                        "description": "Beat stage (default: planning)",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional notes about this Beat",
+                    },
+                },
+                "required": ["act_name", "title"],
+            },
+        ),
+        Tool(
+            name="cairn_update_beat",
+            description="Update a Beat's title, stage, or notes.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "beat_name": {
+                        "type": "string",
+                        "description": "Name of the Beat to update (fuzzy matched)",
+                    },
+                    "new_title": {
+                        "type": "string",
+                        "description": "New title for the Beat",
+                    },
+                    "new_stage": {
+                        "type": "string",
+                        "enum": ["planning", "in_progress", "awaiting_data", "complete"],
+                        "description": "New stage for the Beat",
+                    },
+                    "new_notes": {
+                        "type": "string",
+                        "description": "New notes for the Beat",
+                    },
+                },
+                "required": ["beat_name"],
+            },
+        ),
+        Tool(
+            name="cairn_delete_beat",
+            description="Delete a Beat. WARNING: This is permanent.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "beat_name": {
+                        "type": "string",
+                        "description": "Name of the Beat to delete (fuzzy matched)",
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true to confirm deletion",
+                    },
+                },
+                "required": ["beat_name", "confirm"],
+            },
+        ),
+        # =====================================================================
         # Analytics
         # =====================================================================
         Tool(
@@ -744,6 +1061,60 @@ class CairnToolHandler:
 
         if name == "cairn_get_beat_events":
             return self._get_beat_events(args)
+
+        # =====================================================================
+        # Beat Organization
+        # =====================================================================
+        if name == "cairn_move_beat_to_act":
+            return self._move_beat_to_act(args)
+
+        if name == "cairn_list_beats":
+            return self._list_beats(args)
+
+        # =====================================================================
+        # The Play CRUD - Acts
+        # =====================================================================
+        if name == "cairn_list_acts":
+            return self._list_acts()
+
+        if name == "cairn_create_act":
+            return self._create_act(args)
+
+        if name == "cairn_update_act":
+            return self._update_act(args)
+
+        if name == "cairn_delete_act":
+            return self._delete_act(args)
+
+        if name == "cairn_set_active_act":
+            return self._set_active_act(args)
+
+        # =====================================================================
+        # The Play CRUD - Scenes
+        # =====================================================================
+        if name == "cairn_list_scenes":
+            return self._list_scenes(args)
+
+        if name == "cairn_create_scene":
+            return self._create_scene(args)
+
+        if name == "cairn_update_scene":
+            return self._update_scene(args)
+
+        if name == "cairn_delete_scene":
+            return self._delete_scene(args)
+
+        # =====================================================================
+        # The Play CRUD - Beats
+        # =====================================================================
+        if name == "cairn_create_beat":
+            return self._create_beat(args)
+
+        if name == "cairn_update_beat":
+            return self._update_beat(args)
+
+        if name == "cairn_delete_beat":
+            return self._delete_beat(args)
 
         # =====================================================================
         # Analytics
@@ -1494,3 +1865,821 @@ class CairnToolHandler:
                 "error": str(e),
                 "identity_hash": None,
             }
+
+    # =========================================================================
+    # Beat Organization
+    # =========================================================================
+
+    def _fuzzy_match(self, query: str, candidates: list[tuple[str, str]]) -> tuple[str, str, float] | None:
+        """Fuzzy match a query against candidates.
+
+        Args:
+            query: The search string.
+            candidates: List of (id, name) tuples to match against.
+
+        Returns:
+            (id, name, score) of best match, or None if no good match.
+        """
+        if not candidates:
+            return None
+
+        query_lower = query.lower().strip()
+
+        # First try exact match
+        for cid, name in candidates:
+            if name.lower() == query_lower:
+                return (cid, name, 1.0)
+
+        # Then try substring match
+        best_match = None
+        best_score = 0.0
+
+        for cid, name in candidates:
+            name_lower = name.lower()
+
+            # Check if query is contained in name or vice versa
+            if query_lower in name_lower:
+                score = len(query_lower) / len(name_lower)
+                if score > best_score:
+                    best_score = score
+                    best_match = (cid, name, score)
+            elif name_lower in query_lower:
+                score = len(name_lower) / len(query_lower) * 0.8  # Penalty for partial
+                if score > best_score:
+                    best_score = score
+                    best_match = (cid, name, score)
+
+        # If no substring match, try word overlap
+        if best_match is None or best_score < 0.3:
+            query_words = set(query_lower.split())
+            for cid, name in candidates:
+                name_words = set(name.lower().split())
+                overlap = query_words & name_words
+                if overlap:
+                    score = len(overlap) / max(len(query_words), len(name_words))
+                    if score > best_score:
+                        best_score = score
+                        best_match = (cid, name, score)
+
+        # Only return if we have a reasonable match
+        if best_match and best_score >= 0.3:
+            return best_match
+
+        return None
+
+    def _list_beats(self, args: dict[str, Any]) -> dict[str, Any]:
+        """List all beats with their locations."""
+        from reos import play_fs
+
+        act_filter = args.get("act_name")
+        acts, _ = play_fs.list_acts()
+
+        # Build act name -> id lookup
+        act_lookup = [(a.act_id, a.title) for a in acts]
+
+        # If filtering by act, find the matching act
+        target_act_ids = None
+        if act_filter:
+            match = self._fuzzy_match(act_filter, act_lookup)
+            if match:
+                target_act_ids = {match[0]}
+
+        beats_info = []
+
+        for act in acts:
+            if target_act_ids and act.act_id not in target_act_ids:
+                continue
+
+            scenes = play_fs.list_scenes(act_id=act.act_id)
+
+            for scene in scenes:
+                beats = play_fs.list_beats(act_id=act.act_id, scene_id=scene.scene_id)
+
+                for beat in beats:
+                    beats_info.append({
+                        "beat_id": beat.beat_id,
+                        "title": beat.title,
+                        "stage": beat.stage,
+                        "act_id": act.act_id,
+                        "act_title": act.title,
+                        "scene_id": scene.scene_id,
+                        "scene_title": scene.title,
+                        "has_calendar_link": beat.calendar_event_id is not None,
+                    })
+
+        return {
+            "count": len(beats_info),
+            "beats": beats_info,
+        }
+
+    def _move_beat_to_act(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Move a Beat to a different Act."""
+        from reos import play_fs
+
+        beat_name = args.get("beat_name")
+        target_act_name = args.get("target_act_name")
+        target_scene_name = args.get("target_scene_name")
+
+        if not beat_name:
+            raise CairnToolError("missing_param", "beat_name is required")
+        if not target_act_name:
+            raise CairnToolError("missing_param", "target_act_name is required")
+
+        # Get all acts
+        acts, _ = play_fs.list_acts()
+        act_lookup = [(a.act_id, a.title) for a in acts]
+
+        # Find target act
+        target_act_match = self._fuzzy_match(target_act_name, act_lookup)
+        if not target_act_match:
+            return {
+                "success": False,
+                "error": f"Could not find Act matching '{target_act_name}'",
+                "available_acts": [a.title for a in acts],
+            }
+
+        target_act_id, target_act_title, act_match_score = target_act_match
+
+        # Find target scene (default to Stage Direction)
+        target_scenes = play_fs.list_scenes(act_id=target_act_id)
+        scene_lookup = [(s.scene_id, s.title) for s in target_scenes]
+
+        target_scene_id = None
+        target_scene_title = None
+
+        if target_scene_name:
+            scene_match = self._fuzzy_match(target_scene_name, scene_lookup)
+            if scene_match:
+                target_scene_id, target_scene_title, _ = scene_match
+
+        if not target_scene_id:
+            # Default to Stage Direction
+            stage_direction_id = play_fs._get_stage_direction_scene_id(target_act_id)
+            for scene in target_scenes:
+                if scene.scene_id == stage_direction_id:
+                    target_scene_id = scene.scene_id
+                    target_scene_title = scene.title
+                    break
+
+            # If still not found, use first scene
+            if not target_scene_id and target_scenes:
+                target_scene_id = target_scenes[0].scene_id
+                target_scene_title = target_scenes[0].title
+
+        if not target_scene_id:
+            return {
+                "success": False,
+                "error": f"No scenes found in Act '{target_act_title}'",
+            }
+
+        # Find the beat by searching all acts/scenes
+        found_beat = None
+        source_act_id = None
+        source_scene_id = None
+        source_act_title = None
+        source_scene_title = None
+
+        all_beats = []
+        for act in acts:
+            scenes = play_fs.list_scenes(act_id=act.act_id)
+            for scene in scenes:
+                beats = play_fs.list_beats(act_id=act.act_id, scene_id=scene.scene_id)
+                for beat in beats:
+                    all_beats.append((beat.beat_id, beat.title, act, scene))
+
+        beat_lookup = [(b[0], b[1]) for b in all_beats]
+        beat_match = self._fuzzy_match(beat_name, beat_lookup)
+
+        if not beat_match:
+            return {
+                "success": False,
+                "error": f"Could not find Beat matching '{beat_name}'",
+                "available_beats": [b[1] for b in all_beats[:20]],  # Show first 20
+            }
+
+        beat_id, beat_title, _ = beat_match
+
+        # Find the full beat info
+        for bid, btitle, act, scene in all_beats:
+            if bid == beat_id:
+                found_beat = beat_id
+                source_act_id = act.act_id
+                source_scene_id = scene.scene_id
+                source_act_title = act.title
+                source_scene_title = scene.title
+                break
+
+        if not found_beat:
+            return {
+                "success": False,
+                "error": f"Beat '{beat_title}' not found",
+            }
+
+        # Check if already in target location
+        if source_act_id == target_act_id and source_scene_id == target_scene_id:
+            return {
+                "success": True,
+                "message": f"Beat '{beat_title}' is already in Act '{target_act_title}'",
+                "no_change": True,
+            }
+
+        # Move the beat
+        try:
+            result = play_fs.move_beat(
+                beat_id=beat_id,
+                source_act_id=source_act_id,
+                source_scene_id=source_scene_id,
+                target_act_id=target_act_id,
+                target_scene_id=target_scene_id,
+            )
+
+            # NOTE: We no longer update beat_calendar_links.act_id/scene_id
+            # Surfacing now queries play_fs directly for canonical beat location
+
+            return {
+                "success": True,
+                "message": f"Moved '{beat_title}' from '{source_act_title}' to '{target_act_title}'",
+                "beat_id": beat_id,
+                "beat_title": beat_title,
+                "from_act": source_act_title,
+                "from_scene": source_scene_title,
+                "to_act": target_act_title,
+                "to_scene": target_scene_title,
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    # =========================================================================
+    # The Play CRUD - Acts
+    # =========================================================================
+
+    def _list_acts(self) -> dict[str, Any]:
+        """List all acts."""
+        from reos import play_fs
+
+        acts, active_id = play_fs.list_acts()
+
+        return {
+            "count": len(acts),
+            "active_act_id": active_id,
+            "acts": [
+                {
+                    "act_id": a.act_id,
+                    "title": a.title,
+                    "notes": a.notes,
+                    "active": a.active,
+                    "is_your_story": a.act_id == play_fs.YOUR_STORY_ACT_ID,
+                    "has_repo": a.repo_path is not None,
+                }
+                for a in acts
+            ],
+        }
+
+    def _create_act(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Create a new act."""
+        from reos import play_fs
+
+        title = args.get("title")
+        notes = args.get("notes", "")
+
+        if not title:
+            raise CairnToolError("missing_param", "title is required")
+
+        try:
+            acts, new_act_id = play_fs.create_act(title=title, notes=notes)
+            new_act = next((a for a in acts if a.act_id == new_act_id), None)
+
+            return {
+                "success": True,
+                "message": f"Created Act '{title}'",
+                "act_id": new_act_id,
+                "title": title,
+                "active": new_act.active if new_act else False,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _update_act(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Update an act."""
+        from reos import play_fs
+
+        act_name = args.get("act_name")
+        new_title = args.get("new_title")
+        new_notes = args.get("new_notes")
+
+        if not act_name:
+            raise CairnToolError("missing_param", "act_name is required")
+
+        acts, _ = play_fs.list_acts()
+        act_lookup = [(a.act_id, a.title) for a in acts]
+
+        match = self._fuzzy_match(act_name, act_lookup)
+        if not match:
+            return {
+                "success": False,
+                "error": f"Could not find Act matching '{act_name}'",
+                "available_acts": [a.title for a in acts],
+            }
+
+        act_id, old_title, _ = match
+
+        try:
+            play_fs.update_act(
+                act_id=act_id,
+                title=new_title,
+                notes=new_notes,
+            )
+            return {
+                "success": True,
+                "message": f"Updated Act '{old_title}'",
+                "act_id": act_id,
+                "old_title": old_title,
+                "new_title": new_title or old_title,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _delete_act(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Delete an act."""
+        from reos import play_fs
+
+        act_name = args.get("act_name")
+        confirm = args.get("confirm", False)
+
+        if not act_name:
+            raise CairnToolError("missing_param", "act_name is required")
+        if not confirm:
+            return {
+                "success": False,
+                "error": "Deletion requires confirm=true",
+                "message": "Set confirm=true to delete this Act and all its contents.",
+            }
+
+        acts, _ = play_fs.list_acts()
+        act_lookup = [(a.act_id, a.title) for a in acts]
+
+        match = self._fuzzy_match(act_name, act_lookup)
+        if not match:
+            return {
+                "success": False,
+                "error": f"Could not find Act matching '{act_name}'",
+                "available_acts": [a.title for a in acts],
+            }
+
+        act_id, act_title, _ = match
+
+        # Extra protection for Your Story
+        if act_id == play_fs.YOUR_STORY_ACT_ID:
+            return {
+                "success": False,
+                "error": "Cannot delete 'Your Story' - it is a protected system Act",
+            }
+
+        try:
+            play_fs.delete_act(act_id=act_id)
+            return {
+                "success": True,
+                "message": f"Deleted Act '{act_title}' and all its contents",
+                "deleted_act_id": act_id,
+                "deleted_act_title": act_title,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _set_active_act(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Set the active act."""
+        from reos import play_fs
+
+        act_name = args.get("act_name")
+
+        if not act_name:
+            raise CairnToolError("missing_param", "act_name is required")
+
+        acts, _ = play_fs.list_acts()
+        act_lookup = [(a.act_id, a.title) for a in acts]
+
+        match = self._fuzzy_match(act_name, act_lookup)
+        if not match:
+            return {
+                "success": False,
+                "error": f"Could not find Act matching '{act_name}'",
+                "available_acts": [a.title for a in acts],
+            }
+
+        act_id, act_title, _ = match
+
+        try:
+            play_fs.set_active_act_id(act_id=act_id)
+            return {
+                "success": True,
+                "message": f"Set '{act_title}' as the active Act",
+                "active_act_id": act_id,
+                "active_act_title": act_title,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # =========================================================================
+    # The Play CRUD - Scenes
+    # =========================================================================
+
+    def _list_scenes(self, args: dict[str, Any]) -> dict[str, Any]:
+        """List scenes in an act."""
+        from reos import play_fs
+
+        act_name = args.get("act_name")
+
+        if not act_name:
+            raise CairnToolError("missing_param", "act_name is required")
+
+        acts, _ = play_fs.list_acts()
+        act_lookup = [(a.act_id, a.title) for a in acts]
+
+        match = self._fuzzy_match(act_name, act_lookup)
+        if not match:
+            return {
+                "success": False,
+                "error": f"Could not find Act matching '{act_name}'",
+                "available_acts": [a.title for a in acts],
+            }
+
+        act_id, act_title, _ = match
+        scenes = play_fs.list_scenes(act_id=act_id)
+
+        return {
+            "act_id": act_id,
+            "act_title": act_title,
+            "count": len(scenes),
+            "scenes": [
+                {
+                    "scene_id": s.scene_id,
+                    "title": s.title,
+                    "intent": s.intent,
+                    "is_stage_direction": s.scene_id == play_fs._get_stage_direction_scene_id(act_id),
+                }
+                for s in scenes
+            ],
+        }
+
+    def _create_scene(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Create a new scene."""
+        from reos import play_fs
+
+        act_name = args.get("act_name")
+        title = args.get("title")
+        intent = args.get("intent", "")
+        notes = args.get("notes", "")
+
+        if not act_name:
+            raise CairnToolError("missing_param", "act_name is required")
+        if not title:
+            raise CairnToolError("missing_param", "title is required")
+
+        acts, _ = play_fs.list_acts()
+        act_lookup = [(a.act_id, a.title) for a in acts]
+
+        match = self._fuzzy_match(act_name, act_lookup)
+        if not match:
+            return {
+                "success": False,
+                "error": f"Could not find Act matching '{act_name}'",
+                "available_acts": [a.title for a in acts],
+            }
+
+        act_id, act_title, _ = match
+
+        try:
+            scenes = play_fs.create_scene(
+                act_id=act_id,
+                title=title,
+                intent=intent,
+                notes=notes,
+            )
+            new_scene = scenes[-1] if scenes else None
+
+            return {
+                "success": True,
+                "message": f"Created Scene '{title}' in Act '{act_title}'",
+                "scene_id": new_scene.scene_id if new_scene else None,
+                "scene_title": title,
+                "act_id": act_id,
+                "act_title": act_title,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _update_scene(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Update a scene."""
+        from reos import play_fs
+
+        act_name = args.get("act_name")
+        scene_name = args.get("scene_name")
+        new_title = args.get("new_title")
+        new_intent = args.get("new_intent")
+        new_notes = args.get("new_notes")
+
+        if not act_name:
+            raise CairnToolError("missing_param", "act_name is required")
+        if not scene_name:
+            raise CairnToolError("missing_param", "scene_name is required")
+
+        acts, _ = play_fs.list_acts()
+        act_lookup = [(a.act_id, a.title) for a in acts]
+
+        act_match = self._fuzzy_match(act_name, act_lookup)
+        if not act_match:
+            return {
+                "success": False,
+                "error": f"Could not find Act matching '{act_name}'",
+            }
+
+        act_id, act_title, _ = act_match
+        scenes = play_fs.list_scenes(act_id=act_id)
+        scene_lookup = [(s.scene_id, s.title) for s in scenes]
+
+        scene_match = self._fuzzy_match(scene_name, scene_lookup)
+        if not scene_match:
+            return {
+                "success": False,
+                "error": f"Could not find Scene matching '{scene_name}' in Act '{act_title}'",
+                "available_scenes": [s.title for s in scenes],
+            }
+
+        scene_id, old_scene_title, _ = scene_match
+
+        try:
+            play_fs.update_scene(
+                act_id=act_id,
+                scene_id=scene_id,
+                title=new_title,
+                intent=new_intent,
+                notes=new_notes,
+            )
+            return {
+                "success": True,
+                "message": f"Updated Scene '{old_scene_title}' in Act '{act_title}'",
+                "scene_id": scene_id,
+                "old_title": old_scene_title,
+                "new_title": new_title or old_scene_title,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _delete_scene(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Delete a scene."""
+        from reos import play_fs
+
+        act_name = args.get("act_name")
+        scene_name = args.get("scene_name")
+        confirm = args.get("confirm", False)
+
+        if not act_name:
+            raise CairnToolError("missing_param", "act_name is required")
+        if not scene_name:
+            raise CairnToolError("missing_param", "scene_name is required")
+        if not confirm:
+            return {
+                "success": False,
+                "error": "Deletion requires confirm=true",
+            }
+
+        acts, _ = play_fs.list_acts()
+        act_lookup = [(a.act_id, a.title) for a in acts]
+
+        act_match = self._fuzzy_match(act_name, act_lookup)
+        if not act_match:
+            return {
+                "success": False,
+                "error": f"Could not find Act matching '{act_name}'",
+            }
+
+        act_id, act_title, _ = act_match
+        scenes = play_fs.list_scenes(act_id=act_id)
+        scene_lookup = [(s.scene_id, s.title) for s in scenes]
+
+        scene_match = self._fuzzy_match(scene_name, scene_lookup)
+        if not scene_match:
+            return {
+                "success": False,
+                "error": f"Could not find Scene matching '{scene_name}'",
+            }
+
+        scene_id, scene_title, _ = scene_match
+
+        # Protect Stage Direction
+        if scene_id == play_fs._get_stage_direction_scene_id(act_id):
+            return {
+                "success": False,
+                "error": "Cannot delete 'Stage Direction' - it is a protected system Scene",
+            }
+
+        try:
+            play_fs.delete_scene(act_id=act_id, scene_id=scene_id)
+            return {
+                "success": True,
+                "message": f"Deleted Scene '{scene_title}' from Act '{act_title}'",
+                "deleted_scene_id": scene_id,
+                "deleted_scene_title": scene_title,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # =========================================================================
+    # The Play CRUD - Beats
+    # =========================================================================
+
+    def _create_beat(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Create a new beat."""
+        from reos import play_fs
+
+        act_name = args.get("act_name")
+        scene_name = args.get("scene_name")
+        title = args.get("title")
+        stage = args.get("stage", "planning")
+        notes = args.get("notes", "")
+
+        if not act_name:
+            raise CairnToolError("missing_param", "act_name is required")
+        if not title:
+            raise CairnToolError("missing_param", "title is required")
+
+        acts, _ = play_fs.list_acts()
+        act_lookup = [(a.act_id, a.title) for a in acts]
+
+        act_match = self._fuzzy_match(act_name, act_lookup)
+        if not act_match:
+            return {
+                "success": False,
+                "error": f"Could not find Act matching '{act_name}'",
+                "available_acts": [a.title for a in acts],
+            }
+
+        act_id, act_title, _ = act_match
+        scenes = play_fs.list_scenes(act_id=act_id)
+
+        # Default to Stage Direction if no scene specified
+        scene_id = None
+        scene_title = "Stage Direction"
+
+        if scene_name:
+            scene_lookup = [(s.scene_id, s.title) for s in scenes]
+            scene_match = self._fuzzy_match(scene_name, scene_lookup)
+            if scene_match:
+                scene_id, scene_title, _ = scene_match
+
+        if not scene_id:
+            # Use Stage Direction
+            scene_id = play_fs._get_stage_direction_scene_id(act_id)
+            scene_title = "Stage Direction"
+
+        try:
+            beats = play_fs.create_beat(
+                act_id=act_id,
+                scene_id=scene_id,
+                title=title,
+                stage=stage,
+                notes=notes,
+            )
+            new_beat = beats[-1] if beats else None
+
+            return {
+                "success": True,
+                "message": f"Created Beat '{title}' in '{act_title}' / '{scene_title}'",
+                "beat_id": new_beat.beat_id if new_beat else None,
+                "beat_title": title,
+                "act_title": act_title,
+                "scene_title": scene_title,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _update_beat(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Update a beat."""
+        from reos import play_fs
+
+        beat_name = args.get("beat_name")
+        new_title = args.get("new_title")
+        new_stage = args.get("new_stage")
+        new_notes = args.get("new_notes")
+
+        if not beat_name:
+            raise CairnToolError("missing_param", "beat_name is required")
+
+        # Find the beat
+        acts, _ = play_fs.list_acts()
+        all_beats = []
+
+        for act in acts:
+            scenes = play_fs.list_scenes(act_id=act.act_id)
+            for scene in scenes:
+                beats = play_fs.list_beats(act_id=act.act_id, scene_id=scene.scene_id)
+                for beat in beats:
+                    all_beats.append((beat.beat_id, beat.title, act, scene))
+
+        beat_lookup = [(b[0], b[1]) for b in all_beats]
+        beat_match = self._fuzzy_match(beat_name, beat_lookup)
+
+        if not beat_match:
+            return {
+                "success": False,
+                "error": f"Could not find Beat matching '{beat_name}'",
+                "available_beats": [b[1] for b in all_beats[:20]],
+            }
+
+        beat_id, old_title, _ = beat_match
+
+        # Find act_id and scene_id for this beat
+        act_id = None
+        scene_id = None
+        for bid, btitle, act, scene in all_beats:
+            if bid == beat_id:
+                act_id = act.act_id
+                scene_id = scene.scene_id
+                break
+
+        try:
+            play_fs.update_beat(
+                act_id=act_id,
+                scene_id=scene_id,
+                beat_id=beat_id,
+                title=new_title,
+                stage=new_stage,
+                notes=new_notes,
+            )
+            return {
+                "success": True,
+                "message": f"Updated Beat '{old_title}'",
+                "beat_id": beat_id,
+                "old_title": old_title,
+                "new_title": new_title or old_title,
+                "new_stage": new_stage,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _delete_beat(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Delete a beat."""
+        from reos import play_fs
+
+        beat_name = args.get("beat_name")
+        confirm = args.get("confirm", False)
+
+        if not beat_name:
+            raise CairnToolError("missing_param", "beat_name is required")
+        if not confirm:
+            return {
+                "success": False,
+                "error": "Deletion requires confirm=true",
+            }
+
+        # Find the beat
+        acts, _ = play_fs.list_acts()
+        all_beats = []
+
+        for act in acts:
+            scenes = play_fs.list_scenes(act_id=act.act_id)
+            for scene in scenes:
+                beats = play_fs.list_beats(act_id=act.act_id, scene_id=scene.scene_id)
+                for beat in beats:
+                    all_beats.append((beat.beat_id, beat.title, act, scene))
+
+        beat_lookup = [(b[0], b[1]) for b in all_beats]
+        beat_match = self._fuzzy_match(beat_name, beat_lookup)
+
+        if not beat_match:
+            return {
+                "success": False,
+                "error": f"Could not find Beat matching '{beat_name}'",
+            }
+
+        beat_id, beat_title, _ = beat_match
+
+        # Find act_id and scene_id for this beat
+        act_id = None
+        scene_id = None
+        act_title = None
+        for bid, btitle, act, scene in all_beats:
+            if bid == beat_id:
+                act_id = act.act_id
+                scene_id = scene.scene_id
+                act_title = act.title
+                break
+
+        try:
+            play_fs.delete_beat(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
+
+            # Also remove from beat_calendar_links if present
+            self.store.delete_beat_calendar_link(beat_id=beat_id)
+
+            return {
+                "success": True,
+                "message": f"Deleted Beat '{beat_title}' from Act '{act_title}'",
+                "deleted_beat_id": beat_id,
+                "deleted_beat_title": beat_title,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}

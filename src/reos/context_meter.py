@@ -183,7 +183,7 @@ def calculate_context_stats(
                 tokens=estimate_tokens(system_prompt),
                 percent=(estimate_tokens(system_prompt) / usable_context * 100) if usable_context > 0 else 0,
                 enabled="system_prompt" not in disabled_sources,
-                description="Core instructions defining ReOS behavior and personality",
+                description="Core instructions defining Talking Rock behavior and personality",
             ),
             ContextSource(
                 name="play_context",
@@ -211,11 +211,11 @@ def calculate_context_stats(
             ),
             ContextSource(
                 name="codebase",
-                display_name="Codebase Reference",
+                display_name="Architecture",
                 tokens=estimate_tokens(codebase_context),
                 percent=(estimate_tokens(codebase_context) / usable_context * 100) if usable_context > 0 else 0,
                 enabled="codebase" not in disabled_sources,
-                description="ReOS source code structure for self-awareness",
+                description="Talking Rock system architecture for self-knowledge",
             ),
             ContextSource(
                 name="messages",

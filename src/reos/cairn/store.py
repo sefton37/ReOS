@@ -842,6 +842,54 @@ class CairnStore:
             )
             return cursor.rowcount > 0
 
+    def update_beat_location(
+        self,
+        beat_id: str,
+        act_id: str,
+        scene_id: str,
+    ) -> bool:
+        """Update the Act and Scene location for a Beat's calendar link.
+
+        Called when a Beat is moved between Acts/Scenes.
+
+        Args:
+            beat_id: The Beat ID.
+            act_id: The new Act ID.
+            scene_id: The new Scene ID.
+
+        Returns:
+            True if updated, False if no link found.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE beat_calendar_links
+                SET act_id = ?, scene_id = ?
+                WHERE beat_id = ?
+                """,
+                (act_id, scene_id, beat_id),
+            )
+            return cursor.rowcount > 0
+
+    def delete_beat_calendar_link(self, beat_id: str) -> bool:
+        """Delete calendar link for a Beat when the Beat is deleted.
+
+        Args:
+            beat_id: The Beat ID.
+
+        Returns:
+            True if deleted, False if no link found.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM beat_calendar_links
+                WHERE beat_id = ?
+                """,
+                (beat_id,),
+            )
+            return cursor.rowcount > 0
+
     def link_beat_to_calendar_event_full(
         self,
         beat_id: str,
