@@ -176,7 +176,8 @@ class TestContextService:
     def test_context_service_init(self, context_service) -> None:
         """ContextService should initialize without errors."""
         assert context_service is not None
-        assert context_service._disabled_sources == set()
+        # Disabled sources now stored in database, not in-memory
+        assert context_service.get_disabled_sources() == []
 
     def test_get_stats(self, context_service) -> None:
         """Should return context statistics."""

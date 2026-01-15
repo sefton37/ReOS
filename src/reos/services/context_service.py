@@ -19,6 +19,7 @@ from ..context_meter import (
     MODEL_CONTEXT_LIMITS,
     RESERVED_TOKENS,
 )
+from ..context_sources import VALID_SOURCE_NAMES, DISABLEABLE_SOURCES
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +90,25 @@ class CompactionResult:
 
 
 class ContextService:
-    """Unified service for context management."""
+    """Unified service for context management.
+
+    Uses database for disabled_sources to maintain consistency with RPC handlers.
+    Both CLI and UI share the same source of truth.
+    """
 
     def __init__(self, db: Database):
         self._db = db
-        self._disabled_sources: set[str] = set()
+
+    def _get_disabled_sources(self) -> set[str]:
+        """Get disabled sources from database (single source of truth)."""
+        disabled_str = self._db.get_state(key="context_disabled_sources")
+        if disabled_str and isinstance(disabled_str, str):
+            return set(s.strip() for s in disabled_str.split(",") if s.strip())
+        return set()
+
+    def _save_disabled_sources(self, disabled: set[str]) -> None:
+        """Save disabled sources to database."""
+        self._db.set_state(key="context_disabled_sources", value=",".join(sorted(disabled)))
 
     def get_stats(
         self,
@@ -117,6 +132,9 @@ class ContextService:
         # Get context components
         system_prompt, play_context, learned_kb, system_state, codebase_context = self._get_context_components()
 
+        # Get disabled sources from database (single source of truth)
+        disabled_sources = self._get_disabled_sources()
+
         # Calculate stats
         stats = calculate_context_stats(
             messages=messages,
@@ -126,7 +144,7 @@ class ContextService:
             system_state=system_state,
             codebase_context=codebase_context,
             include_breakdown=include_breakdown,
-            disabled_sources=self._disabled_sources,
+            disabled_sources=disabled_sources,
         )
 
         return ContextStatsResult.from_context_stats(stats)
@@ -138,6 +156,8 @@ class ContextService:
     ) -> ContextStatsResult:
         """Enable or disable a context source.
 
+        Persists to database so changes are shared between CLI and UI.
+
         Args:
             source_name: Name of the source (system_prompt, play_context, etc.)
             enabled: Whether to enable the source
@@ -145,22 +165,33 @@ class ContextService:
         Returns:
             Updated context stats
         """
-        if source_name == "messages":
-            # Cannot disable messages - core conversation
-            logger.warning("Cannot disable messages source")
+        # Validate source name (using shared constant)
+        if source_name not in VALID_SOURCE_NAMES:
+            logger.warning("Invalid source name: %s", source_name)
             return self.get_stats()
 
+        # Don't allow disabling non-disableable sources (system_prompt, messages)
+        if not enabled and source_name not in DISABLEABLE_SOURCES:
+            logger.warning("Cannot disable source: %s", source_name)
+            return self.get_stats()
+
+        # Get current disabled sources from database
+        disabled_sources = self._get_disabled_sources()
+
         if enabled:
-            self._disabled_sources.discard(source_name)
+            disabled_sources.discard(source_name)
         else:
-            self._disabled_sources.add(source_name)
+            disabled_sources.add(source_name)
+
+        # Save to database (single source of truth)
+        self._save_disabled_sources(disabled_sources)
 
         logger.info("Context source %s: %s", source_name, "enabled" if enabled else "disabled")
         return self.get_stats()
 
     def get_disabled_sources(self) -> list[str]:
         """Get list of currently disabled sources."""
-        return list(self._disabled_sources)
+        return list(self._get_disabled_sources())
 
     def compact(
         self,

@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 from . import auth
 from .agent import ChatAgent
+from .context_sources import VALID_SOURCE_NAMES, DISABLEABLE_SOURCES
 from .db import Database, get_db
 from .mcp_tools import ToolError, call_tool, list_tools
 from .security import (
@@ -2726,14 +2727,13 @@ def _handle_context_toggle_source(
     if disabled_sources_str and isinstance(disabled_sources_str, str):
         disabled_sources = set(s.strip() for s in disabled_sources_str.split(",") if s.strip())
 
-    # Valid source names
-    valid_sources = {"system_prompt", "play_context", "learned_kb", "system_state", "messages"}
-    if source_name not in valid_sources:
+    # Validate source name (using shared constant)
+    if source_name not in VALID_SOURCE_NAMES:
         raise RpcError(code=-32602, message=f"Invalid source name: {source_name}")
 
-    # Don't allow disabling messages - that would break chat
-    if source_name == "messages" and not enabled:
-        raise RpcError(code=-32602, message="Cannot disable conversation messages")
+    # Don't allow disabling non-disableable sources (system_prompt, messages)
+    if not enabled and source_name not in DISABLEABLE_SOURCES:
+        raise RpcError(code=-32602, message=f"Cannot disable '{source_name}' - it is required for operation")
 
     # Update disabled sources
     if enabled:
@@ -3169,7 +3169,7 @@ def _handle_safety_set_rate_limit(
 
 
 def _handle_safety_set_sudo_limit(
-    _db: Database,
+    db: Database,
     *,
     max_escalations: int,
 ) -> dict[str, Any]:
@@ -3185,6 +3185,9 @@ def _handle_safety_set_sudo_limit(
     # Update the module-level constant
     linux_tools._MAX_SUDO_ESCALATIONS = max_escalations
 
+    # Persist to database
+    db.set_state(key="safety_sudo_limit", value=str(max_escalations))
+
     return {
         "success": True,
         "max_escalations": max_escalations,
@@ -3192,7 +3195,7 @@ def _handle_safety_set_sudo_limit(
 
 
 def _handle_safety_set_command_length(
-    _db: Database,
+    db: Database,
     *,
     max_length: int,
 ) -> dict[str, Any]:
@@ -3208,6 +3211,9 @@ def _handle_safety_set_command_length(
     # Update the module-level constant
     security.MAX_COMMAND_LEN = max_length
 
+    # Persist to database
+    db.set_state(key="safety_command_length", value=str(max_length))
+
     return {
         "success": True,
         "max_length": max_length,
@@ -3215,7 +3221,7 @@ def _handle_safety_set_command_length(
 
 
 def _handle_safety_set_max_iterations(
-    _db: Database,
+    db: Database,
     *,
     max_iterations: int,
 ) -> dict[str, Any]:
@@ -3231,6 +3237,9 @@ def _handle_safety_set_max_iterations(
     # Update the dataclass default
     code_executor.ExecutionState.max_iterations = max_iterations
 
+    # Persist to database
+    db.set_state(key="safety_max_iterations", value=str(max_iterations))
+
     return {
         "success": True,
         "max_iterations": max_iterations,
@@ -3238,7 +3247,7 @@ def _handle_safety_set_max_iterations(
 
 
 def _handle_safety_set_wall_clock_timeout(
-    _db: Database,
+    db: Database,
     *,
     timeout_seconds: int,
 ) -> dict[str, Any]:
@@ -3253,6 +3262,9 @@ def _handle_safety_set_wall_clock_timeout(
 
     # Update the module-level constant
     code_executor.DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS = timeout_seconds
+
+    # Persist to database
+    db.set_state(key="safety_wall_clock_timeout", value=str(timeout_seconds))
 
     return {
         "success": True,
@@ -4265,11 +4277,60 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
         )
 
 
+def _load_persisted_safety_settings(db: Database) -> None:
+    """Load safety settings from database on startup.
+
+    This ensures user's safety settings persist across restarts.
+    """
+    from . import linux_tools
+    from . import security
+    from .code_mode import executor as code_executor
+
+    # Load sudo limit
+    val = db.get_state(key="safety_sudo_limit")
+    if val and isinstance(val, str):
+        try:
+            linux_tools._MAX_SUDO_ESCALATIONS = int(val)
+            logger.debug("Loaded safety_sudo_limit: %s", val)
+        except ValueError:
+            pass
+
+    # Load command length
+    val = db.get_state(key="safety_command_length")
+    if val and isinstance(val, str):
+        try:
+            security.MAX_COMMAND_LEN = int(val)
+            logger.debug("Loaded safety_command_length: %s", val)
+        except ValueError:
+            pass
+
+    # Load max iterations
+    val = db.get_state(key="safety_max_iterations")
+    if val and isinstance(val, str):
+        try:
+            code_executor.ExecutionState.max_iterations = int(val)
+            logger.debug("Loaded safety_max_iterations: %s", val)
+        except ValueError:
+            pass
+
+    # Load wall clock timeout
+    val = db.get_state(key="safety_wall_clock_timeout")
+    if val and isinstance(val, str):
+        try:
+            code_executor.DEFAULT_WALL_CLOCK_TIMEOUT_SECONDS = int(val)
+            logger.debug("Loaded safety_wall_clock_timeout: %s", val)
+        except ValueError:
+            pass
+
+
 def run_stdio_server() -> None:
     """Run the UI kernel server over stdio."""
 
     db = get_db()
     db.migrate()
+
+    # Load persisted safety settings
+    _load_persisted_safety_settings(db)
 
     while True:
         line = _readline()

@@ -12,6 +12,8 @@ from .db import Database
 from .mcp_tools import Tool, ToolError, call_tool, list_tools, render_tool_result
 from .providers import LLMProvider, get_provider
 from .play_fs import list_acts as play_list_acts
+from .play_fs import list_scenes as play_list_scenes
+from .play_fs import list_beats as play_list_beats
 from .play_fs import read_me_markdown as play_read_me_markdown
 from .play_fs import Act
 from .reasoning import ReasoningEngine, ReasoningConfig, ComplexityLevel, TaskPlan, create_llm_planner_callback
@@ -86,6 +88,52 @@ def _generate_id() -> str:
 class ToolCall:
     name: str
     arguments: dict[str, Any]
+
+
+@dataclass
+class ConversationContext:
+    """All context needed for a conversation turn - loaded ONCE per request.
+
+    This consolidates all context gathering into a single object to avoid
+    redundant file I/O and database queries.
+    """
+    # User input
+    user_text: str
+    conversation_id: str
+
+    # Persona/agent config
+    persona_system: str = ""
+    persona_context: str = ""
+
+    # The Play data (loaded once, used by both prompt building and intent engine)
+    play_context: str = ""  # Formatted text for prompt
+    play_data: dict[str, Any] = field(default_factory=dict)  # Structured data for intent engine
+
+    # Other context sources
+    learned_context: str = ""
+    system_context: str = ""
+    codebase_context: str = ""
+    conversation_history: str = ""
+
+    # Computed full prompt prefix
+    full_prompt_prefix: str = ""
+
+    def build_prompt_prefix(self) -> str:
+        """Build the full prompt prefix from all context sources."""
+        parts = [self.persona_system]
+        if self.persona_context:
+            parts.append(self.persona_context)
+        if self.play_context:
+            parts.append(self.play_context)
+        if self.learned_context:
+            parts.append(self.learned_context)
+        if self.system_context:
+            parts.append(self.system_context)
+        if self.codebase_context:
+            parts.append(self.codebase_context)
+        if self.conversation_history:
+            parts.append(self.conversation_history)
+        return "\n\n".join(parts)
 
 
 @dataclass(frozen=True)
@@ -288,6 +336,54 @@ class ChatAgent:
         except Exception as e:
             logger.debug("Error getting active act: %s", e)
             return None
+
+    def _gather_play_data(self) -> dict[str, Any]:
+        """Gather The Play data (acts and beats) for intent engine context.
+
+        Returns:
+            Dictionary with 'acts' and 'all_beats' lists for LLM-based extraction.
+        """
+        try:
+            acts, active_id = play_list_acts()
+            acts_data = []
+            all_beats = []
+
+            for act in acts:
+                acts_data.append({
+                    "act_id": act.act_id,
+                    "title": act.title,
+                    "active": act.active,
+                })
+
+                # Get scenes for this act
+                try:
+                    scenes = play_list_scenes(act_id=act.act_id)
+                    for scene in scenes:
+                        # Get beats for this scene
+                        try:
+                            beats = play_list_beats(act_id=act.act_id, scene_id=scene.scene_id)
+                            for beat in beats:
+                                all_beats.append({
+                                    "beat_id": beat.beat_id,
+                                    "title": beat.title,
+                                    "act_id": act.act_id,
+                                    "act_title": act.title,
+                                    "scene_id": scene.scene_id,
+                                    "scene_title": scene.title,
+                                })
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            return {
+                "acts": acts_data,
+                "all_beats": all_beats,
+                "active_act_id": active_id,
+            }
+        except Exception as e:
+            logger.debug("Error gathering play data: %s", e)
+            return {"acts": [], "all_beats": [], "active_act_id": None}
 
     def _get_active_act_with_repo(self) -> Act | None:
         """Get the active Act if it has a repository assigned.
@@ -844,6 +940,20 @@ class ChatAgent:
             return self._llm_override
         return get_provider(self._db)
 
+    def _get_disabled_sources(self) -> set[str]:
+        """Get the set of disabled context sources from user settings.
+
+        These are sources the user has toggled OFF in the context overlay.
+        When a source is disabled, it should not be included in the prompt.
+
+        Returns:
+            Set of source names that are disabled (e.g., {"play_context", "system_state"})
+        """
+        disabled_str = self._db.get_state(key="context_disabled_sources")
+        if disabled_str and isinstance(disabled_str, str):
+            return set(s.strip() for s in disabled_str.split(",") if s.strip())
+        return set()
+
     def respond(
         self,
         user_text: str,
@@ -998,35 +1108,9 @@ class ChatAgent:
             except Exception as e:
                 logger.warning("Extended thinking failed: %s", e)
 
-        persona_system = str(persona.get("system_prompt") or "")
-        persona_context = str(persona.get("default_context") or "")
-        persona_prefix = persona_system
-        if persona_context:
-            persona_prefix = persona_prefix + "\n\n" + persona_context
-
-        play_context = self._get_play_context()
-        if play_context:
-            persona_prefix = persona_prefix + "\n\n" + play_context
-
-        # Add learned knowledge from previous compactions
-        learned_context = self._get_learned_context()
-        if learned_context:
-            persona_prefix = persona_prefix + "\n\n" + learned_context
-
-        # Add daily system state context (RAG)
-        system_context = self._get_system_context()
-        if system_context:
-            persona_prefix = persona_prefix + "\n\n" + system_context
-
-        # Add codebase self-awareness context
-        codebase_context = self._get_codebase_context()
-        if codebase_context:
-            persona_prefix = persona_prefix + "\n\n" + codebase_context
-
-        # Add conversation history context
-        conversation_context = self._build_conversation_context(conversation_id)
-        if conversation_context:
-            persona_prefix = persona_prefix + "\n\n" + conversation_context
+        # Build ALL context in ONE pass - avoids redundant I/O
+        ctx = self._build_full_context(user_text, conversation_id, agent_type)
+        persona_prefix = ctx.full_prompt_prefix
 
         llm = self._get_provider()
 
@@ -1048,12 +1132,16 @@ class ChatAgent:
                 except ToolError as e:
                     return {"error": e.message, "code": e.code}
 
-            # Process through intent engine
-            intent_engine = CairnIntentEngine(llm=llm, available_tools=available_tools)
+            # Process through intent engine with Play context (from ctx, not re-loaded)
+            intent_engine = CairnIntentEngine(
+                llm=llm,
+                available_tools=available_tools,
+                play_data=ctx.play_data,  # Use already-loaded data
+            )
             result = intent_engine.process(
                 user_input=user_text,
                 execute_tool=execute_tool,
-                persona_context=play_context if play_context else "",
+                persona_context=ctx.play_context,  # Use already-loaded context
             )
 
             # Build response in expected format
@@ -1600,22 +1688,112 @@ class ChatAgent:
 
         This allows ReOS to answer questions about its own implementation,
         architecture, and source code structure.
+
+        Uses the architecture module which provides:
+        1. Compressed architecture blueprint (~8K tokens)
+        2. ADR summaries
+        3. Codebase stats
+
+        For deeper queries, use the RAG tools:
+        - reos_search_codebase: Find relevant code
+        - reos_get_architecture: Full architecture doc
+        - reos_file_summary: File contents summary
         """
         try:
-            from .codebase_index import get_codebase_context as get_codebase_ctx
+            from .architecture import get_architecture_context
 
-            codebase_ctx = get_codebase_ctx()
-            if codebase_ctx.strip():
+            arch_ctx = get_architecture_context(max_tokens=6000)
+            if arch_ctx.strip():
                 return (
-                    "CODEBASE_REFERENCE (ReOS source code structure):\n"
-                    "Use this to answer questions about how ReOS works, "
-                    "its architecture, modules, and implementation.\n"
-                    f"{codebase_ctx}"
+                    "ARCHITECTURE_REFERENCE (ReOS system architecture):\n"
+                    "Use this to understand how ReOS works. For deeper queries, "
+                    "use reos_search_codebase or reos_file_summary tools.\n\n"
+                    f"{arch_ctx}"
                 )
             return ""
         except Exception as e:
-            logger.debug("Could not load codebase context: %s", e)
+            logger.debug("Could not load architecture context: %s", e)
+            # Fallback to legacy codebase_index if available
+            try:
+                from .codebase_index import get_codebase_context as get_codebase_ctx
+                codebase_ctx = get_codebase_ctx()
+                if codebase_ctx.strip():
+                    return f"CODEBASE_REFERENCE:\n{codebase_ctx}"
+            except Exception:
+                pass
             return ""
+
+    def _build_full_context(
+        self,
+        user_text: str,
+        conversation_id: str,
+        agent_type: str | None = None,
+    ) -> ConversationContext:
+        """Build all conversation context in ONE pass.
+
+        This consolidates all context gathering to avoid redundant I/O.
+        The returned ConversationContext contains everything needed for:
+        - Building the system prompt
+        - Intent engine (play_data)
+        - Response generation
+
+        Respects user's disabled_sources settings from the context overlay.
+        When a source is disabled, it won't be loaded or included in the prompt.
+
+        Args:
+            user_text: The user's message
+            conversation_id: Current conversation ID
+            agent_type: Agent type (cairn, riva, etc.)
+
+        Returns:
+            ConversationContext with all context loaded once
+        """
+        # Get user's disabled sources from settings
+        disabled_sources = self._get_disabled_sources()
+        if disabled_sources:
+            logger.debug("Context sources disabled by user: %s", disabled_sources)
+
+        # Get persona (agent config) - system_prompt is never disabled
+        persona = self._get_persona(agent_type)
+        persona_system = str(persona.get("system_prompt") or "")
+        persona_context_str = str(persona.get("default_context") or "")
+
+        # Get Play context and data (only if not disabled)
+        # play_context is formatted text, play_data is structured for intent engine
+        # Note: play_data is still loaded for intent engine even if display is disabled
+        if "play_context" not in disabled_sources:
+            play_context = self._get_play_context()
+            play_data = self._gather_play_data()
+        else:
+            play_context = ""
+            play_data = self._gather_play_data()  # Still need for intent engine
+
+        # Get other context sources (only if not disabled)
+        learned_context = "" if "learned_kb" in disabled_sources else self._get_learned_context()
+        system_context = "" if "system_state" in disabled_sources else self._get_system_context()
+        codebase_context = "" if "codebase" in disabled_sources else self._get_codebase_context()
+
+        # Conversation history ("messages") - always loaded, cannot be disabled
+        conversation_history = self._build_conversation_context(conversation_id)
+
+        # Build the context object
+        ctx = ConversationContext(
+            user_text=user_text,
+            conversation_id=conversation_id,
+            persona_system=persona_system,
+            persona_context=persona_context_str,
+            play_context=play_context,
+            play_data=play_data,
+            learned_context=learned_context,
+            system_context=system_context,
+            codebase_context=codebase_context,
+            conversation_history=conversation_history,
+        )
+
+        # Compute full prompt prefix
+        ctx.full_prompt_prefix = ctx.build_prompt_prefix()
+
+        return ctx
 
     def _user_opted_into_diff(self, user_text: str) -> bool:
         t = user_text.lower()
