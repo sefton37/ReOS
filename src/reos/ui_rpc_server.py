@@ -3051,6 +3051,29 @@ def _handle_thunderbird_reset(db: Database) -> dict[str, Any]:
     return {"success": True}
 
 
+# -------------------------------------------------------------------------
+# Autostart Settings
+# -------------------------------------------------------------------------
+
+
+def _handle_autostart_get(_db: Database) -> dict[str, Any]:
+    """Get current autostart status for Talking Rock."""
+    from .autostart import get_autostart_status
+
+    return get_autostart_status()
+
+
+def _handle_autostart_set(_db: Database, *, enabled: bool) -> dict[str, Any]:
+    """Enable or disable autostart for Talking Rock.
+
+    Args:
+        enabled: True to start Talking Rock on login, False to disable.
+    """
+    from .autostart import set_autostart
+
+    return set_autostart(enabled)
+
+
 def _handle_cairn_attention(
     db: Database,
     *,
@@ -3356,6 +3379,7 @@ _SIMPLE_HANDLERS: dict[str, Callable[[Database], Any]] = {
     "cairn/thunderbird/status": _handle_cairn_thunderbird_status,
     "thunderbird/check": _handle_thunderbird_check,
     "thunderbird/reset": _handle_thunderbird_reset,
+    "autostart/get": _handle_autostart_get,
 }
 
 # Handlers with single required string param: (handler, param_name)
@@ -3637,6 +3661,14 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             if not isinstance(enabled, bool):
                 raise RpcError(code=-32602, message="enabled must be a boolean")
             return _jsonrpc_result(req_id=req_id, result=_handle_ollama_set_gpu(db, enabled=enabled))
+
+        if method == "autostart/set":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            enabled = params.get("enabled")
+            if not isinstance(enabled, bool):
+                raise RpcError(code=-32602, message="enabled must be a boolean")
+            return _jsonrpc_result(req_id=req_id, result=_handle_autostart_set(db, enabled=enabled))
 
         if method == "ollama/set_context":
             if not isinstance(params, dict):

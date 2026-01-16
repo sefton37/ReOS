@@ -980,6 +980,39 @@ def list_tools() -> list[Tool]:
                 },
             },
         ),
+        # =====================================================================
+        # System Settings
+        # =====================================================================
+        Tool(
+            name="cairn_set_autostart",
+            description=(
+                "Enable or disable Talking Rock autostart on Ubuntu login. "
+                "Use when user asks to 'start automatically', 'open on boot', "
+                "'launch on login', or similar requests about startup behavior."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "True to enable autostart on login, False to disable",
+                    },
+                },
+                "required": ["enabled"],
+            },
+        ),
+        Tool(
+            name="cairn_get_autostart",
+            description=(
+                "Get current autostart status for Talking Rock. "
+                "Use when user asks if autostart is enabled, or wants to know "
+                "the current startup configuration."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
     ]
 
 
@@ -1217,6 +1250,15 @@ class CairnToolHandler:
 
         if name == "cairn_cancel_action":
             return self._cancel_action(args)
+
+        # =====================================================================
+        # System Settings
+        # =====================================================================
+        if name == "cairn_set_autostart":
+            return self._set_autostart(args)
+
+        if name == "cairn_get_autostart":
+            return self._get_autostart()
 
         raise CairnToolError(
             code="unknown_tool",
@@ -3132,3 +3174,47 @@ class CairnToolHandler:
                 "error": "Could not cancel action",
                 "message": "Failed to cancel the pending action.",
             }
+
+    # =========================================================================
+    # System Settings
+    # =========================================================================
+
+    def _set_autostart(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Enable or disable Talking Rock autostart on Ubuntu login."""
+        from ..autostart import set_autostart
+
+        enabled = args.get("enabled")
+        if not isinstance(enabled, bool):
+            raise CairnToolError(
+                code="invalid_argument",
+                message="'enabled' must be a boolean",
+            )
+
+        result = set_autostart(enabled)
+
+        if result.get("success"):
+            action = "enabled" if enabled else "disabled"
+            return {
+                "success": True,
+                "enabled": result["enabled"],
+                "message": f"Autostart {action}. Talking Rock will {'now start automatically' if enabled else 'no longer start automatically'} when you log in.",
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.get("error", "Unknown error"),
+                "message": f"Failed to update autostart setting: {result.get('error', 'Unknown error')}",
+            }
+
+    def _get_autostart(self) -> dict[str, Any]:
+        """Get current autostart status for Talking Rock."""
+        from ..autostart import get_autostart_status
+
+        status = get_autostart_status()
+
+        return {
+            "success": True,
+            "enabled": status["enabled"],
+            "desktop_file": status["desktop_file"],
+            "message": f"Autostart is currently {'enabled' if status['enabled'] else 'disabled'}.",
+        }

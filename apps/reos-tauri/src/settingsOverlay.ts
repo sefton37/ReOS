@@ -37,6 +37,13 @@ interface ThunderbirdCheckResult {
   active_profiles: string[];
 }
 
+interface AutostartStatus {
+  enabled: boolean;
+  desktop_file: string;
+  reos_executable: string;
+  reos_exists: boolean;
+}
+
 interface OllamaStatus {
   url: string;
   model: string;
@@ -248,6 +255,7 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
 
   // Integrations state
   let thunderbirdStatus: ThunderbirdCheckResult | null = null;
+  let autostartStatus: AutostartStatus | null = null;
 
   // Create overlay container
   const overlay = el('div');
@@ -494,6 +502,13 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
       thunderbirdStatus = await kernelRequest('thunderbird/check', {}) as ThunderbirdCheckResult;
     } catch {
       thunderbirdStatus = null;
+    }
+
+    // Load autostart status
+    try {
+      autostartStatus = await kernelRequest('autostart/get', {}) as AutostartStatus;
+    } catch {
+      autostartStatus = null;
     }
 
     render();
@@ -2627,6 +2642,123 @@ When executing:
       </div>
     `;
     content.appendChild(headerInfo);
+
+    // Startup Section - Autostart on boot
+    const startupSection = createSection('Startup');
+
+    const startupCard = el('div');
+    startupCard.style.cssText = `
+      padding: 16px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      border-left: 3px solid ${autostartStatus?.enabled ? '#22c55e' : '#4b5563'};
+    `;
+
+    const startupHeader = el('div');
+    startupHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+
+    const startupInfo = el('div');
+    startupInfo.innerHTML = `
+      <div style="font-weight: 500; color: #fff; font-size: 14px; margin-bottom: 4px;">Start on Login</div>
+      <div style="font-size: 12px; color: rgba(255,255,255,0.6);">
+        Automatically open Talking Rock when you log into Ubuntu
+      </div>
+    `;
+
+    // Toggle switch for autostart
+    const toggleContainer = el('label');
+    toggleContainer.style.cssText = `
+      position: relative;
+      display: inline-block;
+      width: 48px;
+      height: 26px;
+      cursor: pointer;
+    `;
+
+    const toggleInput = el('input') as HTMLInputElement;
+    toggleInput.type = 'checkbox';
+    toggleInput.checked = autostartStatus?.enabled ?? false;
+    toggleInput.style.cssText = 'opacity: 0; width: 0; height: 0;';
+
+    const toggleSlider = el('span');
+    toggleSlider.style.cssText = `
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: ${autostartStatus?.enabled ? '#22c55e' : '#4b5563'};
+      transition: 0.3s;
+      border-radius: 26px;
+    `;
+
+    const toggleKnob = el('span');
+    toggleKnob.style.cssText = `
+      position: absolute;
+      content: '';
+      height: 20px;
+      width: 20px;
+      left: ${autostartStatus?.enabled ? '24px' : '3px'};
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    `;
+
+    toggleSlider.appendChild(toggleKnob);
+    toggleContainer.appendChild(toggleInput);
+    toggleContainer.appendChild(toggleSlider);
+
+    toggleInput.addEventListener('change', async () => {
+      const newState = toggleInput.checked;
+      // Update visual immediately
+      toggleSlider.style.backgroundColor = newState ? '#22c55e' : '#4b5563';
+      toggleKnob.style.left = newState ? '24px' : '3px';
+      startupCard.style.borderLeftColor = newState ? '#22c55e' : '#4b5563';
+
+      try {
+        const result = await kernelRequest('autostart/set', { enabled: newState }) as { success: boolean; enabled: boolean; error?: string };
+        if (!result.success) {
+          // Revert on failure
+          toggleInput.checked = !newState;
+          toggleSlider.style.backgroundColor = !newState ? '#22c55e' : '#4b5563';
+          toggleKnob.style.left = !newState ? '24px' : '3px';
+          startupCard.style.borderLeftColor = !newState ? '#22c55e' : '#4b5563';
+          console.error('Failed to set autostart:', result.error);
+        }
+        // Reload status
+        autostartStatus = await kernelRequest('autostart/get', {}) as AutostartStatus;
+      } catch (e) {
+        // Revert on error
+        toggleInput.checked = !newState;
+        toggleSlider.style.backgroundColor = !newState ? '#22c55e' : '#4b5563';
+        toggleKnob.style.left = !newState ? '24px' : '3px';
+        startupCard.style.borderLeftColor = !newState ? '#22c55e' : '#4b5563';
+        console.error('Failed to set autostart:', e);
+      }
+    });
+
+    startupHeader.appendChild(startupInfo);
+    startupHeader.appendChild(toggleContainer);
+    startupCard.appendChild(startupHeader);
+
+    // Show desktop file path if enabled
+    if (autostartStatus?.enabled && autostartStatus.desktop_file) {
+      const pathInfo = el('div');
+      pathInfo.style.cssText = `
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(255,255,255,0.1);
+        font-size: 11px;
+        color: rgba(255,255,255,0.4);
+      `;
+      pathInfo.textContent = `Desktop entry: ${autostartStatus.desktop_file}`;
+      startupCard.appendChild(pathInfo);
+    }
+
+    startupSection.appendChild(startupCard);
+    content.appendChild(startupSection);
 
     // Thunderbird Section
     const thunderbirdSection = createSection('Thunderbird');
