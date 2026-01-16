@@ -24,6 +24,22 @@ import type {
   PlayLevel,
 } from './types';
 
+// Color palette for Acts (matches Python ACT_COLOR_PALETTE)
+const ACT_COLOR_PALETTE = [
+  '#8b5cf6',  // Purple (violet-500)
+  '#3b82f6',  // Blue (blue-500)
+  '#10b981',  // Green (emerald-500)
+  '#f59e0b',  // Amber (amber-500)
+  '#ef4444',  // Red (red-500)
+  '#ec4899',  // Pink (pink-500)
+  '#06b6d4',  // Cyan (cyan-500)
+  '#84cc16',  // Lime (lime-500)
+  '#f97316',  // Orange (orange-500)
+  '#6366f1',  // Indigo (indigo-500)
+  '#14b8a6',  // Teal (teal-500)
+  '#a855f7',  // Fuchsia (purple-500)
+];
+
 // Placeholder text per level
 const PLACEHOLDER_TEXT: Record<PlayLevel, string> = {
   play: `This is The Play - your high-level narrative and vision.
@@ -399,6 +415,129 @@ export function createPlayOverlay(onClose: () => void): {
     render();
   }
 
+  // Show color picker dropdown for an Act
+  function showActColorPicker(actId: string, currentColor: string, anchorEl: HTMLElement) {
+    // Remove any existing picker
+    const existingPicker = document.querySelector('.act-color-picker');
+    if (existingPicker) existingPicker.remove();
+
+    const picker = el('div');
+    picker.className = 'act-color-picker';
+    picker.style.cssText = `
+      position: fixed;
+      background: #1e1e2e;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      padding: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 10000;
+    `;
+
+    // Position near the anchor
+    const rect = anchorEl.getBoundingClientRect();
+    picker.style.left = `${rect.left}px`;
+    picker.style.top = `${rect.bottom + 4}px`;
+
+    // Color grid
+    const colorGrid = el('div');
+    colorGrid.style.cssText = `
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      margin-bottom: 8px;
+    `;
+
+    for (const color of ACT_COLOR_PALETTE) {
+      const swatch = el('button');
+      swatch.style.cssText = `
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        border: 2px solid ${color === currentColor ? '#fff' : 'transparent'};
+        background: ${color};
+        cursor: pointer;
+        padding: 0;
+      `;
+      swatch.title = color;
+      swatch.addEventListener('click', async () => {
+        await updateActColor(actId, color);
+        picker.remove();
+      });
+      colorGrid.appendChild(swatch);
+    }
+    picker.appendChild(colorGrid);
+
+    // Custom hex input
+    const customRow = el('div');
+    customRow.style.cssText = `
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    `;
+
+    const hexInput = el('input') as HTMLInputElement;
+    hexInput.type = 'text';
+    hexInput.placeholder = '#hex';
+    hexInput.value = currentColor;
+    hexInput.style.cssText = `
+      flex: 1;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      font-size: 12px;
+      font-family: monospace;
+    `;
+
+    const applyBtn = el('button');
+    applyBtn.textContent = '✓';
+    applyBtn.style.cssText = `
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: none;
+      background: #3b82f6;
+      color: #fff;
+      cursor: pointer;
+      font-size: 12px;
+    `;
+    applyBtn.addEventListener('click', async () => {
+      const val = hexInput.value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+        await updateActColor(actId, val);
+        picker.remove();
+      } else {
+        hexInput.style.borderColor = '#ef4444';
+      }
+    });
+
+    customRow.appendChild(hexInput);
+    customRow.appendChild(applyBtn);
+    picker.appendChild(customRow);
+
+    document.body.appendChild(picker);
+
+    // Close picker on click outside
+    const closeHandler = (e: MouseEvent) => {
+      if (!picker.contains(e.target as Node) && e.target !== anchorEl) {
+        picker.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+  }
+
+  // Update Act color via RPC
+  async function updateActColor(actId: string, color: string) {
+    try {
+      await kernelRequest('play/acts/update', { act_id: actId, color });
+      await refreshData();
+      render();
+    } catch (e) {
+      console.error('Failed to update Act color:', e);
+    }
+  }
+
   // --- Render functions ---
 
   function renderSidebar() {
@@ -435,6 +574,15 @@ export function createPlayOverlay(onClose: () => void): {
 
       const actItem = el('div');
       actItem.className = `tree-item act ${isSelected ? 'selected' : ''} ${isActive ? 'active' : ''}`;
+      actItem.style.display = 'flex';
+      actItem.style.alignItems = 'center';
+      actItem.style.justifyContent = 'space-between';
+
+      const actItemLeft = el('div');
+      actItemLeft.style.display = 'flex';
+      actItemLeft.style.alignItems = 'center';
+      actItemLeft.style.flex = '1';
+      actItemLeft.style.overflow = 'hidden';
 
       const expandIcon = el('span');
       expandIcon.className = 'tree-expand';
@@ -446,10 +594,37 @@ export function createPlayOverlay(onClose: () => void): {
 
       const actLabel = el('span');
       actLabel.textContent = act.title;
+      actLabel.style.overflow = 'hidden';
+      actLabel.style.textOverflow = 'ellipsis';
+      actLabel.style.whiteSpace = 'nowrap';
 
-      actItem.appendChild(expandIcon);
-      actItem.appendChild(actLabel);
-      actItem.addEventListener('click', () => {
+      actItemLeft.appendChild(expandIcon);
+      actItemLeft.appendChild(actLabel);
+
+      // Color picker button
+      const colorBtn = el('button');
+      colorBtn.className = 'act-color-btn';
+      const actColor = act.color || '#8b5cf6';  // Default purple
+      colorBtn.style.cssText = `
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        border: 1px solid rgba(255,255,255,0.3);
+        background: ${actColor};
+        cursor: pointer;
+        flex-shrink: 0;
+        margin-left: 4px;
+        padding: 0;
+      `;
+      colorBtn.title = 'Change Act color';
+      colorBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showActColorPicker(act.act_id, actColor, colorBtn);
+      });
+
+      actItem.appendChild(actItemLeft);
+      actItem.appendChild(colorBtn);
+      actItemLeft.addEventListener('click', () => {
         // Toggle: if clicking already-active act, deselect it
         if (state.activeActId === act.act_id) {
           deselectAct();

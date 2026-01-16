@@ -577,7 +577,7 @@ def list_tools() -> list[Tool]:
         ),
         Tool(
             name="cairn_update_act",
-            description="Update an Act's title or notes.",
+            description="Update an Act's title, notes, or color.",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -592,6 +592,10 @@ def list_tools() -> list[Tool]:
                     "new_notes": {
                         "type": "string",
                         "description": "New notes for the Act",
+                    },
+                    "new_color": {
+                        "type": "string",
+                        "description": "New color for the Act (hex code like '#8b5cf6' or color name)",
                     },
                 },
                 "required": ["act_name"],
@@ -2316,6 +2320,7 @@ class CairnToolHandler:
         act_name = args.get("act_name")
         new_title = args.get("new_title")
         new_notes = args.get("new_notes")
+        new_color = args.get("new_color")
 
         if not act_name:
             raise CairnToolError("missing_param", "act_name is required")
@@ -2333,19 +2338,28 @@ class CairnToolHandler:
 
         act_id, old_title, _ = match
 
+        # Get current Act for old color
+        old_act = next((a for a in acts if a.act_id == act_id), None)
+        old_color = old_act.color if old_act else None
+
         try:
             play_fs.update_act(
                 act_id=act_id,
                 title=new_title,
                 notes=new_notes,
+                color=new_color,
             )
-            return {
+            result = {
                 "success": True,
                 "message": f"Updated Act '{old_title}'",
                 "act_id": act_id,
                 "old_title": old_title,
                 "new_title": new_title or old_title,
             }
+            if new_color:
+                result["new_color"] = new_color
+                result["old_color"] = old_color
+            return result
         except Exception as e:
             return {"success": False, "error": str(e)}
 

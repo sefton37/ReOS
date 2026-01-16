@@ -457,6 +457,7 @@ function buildUi() {
           act_id?: string;
           scene_id?: string;
           act_title?: string;
+          act_color?: string;
         }>;
       };
       if (result.items && result.items.length > 0) {
@@ -472,6 +473,7 @@ function buildUi() {
           act_id: item.act_id,
           scene_id: item.scene_id,
           act_title: item.act_title,
+          act_color: item.act_color,
         })));
       }
     } catch (e) {
@@ -499,6 +501,7 @@ function buildUi() {
           act_id?: string;
           scene_id?: string;
           act_title?: string;
+          act_color?: string;
         }>;
       };
       cairnView.updateSurfaced(result.items.map(item => ({
@@ -513,6 +516,7 @@ function buildUi() {
         act_id: item.act_id,
         scene_id: item.scene_id,
         act_title: item.act_title,
+        act_color: item.act_color,
       })));
     } catch (e) {
       console.log('Could not refresh attention items:', e);

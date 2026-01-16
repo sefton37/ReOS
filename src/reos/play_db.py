@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 _local = threading.local()
 
 # Schema version for migrations
-SCHEMA_VERSION = 1
+# v1: Initial schema
+# v2: Added color column to acts table
+SCHEMA_VERSION = 2
 
 
 def _play_db_path() -> Path:
@@ -78,6 +80,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             title TEXT NOT NULL,
             active INTEGER NOT NULL DEFAULT 0,
             notes TEXT NOT NULL DEFAULT '',
+            color TEXT,  -- Hex color for UI display (e.g., "#8b5cf6")
             repo_path TEXT,
             artifact_type TEXT,
             code_config TEXT,  -- JSON string
@@ -140,8 +143,34 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
     # Set schema version if not exists
     cursor = conn.execute("SELECT version FROM schema_version LIMIT 1")
-    if cursor.fetchone() is None:
+    row = cursor.fetchone()
+    if row is None:
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+    else:
+        current_version = row[0]
+        # Run migrations
+        _run_schema_migrations(conn, current_version)
+
+
+def _run_schema_migrations(conn: sqlite3.Connection, current_version: int) -> None:
+    """Run schema migrations from current_version to SCHEMA_VERSION."""
+    if current_version >= SCHEMA_VERSION:
+        return
+
+    logger.info(f"Running schema migrations from v{current_version} to v{SCHEMA_VERSION}")
+
+    # Migration v1 -> v2: Add color column to acts table
+    if current_version < 2:
+        # Check if color column already exists
+        cursor = conn.execute("PRAGMA table_info(acts)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "color" not in columns:
+            logger.info("Adding color column to acts table")
+            conn.execute("ALTER TABLE acts ADD COLUMN color TEXT")
+
+    # Update schema version
+    conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
+    logger.info(f"Schema migrated to v{SCHEMA_VERSION}")
 
 
 def _now_iso() -> str:
@@ -398,13 +427,14 @@ def get_act(act_id: str) -> dict[str, Any] | None:
         "title": row["title"],
         "active": bool(row["active"]),
         "notes": row["notes"],
+        "color": row["color"] if "color" in row.keys() else None,
         "repo_path": row["repo_path"],
         "artifact_type": row["artifact_type"],
         "code_config": code_config,
     }
 
 
-def create_act(*, title: str, notes: str = "") -> tuple[list[dict[str, Any]], str]:
+def create_act(*, title: str, notes: str = "", color: str | None = None) -> tuple[list[dict[str, Any]], str]:
     """Create a new act."""
     act_id = _new_id("act")
     now = _now_iso()
@@ -415,9 +445,9 @@ def create_act(*, title: str, notes: str = "") -> tuple[list[dict[str, Any]], st
         position = cursor.fetchone()[0]
 
         conn.execute("""
-            INSERT INTO acts (act_id, title, active, notes, position, created_at, updated_at)
-            VALUES (?, ?, 0, ?, ?, ?, ?)
-        """, (act_id, title, notes, position, now, now))
+            INSERT INTO acts (act_id, title, active, notes, color, position, created_at, updated_at)
+            VALUES (?, ?, 0, ?, ?, ?, ?, ?)
+        """, (act_id, title, notes, color, position, now, now))
 
         # Create stage direction scene
         _ensure_stage_direction_scene_db(conn, act_id)
@@ -426,7 +456,13 @@ def create_act(*, title: str, notes: str = "") -> tuple[list[dict[str, Any]], st
     return acts, act_id
 
 
-def update_act(*, act_id: str, title: str | None = None, notes: str | None = None) -> tuple[list[dict[str, Any]], str | None]:
+def update_act(
+    *,
+    act_id: str,
+    title: str | None = None,
+    notes: str | None = None,
+    color: str | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
     """Update an act."""
     now = _now_iso()
 
@@ -442,6 +478,10 @@ def update_act(*, act_id: str, title: str | None = None, notes: str | None = Non
         if notes is not None:
             updates.append("notes = ?")
             params.append(notes)
+
+        if color is not None:
+            updates.append("color = ?")
+            params.append(color)
 
         params.append(act_id)
 

@@ -2150,7 +2150,7 @@ def _handle_play_acts_list(_db: Database) -> dict[str, Any]:
     return {
         "active_act_id": active_id,
         "acts": [
-            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path}
+            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path, "color": a.color}
             for a in acts
         ],
     }
@@ -2165,7 +2165,7 @@ def _handle_play_acts_set_active(_db: Database, *, act_id: str | None) -> dict[s
     return {
         "active_act_id": active_id,
         "acts": [
-            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path}
+            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path, "color": a.color}
             for a in acts
         ],
     }
@@ -2226,15 +2226,16 @@ def _handle_play_acts_update(
     act_id: str,
     title: str | None = None,
     notes: str | None = None,
+    color: str | None = None,
 ) -> dict[str, Any]:
     try:
-        acts, active_id = play_update_act(act_id=act_id, title=title, notes=notes)
+        acts, active_id = play_update_act(act_id=act_id, title=title, notes=notes, color=color)
     except ValueError as exc:
         raise RpcError(code=-32602, message=str(exc)) from exc
     return {
         "active_act_id": active_id,
         "acts": [
-            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path}
+            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path, "color": a.color}
             for a in acts
         ],
     }
@@ -3086,10 +3087,10 @@ def _handle_cairn_attention(
 
     items = surfacer.surface_attention(hours=hours, limit=limit)
 
-    # Build act_id -> title lookup from play_fs
+    # Build act_id -> title/color lookup from play_fs
     from . import play_fs
     acts, _ = play_fs.list_acts()
-    act_titles = {a.act_id: a.title for a in acts}
+    act_info = {a.act_id: {"title": a.title, "color": a.color} for a in acts}
 
     return {
         "count": len(items),
@@ -3107,7 +3108,8 @@ def _handle_cairn_attention(
                 "next_occurrence": item.next_occurrence.isoformat() if item.next_occurrence else None,
                 "act_id": item.act_id,
                 "scene_id": item.scene_id,
-                "act_title": act_titles.get(item.act_id) if item.act_id else None,
+                "act_title": act_info.get(item.act_id, {}).get("title") if item.act_id else None,
+                "act_color": act_info.get(item.act_id, {}).get("color") if item.act_id else None,
             }
             for item in items
         ],
@@ -3685,15 +3687,18 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             act_id = params.get("act_id")
             title = params.get("title")
             notes = params.get("notes")
+            color = params.get("color")
             if not isinstance(act_id, str) or not act_id:
                 raise RpcError(code=-32602, message="act_id is required")
             if title is not None and not isinstance(title, str):
                 raise RpcError(code=-32602, message="title must be a string or null")
             if notes is not None and not isinstance(notes, str):
                 raise RpcError(code=-32602, message="notes must be a string or null")
+            if color is not None and not isinstance(color, str):
+                raise RpcError(code=-32602, message="color must be a string or null")
             return _jsonrpc_result(
                 req_id=req_id,
-                result=_handle_play_acts_update(db, act_id=act_id, title=title, notes=notes),
+                result=_handle_play_acts_update(db, act_id=act_id, title=title, notes=notes, color=color),
             )
 
         if method == "play/acts/set_active":

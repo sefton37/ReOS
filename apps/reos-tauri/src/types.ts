@@ -346,7 +346,7 @@ export type PlayMeReadResult = {
 
 export type PlayActsListResult = {
   active_act_id: string | null;
-  acts: Array<{ act_id: string; title: string; active: boolean; notes: string; repo_path: string | null }>;
+  acts: Array<{ act_id: string; title: string; active: boolean; notes: string; repo_path: string | null; color: string | null }>;
 };
 
 export type PlayScenesListResult = {

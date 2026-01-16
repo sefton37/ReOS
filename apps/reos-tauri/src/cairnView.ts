@@ -56,7 +56,7 @@ export function createCairnView(
   hideThinking: () => void;
   clearChat: () => void;
   getChatInput: () => HTMLInputElement;
-  updateSurfaced: (items: Array<{ title: string; reason: string; urgency: string; is_recurring?: boolean; recurrence_frequency?: string }>) => void;
+  updateSurfaced: (items: Array<{ title: string; reason: string; urgency: string; is_recurring?: boolean; recurrence_frequency?: string; act_color?: string }>) => void;
 } {
   const state: CairnViewState = {
     chatMessages: [],
@@ -990,6 +990,7 @@ export function createCairnView(
     act_id?: string;
     scene_id?: string;
     act_title?: string;
+    act_color?: string;
   }>): void {
     // Compute fingerprint to detect changes and avoid unnecessary re-renders
     const newFingerprint = JSON.stringify(items.map(i => ({
@@ -1042,9 +1043,10 @@ export function createCairnView(
         ? `<span title="Recurring ${item.recurrence_frequency?.toLowerCase() || ''}" style="font-size: 11px; margin-left: 4px;">🔄</span>`
         : '';
 
-      // Act label
+      // Act label with dynamic color
+      const actColor = item.act_color || '#9333ea';  // Default to purple if no color set
       const actLabel = item.act_title
-        ? `<span style="font-size: 10px; margin-left: 6px; padding: 2px 6px; background: rgba(147, 51, 234, 0.2); color: #a78bfa; border-radius: 4px;">Act: ${escapeHtml(item.act_title)}</span>`
+        ? `<span style="font-size: 10px; margin-left: 6px; padding: 2px 6px; background: ${actColor}33; color: ${actColor}; border-radius: 4px;">Act: ${escapeHtml(item.act_title)}</span>`
         : '';
 
       itemEl.innerHTML = `

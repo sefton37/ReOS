@@ -66,6 +66,24 @@ def _migrate_status_to_stage(status: str) -> str:
     return mapping.get(status.lower().strip(), BeatStage.PLANNING.value)
 
 
+# Color palette for Acts - visually distinct colors that work well in UI
+# Each color is a tuple of (background_rgba, text_hex) for light theme compatibility
+ACT_COLOR_PALETTE: list[str] = [
+    "#8b5cf6",  # Purple (violet-500)
+    "#3b82f6",  # Blue (blue-500)
+    "#10b981",  # Green (emerald-500)
+    "#f59e0b",  # Amber (amber-500)
+    "#ef4444",  # Red (red-500)
+    "#ec4899",  # Pink (pink-500)
+    "#06b6d4",  # Cyan (cyan-500)
+    "#84cc16",  # Lime (lime-500)
+    "#f97316",  # Orange (orange-500)
+    "#6366f1",  # Indigo (indigo-500)
+    "#14b8a6",  # Teal (teal-500)
+    "#a855f7",  # Fuchsia (purple-500)
+]
+
+
 @dataclass(frozen=True)
 class Act:
     """An Act in The Play - a major phase or project.
@@ -78,6 +96,7 @@ class Act:
     title: str
     active: bool = False
     notes: str = ""
+    color: str | None = None               # Hex color for UI display (e.g., "#8b5cf6")
     # Code Mode fields
     repo_path: str | None = None           # Absolute path to git repo
     artifact_type: str | None = None       # "python", "typescript", "rust", etc.
@@ -312,6 +331,7 @@ def _dict_to_act(d: dict[str, Any]) -> Act:
         title=d.get("title", ""),
         active=bool(d.get("active", False)),
         notes=d.get("notes", ""),
+        color=d.get("color"),
         repo_path=d.get("repo_path"),
         artifact_type=d.get("artifact_type"),
         code_config=d.get("code_config"),
@@ -634,21 +654,46 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex[:12]}"
 
 
-def create_act(*, title: str, notes: str = "") -> tuple[list[Act], str]:
+def _pick_unused_color(existing_acts: list[Act]) -> str:
+    """Pick a color from the palette that's not already in use.
+
+    If all colors are used, returns the first color in the palette.
+    Prefers colors that are most different from existing ones.
+    """
+    used_colors = {a.color for a in existing_acts if a.color}
+
+    # Find unused colors
+    unused = [c for c in ACT_COLOR_PALETTE if c not in used_colors]
+
+    if unused:
+        # Return the first unused color (maintains consistent assignment order)
+        return unused[0]
+
+    # All colors used - just return the first one
+    return ACT_COLOR_PALETTE[0]
+
+
+def create_act(*, title: str, notes: str = "", color: str | None = None) -> tuple[list[Act], str]:
     """Create a new Act with its mandatory Stage Direction scene.
 
     - Generates a stable act_id.
     - If no act is active yet, the new act becomes active.
     - Auto-creates a 'Stage Direction' scene as the default Beat container.
+    - Auto-assigns a color from the palette if not specified.
     """
     if not isinstance(title, str) or not title.strip():
         raise ValueError("title is required")
     if not isinstance(notes, str):
         raise ValueError("notes must be a string")
 
+    # Auto-assign color if not provided
+    if color is None:
+        existing_acts, _ = list_acts()
+        color = _pick_unused_color(existing_acts)
+
     if USE_SQLITE_BACKEND:
         from . import play_db
-        acts_data, act_id = play_db.create_act(title=title.strip(), notes=notes)
+        acts_data, act_id = play_db.create_act(title=title.strip(), notes=notes, color=color)
         acts = [_dict_to_act(d) for d in acts_data]
         # Still create directory for KB files
         _act_dir(act_id).mkdir(parents=True, exist_ok=True)
@@ -659,7 +704,7 @@ def create_act(*, title: str, notes: str = "") -> tuple[list[Act], str]:
     act_id = _new_id("act")
 
     is_active = active_id is None
-    acts.append(Act(act_id=act_id, title=title.strip(), active=is_active, notes=notes))
+    acts.append(Act(act_id=act_id, title=title.strip(), active=is_active, notes=notes, color=color))
     _write_acts(acts)
 
     # Ensure the act directory exists for scenes/kb.
@@ -671,18 +716,26 @@ def create_act(*, title: str, notes: str = "") -> tuple[list[Act], str]:
     return acts, act_id
 
 
-def update_act(*, act_id: str, title: str | None = None, notes: str | None = None) -> tuple[list[Act], str | None]:
-    """Update an Act's user-editable fields."""
+def update_act(
+    *,
+    act_id: str,
+    title: str | None = None,
+    notes: str | None = None,
+    color: str | None = None,
+) -> tuple[list[Act], str | None]:
+    """Update an Act's user-editable fields including color."""
     _validate_id(name="act_id", value=act_id)
 
     if title is not None and (not isinstance(title, str) or not title.strip()):
         raise ValueError("title must be a non-empty string")
     if notes is not None and not isinstance(notes, str):
         raise ValueError("notes must be a string")
+    if color is not None and not isinstance(color, str):
+        raise ValueError("color must be a string")
 
     if USE_SQLITE_BACKEND:
         from . import play_db
-        acts_data, active_id = play_db.update_act(act_id=act_id, title=title, notes=notes)
+        acts_data, active_id = play_db.update_act(act_id=act_id, title=title, notes=notes, color=color)
         acts = [_dict_to_act(d) for d in acts_data]
         return acts, active_id
 
@@ -701,6 +754,7 @@ def update_act(*, act_id: str, title: str | None = None, notes: str | None = Non
                 title=(title.strip() if isinstance(title, str) else a.title),
                 active=bool(a.active),
                 notes=(notes if isinstance(notes, str) else a.notes),
+                color=(color if color is not None else a.color),
                 repo_path=a.repo_path,
                 artifact_type=a.artifact_type,
                 code_config=a.code_config,
