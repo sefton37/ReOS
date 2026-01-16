@@ -1,0 +1,34 @@
+{
+  "manifest_version": 2,
+  "name": "Talking Rock Bridge",
+  "version": "1.0.0",
+  "description": "Enables ReOS to create/update/delete calendar events in Thunderbird",
+  "author": "ReOS",
+  "applications": {
+    "gecko": {
+      "id": "talking-rock-bridge@reos.local",
+      "strict_min_version": "115.0"
+    }
+  },
+  "permissions": [
+    "addressBooks",
+    "messagesRead"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "experiment_apis": {
+    "calendarBridge": {
+      "schema": "api/calendarBridge/schema.json",
+      "parent": {
+        "scopes": ["addon_parent"],
+        "paths": [["calendarBridge"]],
+        "script": "api/calendarBridge/implementation.js"
+      }
+    }
+  },
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png"
+  }
+}

@@ -1,6 +1,9 @@
 """Beat-Calendar Sync for CAIRN.
 
-Syncs calendar events from Thunderbird to Beats in The Play.
+Bidirectional sync between Thunderbird calendar and Beats:
+- Inbound: Syncs calendar events from Thunderbird to Beats
+- Outbound: Syncs Beats to Thunderbird calendar events
+
 ONE Beat per calendar event (recurring events are NOT expanded).
 """
 
@@ -15,6 +18,9 @@ if TYPE_CHECKING:
     from reos.cairn.thunderbird import ThunderbirdBridge
 
 logger = logging.getLogger(__name__)
+
+# Placeholder date for Beats without a specific date (Dec 31, 2099)
+PLACEHOLDER_DATE = datetime(2099, 12, 31, 12, 0, 0)
 
 
 def get_next_occurrence(rrule_str: str, dtstart: datetime, after: datetime | None = None) -> datetime | None:
@@ -356,3 +362,197 @@ def get_base_calendar_events(
     except Exception as e:
         logger.warning("Failed to get base calendar events: %s", e)
         return []
+
+
+# =============================================================================
+# Outbound Sync: Beat -> Thunderbird Calendar
+# =============================================================================
+
+
+def sync_beat_to_calendar(
+    beat_id: str,
+    title: str,
+    start_date: datetime | None = None,
+    notes: str | None = None,
+) -> str | None:
+    """Create a Thunderbird calendar event for a Beat.
+
+    This is called when a new Beat is created and outbound sync is enabled.
+    Uses a placeholder date (Dec 31, 2099) if no date is specified.
+
+    Args:
+        beat_id: The Beat ID (for logging).
+        title: Beat title (used as event title).
+        start_date: Event date (default: placeholder date).
+        notes: Beat notes (used as event description).
+
+    Returns:
+        The Thunderbird event ID if created, None otherwise.
+    """
+    try:
+        from reos.cairn.thunderbird_bridge import create_calendar_event_for_beat
+    except ImportError:
+        logger.debug("Thunderbird bridge not available")
+        return None
+
+    event_id = create_calendar_event_for_beat(
+        title=title,
+        start_date=start_date,
+        notes=notes,
+    )
+
+    if event_id:
+        logger.debug("Created Thunderbird event %s for Beat %s", event_id, beat_id)
+
+    return event_id
+
+
+def update_beat_calendar_event(
+    thunderbird_event_id: str,
+    title: str | None = None,
+    start_date: datetime | None = None,
+    notes: str | None = None,
+) -> bool:
+    """Update the Thunderbird calendar event for a Beat.
+
+    Args:
+        thunderbird_event_id: The Thunderbird event ID to update.
+        title: New title (optional).
+        start_date: New date (optional).
+        notes: New notes/description (optional).
+
+    Returns:
+        True if updated, False otherwise.
+    """
+    try:
+        from reos.cairn.thunderbird_bridge import update_calendar_event_for_beat
+    except ImportError:
+        logger.debug("Thunderbird bridge not available")
+        return False
+
+    return update_calendar_event_for_beat(
+        event_id=thunderbird_event_id,
+        title=title,
+        start_date=start_date,
+        notes=notes,
+    )
+
+
+def delete_beat_calendar_event(thunderbird_event_id: str) -> bool:
+    """Delete the Thunderbird calendar event for a Beat.
+
+    Args:
+        thunderbird_event_id: The Thunderbird event ID to delete.
+
+    Returns:
+        True if deleted (or already gone), False otherwise.
+    """
+    try:
+        from reos.cairn.thunderbird_bridge import delete_calendar_event_for_beat
+    except ImportError:
+        logger.debug("Thunderbird bridge not available")
+        return False
+
+    return delete_calendar_event_for_beat(event_id=thunderbird_event_id)
+
+
+def is_outbound_sync_available() -> bool:
+    """Check if outbound sync to Thunderbird is available.
+
+    Returns:
+        True if the Talking Rock Bridge add-on is running.
+    """
+    try:
+        from reos.cairn.thunderbird_bridge import is_bridge_available
+        return is_bridge_available()
+    except ImportError:
+        return False
+
+
+def create_beat_with_calendar_sync(
+    act_id: str,
+    scene_id: str,
+    title: str,
+    stage: str = "",
+    notes: str = "",
+    start_date: datetime | None = None,
+    link: str | None = None,
+    calendar_event_id: str | None = None,
+    recurrence_rule: str | None = None,
+    enable_outbound_sync: bool = True,
+) -> tuple[list, str | None]:
+    """Create a Beat with optional outbound calendar sync.
+
+    If outbound sync is enabled and the Talking Rock Bridge is available,
+    creates a corresponding Thunderbird calendar event.
+
+    Args:
+        act_id: The Act ID.
+        scene_id: The Scene ID.
+        title: Beat title.
+        stage: BeatStage value.
+        notes: Beat notes.
+        start_date: Optional date for the Beat's calendar event.
+        link: Optional external link.
+        calendar_event_id: Inbound sync - existing calendar event ID.
+        recurrence_rule: RRULE string if recurring.
+        enable_outbound_sync: Whether to create a Thunderbird event.
+
+    Returns:
+        Tuple of (list of Beats, thunderbird_event_id or None).
+    """
+    from reos.play_fs import create_beat
+
+    thunderbird_event_id = None
+
+    # Only do outbound sync if:
+    # 1. Enabled
+    # 2. No inbound calendar_event_id (don't duplicate events)
+    # 3. Bridge is available
+    if enable_outbound_sync and not calendar_event_id and is_outbound_sync_available():
+        thunderbird_event_id = sync_beat_to_calendar(
+            beat_id="pending",  # We don't have the ID yet
+            title=title,
+            start_date=start_date,
+            notes=notes,
+        )
+
+    beats = create_beat(
+        act_id=act_id,
+        scene_id=scene_id,
+        title=title,
+        stage=stage,
+        notes=notes,
+        link=link,
+        calendar_event_id=calendar_event_id,
+        recurrence_rule=recurrence_rule,
+        thunderbird_event_id=thunderbird_event_id,
+    )
+
+    return beats, thunderbird_event_id
+
+
+def delete_beat_with_calendar_sync(
+    act_id: str,
+    scene_id: str,
+    beat_id: str,
+    thunderbird_event_id: str | None = None,
+) -> list:
+    """Delete a Beat and its corresponding Thunderbird calendar event.
+
+    Args:
+        act_id: The Act ID.
+        scene_id: The Scene ID.
+        beat_id: The Beat ID to delete.
+        thunderbird_event_id: The Thunderbird event ID to delete (if any).
+
+    Returns:
+        List of remaining Beats in the scene.
+    """
+    from reos.play_fs import delete_beat
+
+    # Delete the Thunderbird event first (if exists)
+    if thunderbird_event_id:
+        delete_beat_calendar_event(thunderbird_event_id)
+
+    return delete_beat(act_id=act_id, scene_id=scene_id, beat_id=beat_id)

@@ -31,7 +31,8 @@ _local = threading.local()
 # Schema version for migrations
 # v1: Initial schema
 # v2: Added color column to acts table
-SCHEMA_VERSION = 2
+# v3: Added thunderbird_event_id column to beats table
+SCHEMA_VERSION = 3
 
 
 def _play_db_path() -> Path:
@@ -54,6 +55,19 @@ def _get_connection() -> sqlite3.Connection:
     return _local.conn
 
 
+def close_connection() -> None:
+    """Close the thread-local database connection.
+
+    This is primarily used for testing to ensure clean state between tests.
+    """
+    if hasattr(_local, "conn") and _local.conn is not None:
+        try:
+            _local.conn.close()
+        except Exception:
+            pass
+        _local.conn = None
+
+
 @contextmanager
 def _transaction() -> Iterator[sqlite3.Connection]:
     """Context manager for database transactions."""
@@ -68,6 +82,7 @@ def _transaction() -> Iterator[sqlite3.Connection]:
 
 def _init_schema(conn: sqlite3.Connection) -> None:
     """Initialize the database schema."""
+    # Step 1: Create tables (without indexes that depend on new columns)
     conn.executescript("""
         -- Schema version tracking
         CREATE TABLE IF NOT EXISTS schema_version (
@@ -116,6 +131,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             link TEXT,
             calendar_event_id TEXT,
             recurrence_rule TEXT,
+            thunderbird_event_id TEXT,  -- Outbound sync: TB event created for this Beat
             position INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -151,6 +167,13 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         # Run migrations
         _run_schema_migrations(conn, current_version)
 
+    # Step 2: Create indexes that depend on potentially new columns (after migrations)
+    # This ensures columns exist before creating indexes on them
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_beats_thunderbird_event "
+        "ON beats(thunderbird_event_id)"
+    )
+
 
 def _run_schema_migrations(conn: sqlite3.Connection, current_version: int) -> None:
     """Run schema migrations from current_version to SCHEMA_VERSION."""
@@ -167,6 +190,16 @@ def _run_schema_migrations(conn: sqlite3.Connection, current_version: int) -> No
         if "color" not in columns:
             logger.info("Adding color column to acts table")
             conn.execute("ALTER TABLE acts ADD COLUMN color TEXT")
+
+    # Migration v2 -> v3: Add thunderbird_event_id column to beats table
+    if current_version < 3 and current_version > 0:
+        # Check if thunderbird_event_id column already exists
+        cursor = conn.execute("PRAGMA table_info(beats)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "thunderbird_event_id" not in columns:
+            logger.info("Adding thunderbird_event_id column to beats table")
+            conn.execute("ALTER TABLE beats ADD COLUMN thunderbird_event_id TEXT")
+        # Note: Index is created after _init_schema completes
 
     # Update schema version
     conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
@@ -655,7 +688,8 @@ def list_beats(act_id: str, scene_id: str) -> list[dict[str, Any]]:
     conn = _get_connection()
 
     cursor = conn.execute("""
-        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id, recurrence_rule
+        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id,
+               recurrence_rule, thunderbird_event_id
         FROM beats
         WHERE scene_id = ?
         ORDER BY position ASC
@@ -671,6 +705,7 @@ def list_beats(act_id: str, scene_id: str) -> list[dict[str, Any]]:
             "link": row["link"],
             "calendar_event_id": row["calendar_event_id"],
             "recurrence_rule": row["recurrence_rule"],
+            "thunderbird_event_id": row["thunderbird_event_id"],
         }
         for row in cursor
     ]
@@ -680,7 +715,8 @@ def get_beat(beat_id: str) -> dict[str, Any] | None:
     """Get a beat by ID."""
     conn = _get_connection()
     cursor = conn.execute("""
-        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id, recurrence_rule
+        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id,
+               recurrence_rule, thunderbird_event_id
         FROM beats WHERE beat_id = ?
     """, (beat_id,))
 
@@ -697,12 +733,14 @@ def get_beat(beat_id: str) -> dict[str, Any] | None:
         "link": row["link"],
         "calendar_event_id": row["calendar_event_id"],
         "recurrence_rule": row["recurrence_rule"],
+        "thunderbird_event_id": row["thunderbird_event_id"],
     }
 
 
 def create_beat(*, act_id: str, scene_id: str, title: str, stage: str = "planning",
                 notes: str = "", link: str | None = None, calendar_event_id: str | None = None,
-                recurrence_rule: str | None = None) -> tuple[list[dict[str, Any]], str]:
+                recurrence_rule: str | None = None,
+                thunderbird_event_id: str | None = None) -> tuple[list[dict[str, Any]], str]:
     """Create a new beat."""
     beat_id = _new_id("beat")
     now = _now_iso()
@@ -717,16 +755,19 @@ def create_beat(*, act_id: str, scene_id: str, title: str, stage: str = "plannin
 
         conn.execute("""
             INSERT INTO beats
-            (beat_id, scene_id, title, stage, notes, link, calendar_event_id, recurrence_rule, position, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (beat_id, scene_id, title, stage, notes, link, calendar_event_id, recurrence_rule, position, now, now))
+            (beat_id, scene_id, title, stage, notes, link, calendar_event_id, recurrence_rule,
+             thunderbird_event_id, position, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (beat_id, scene_id, title, stage, notes, link, calendar_event_id, recurrence_rule,
+              thunderbird_event_id, position, now, now))
 
     return list_beats(act_id, scene_id), beat_id
 
 
 def update_beat(*, act_id: str, scene_id: str, beat_id: str, title: str | None = None,
                 stage: str | None = None, notes: str | None = None, link: str | None = None,
-                calendar_event_id: str | None = None, recurrence_rule: str | None = None) -> list[dict[str, Any]]:
+                calendar_event_id: str | None = None, recurrence_rule: str | None = None,
+                thunderbird_event_id: str | None = None) -> list[dict[str, Any]]:
     """Update a beat."""
     now = _now_iso()
 
@@ -752,6 +793,9 @@ def update_beat(*, act_id: str, scene_id: str, beat_id: str, title: str | None =
         if recurrence_rule is not None:
             updates.append("recurrence_rule = ?")
             params.append(recurrence_rule if recurrence_rule else None)
+        if thunderbird_event_id is not None:
+            updates.append("thunderbird_event_id = ?")
+            params.append(thunderbird_event_id if thunderbird_event_id else None)
 
         params.append(beat_id)
 
@@ -829,11 +873,12 @@ def find_beat_location(beat_id: str) -> dict[str, str | None] | None:
 
 
 def find_beat_by_calendar_event(calendar_event_id: str) -> dict[str, Any] | None:
-    """Find a beat by its calendar event ID."""
+    """Find a beat by its calendar event ID (inbound sync)."""
     conn = _get_connection()
 
     cursor = conn.execute("""
-        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id, recurrence_rule
+        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id,
+               recurrence_rule, thunderbird_event_id
         FROM beats WHERE calendar_event_id = ?
     """, (calendar_event_id,))
 
@@ -850,7 +895,68 @@ def find_beat_by_calendar_event(calendar_event_id: str) -> dict[str, Any] | None
         "link": row["link"],
         "calendar_event_id": row["calendar_event_id"],
         "recurrence_rule": row["recurrence_rule"],
+        "thunderbird_event_id": row["thunderbird_event_id"],
     }
+
+
+def find_beat_by_thunderbird_event(thunderbird_event_id: str) -> dict[str, Any] | None:
+    """Find a beat by its Thunderbird event ID (outbound sync)."""
+    conn = _get_connection()
+
+    cursor = conn.execute("""
+        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id,
+               recurrence_rule, thunderbird_event_id
+        FROM beats WHERE thunderbird_event_id = ?
+    """, (thunderbird_event_id,))
+
+    row = cursor.fetchone()
+    if not row:
+        return None
+
+    return {
+        "beat_id": row["beat_id"],
+        "scene_id": row["scene_id"],
+        "title": row["title"],
+        "stage": row["stage"],
+        "notes": row["notes"],
+        "link": row["link"],
+        "calendar_event_id": row["calendar_event_id"],
+        "recurrence_rule": row["recurrence_rule"],
+        "thunderbird_event_id": row["thunderbird_event_id"],
+    }
+
+
+def set_beat_thunderbird_event_id(beat_id: str, thunderbird_event_id: str | None) -> bool:
+    """Set the Thunderbird event ID for a Beat (outbound sync).
+
+    Args:
+        beat_id: The Beat ID to update.
+        thunderbird_event_id: The Thunderbird event ID, or None to clear.
+
+    Returns:
+        True if updated, False if beat not found.
+    """
+    now = _now_iso()
+
+    with _transaction() as conn:
+        cursor = conn.execute("""
+            UPDATE beats SET thunderbird_event_id = ?, updated_at = ?
+            WHERE beat_id = ?
+        """, (thunderbird_event_id, now, beat_id))
+
+        return cursor.rowcount > 0
+
+
+def clear_beat_thunderbird_event_id(beat_id: str) -> bool:
+    """Clear the Thunderbird event ID for a Beat.
+
+    Args:
+        beat_id: The Beat ID to update.
+
+    Returns:
+        True if updated, False if beat not found.
+    """
+    return set_beat_thunderbird_event_id(beat_id, None)
 
 
 # =============================================================================

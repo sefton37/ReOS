@@ -119,6 +119,10 @@ class Beat:
 
     Beats can be linked to calendar events. For recurring events,
     ONE Beat represents the entire series (not expanded occurrences).
+
+    Calendar integration fields:
+    - calendar_event_id: Inbound sync - ID of the Thunderbird event this Beat reflects
+    - thunderbird_event_id: Outbound sync - ID of the Thunderbird event created for this Beat
     """
     beat_id: str
     title: str
@@ -126,8 +130,9 @@ class Beat:
     notes: str
     link: str | None = None
     # Calendar integration fields
-    calendar_event_id: str | None = None  # Source calendar event ID
-    recurrence_rule: str | None = None    # RRULE string if recurring
+    calendar_event_id: str | None = None      # Inbound sync: TB event that Beat reflects
+    recurrence_rule: str | None = None        # RRULE string if recurring
+    thunderbird_event_id: str | None = None   # Outbound sync: TB event created for Beat
 
 
 @dataclass(frozen=True)
@@ -360,6 +365,7 @@ def _dict_to_beat(d: dict[str, Any]) -> Beat:
         link=d.get("link"),
         calendar_event_id=d.get("calendar_event_id"),
         recurrence_rule=d.get("recurrence_rule"),
+        thunderbird_event_id=d.get("thunderbird_event_id"),
     )
 
 
@@ -587,6 +593,9 @@ def list_beats(*, act_id: str, scene_id: str) -> list[Beat]:
             recurrence_rule = b.get("recurrence_rule")
             if recurrence_rule is not None and not isinstance(recurrence_rule, str):
                 recurrence_rule = None
+            thunderbird_event_id = b.get("thunderbird_event_id")
+            if thunderbird_event_id is not None and not isinstance(thunderbird_event_id, str):
+                thunderbird_event_id = None
 
             if not isinstance(beat_id, str) or not beat_id:
                 continue
@@ -604,6 +613,7 @@ def list_beats(*, act_id: str, scene_id: str) -> list[Beat]:
                     link=link,
                     calendar_event_id=calendar_event_id,
                     recurrence_rule=recurrence_rule,
+                    thunderbird_event_id=thunderbird_event_id,
                 )
             )
         return beats
@@ -1130,6 +1140,7 @@ def create_beat(
     link: str | None = None,
     calendar_event_id: str | None = None,
     recurrence_rule: str | None = None,
+    thunderbird_event_id: str | None = None,
 ) -> list[Beat]:
     """Create a Beat under a Scene.
 
@@ -1140,8 +1151,9 @@ def create_beat(
         stage: BeatStage value (planning, in_progress, awaiting_data, complete).
         notes: Optional notes.
         link: Optional external link.
-        calendar_event_id: Optional calendar event ID this Beat is linked to.
+        calendar_event_id: Optional calendar event ID this Beat is linked to (inbound sync).
         recurrence_rule: Optional RRULE string for recurring events.
+        thunderbird_event_id: Optional Thunderbird event ID created for this Beat (outbound sync).
     """
     _validate_id(name="act_id", value=act_id)
     _validate_id(name="scene_id", value=scene_id)
@@ -1157,6 +1169,8 @@ def create_beat(
         raise ValueError("calendar_event_id must be a string or null")
     if recurrence_rule is not None and not isinstance(recurrence_rule, str):
         raise ValueError("recurrence_rule must be a string or null")
+    if thunderbird_event_id is not None and not isinstance(thunderbird_event_id, str):
+        raise ValueError("thunderbird_event_id must be a string or null")
 
     # Default stage to PLANNING if not specified
     if not stage:
@@ -1167,7 +1181,8 @@ def create_beat(
         beats_data, _ = play_db.create_beat(
             act_id=act_id, scene_id=scene_id, title=title.strip(),
             stage=stage, notes=notes, link=link,
-            calendar_event_id=calendar_event_id, recurrence_rule=recurrence_rule
+            calendar_event_id=calendar_event_id, recurrence_rule=recurrence_rule,
+            thunderbird_event_id=thunderbird_event_id,
         )
         return [_dict_to_beat(d) for d in beats_data]
 
@@ -1205,6 +1220,8 @@ def create_beat(
             beat_data["calendar_event_id"] = calendar_event_id
         if recurrence_rule:
             beat_data["recurrence_rule"] = recurrence_rule
+        if thunderbird_event_id:
+            beat_data["thunderbird_event_id"] = thunderbird_event_id
 
         beats.append(beat_data)
         item = dict(item)
@@ -1310,6 +1327,8 @@ def update_beat(
                 beat_data["calendar_event_id"] = b["calendar_event_id"]
             if b.get("recurrence_rule"):
                 beat_data["recurrence_rule"] = b["recurrence_rule"]
+            if b.get("thunderbird_event_id"):
+                beat_data["thunderbird_event_id"] = b["thunderbird_event_id"]
 
             out_beats.append(beat_data)
 
