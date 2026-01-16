@@ -254,6 +254,11 @@ class TestToolsHandlers:
 class TestPlayHandlers:
     """Test Play (CAIRN knowledge base) RPC handlers."""
 
+    @pytest.fixture(autouse=True)
+    def isolate_play_data(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Isolate Play data to prevent tests from polluting real user data."""
+        monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
+
     def test_play_list_acts_returns_acts(self, db: Database) -> None:
         """play/acts/list should return all acts."""
         from reos.play_fs import list_acts, create_act
