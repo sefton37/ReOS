@@ -20,6 +20,8 @@ from reos.cairn.models import (
     ActivityType,
     ContactRelationship,
     KanbanState,
+    PendingConfirmation,
+    TOOLS_REQUIRING_CONFIRMATION,
     UndoContext,
 )
 from reos.cairn.store import CairnStore
@@ -938,6 +940,42 @@ def list_tools() -> list[Tool]:
                 },
             },
         ),
+        # =====================================================================
+        # Confirmation (for irreversible actions)
+        # =====================================================================
+        Tool(
+            name="cairn_confirm_action",
+            description=(
+                "Confirm a pending irreversible action. IMPORTANT: Only call this "
+                "AFTER the user has explicitly said 'yes', 'confirm', 'do it', or "
+                "similar approval. Never call this automatically."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "confirmation_id": {
+                        "type": "string",
+                        "description": "The confirmation ID shown to user (optional if only one pending)",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="cairn_cancel_action",
+            description=(
+                "Cancel a pending irreversible action. Use when user says 'no', "
+                "'cancel', 'never mind', or wants to abort the pending action."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "confirmation_id": {
+                        "type": "string",
+                        "description": "The confirmation ID to cancel (optional if only one pending)",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -1166,6 +1204,15 @@ class CairnToolHandler:
         # =====================================================================
         if name == "cairn_undo_last":
             return self._undo_last(args)
+
+        # =====================================================================
+        # Confirmation (for irreversible actions)
+        # =====================================================================
+        if name == "cairn_confirm_action":
+            return self._confirm_action(args)
+
+        if name == "cairn_cancel_action":
+            return self._cancel_action(args)
 
         raise CairnToolError(
             code="unknown_tool",
@@ -2303,20 +2350,14 @@ class CairnToolHandler:
             return {"success": False, "error": str(e)}
 
     def _delete_act(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Delete an act."""
+        """Delete an act. Requires explicit user confirmation."""
         from reos import play_fs
 
         act_name = args.get("act_name")
-        confirm = args.get("confirm", False)
+        confirmation_id = args.get("_confirmation_id")  # Internal: set by confirm_action
 
         if not act_name:
             raise CairnToolError("missing_param", "act_name is required")
-        if not confirm:
-            return {
-                "success": False,
-                "error": "Deletion requires confirm=true",
-                "message": "Set confirm=true to delete this Act and all its contents.",
-            }
 
         acts, _ = play_fs.list_acts()
         act_lookup = [(a.act_id, a.title) for a in acts]
@@ -2338,6 +2379,32 @@ class CairnToolHandler:
                 "error": "Cannot delete 'Your Story' - it is a protected system Act",
             }
 
+        # Check if this execution has been confirmed
+        if not confirmation_id:
+            # Count scenes and beats to show impact
+            scenes = play_fs.list_scenes(act_id=act_id)
+            beat_count = sum(
+                len(play_fs.list_beats(act_id=act_id, scene_id=s.scene_id))
+                for s in scenes
+            )
+
+            # Create pending confirmation - user must explicitly approve
+            pending = self.store.create_pending_confirmation(
+                tool_name="cairn_delete_act",
+                tool_args={"act_name": act_name},
+                description=f"Delete Act '{act_title}' with {len(scenes)} scenes and {beat_count} beats",
+                warning="This will permanently delete the Act and ALL its contents (scenes, beats).",
+            )
+            return {
+                "success": False,
+                "awaiting_confirmation": True,
+                "confirmation_id": pending.confirmation_id,
+                "action": f"Delete Act '{act_title}'",
+                "warning": f"This will permanently delete '{act_title}' including {len(scenes)} scenes and {beat_count} beats.",
+                "message": f"⚠️ Are you sure you want to delete Act '{act_title}' and all its contents? Say 'yes' or 'confirm' to proceed, or 'cancel' to abort.",
+            }
+
+        # Execution is confirmed - proceed with delete
         try:
             play_fs.delete_act(act_id=act_id)
             return {
@@ -2529,22 +2596,17 @@ class CairnToolHandler:
             return {"success": False, "error": str(e)}
 
     def _delete_scene(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Delete a scene."""
+        """Delete a scene. Requires explicit user confirmation."""
         from reos import play_fs
 
         act_name = args.get("act_name")
         scene_name = args.get("scene_name")
-        confirm = args.get("confirm", False)
+        confirmation_id = args.get("_confirmation_id")  # Internal: set by confirm_action
 
         if not act_name:
             raise CairnToolError("missing_param", "act_name is required")
         if not scene_name:
             raise CairnToolError("missing_param", "scene_name is required")
-        if not confirm:
-            return {
-                "success": False,
-                "error": "Deletion requires confirm=true",
-            }
 
         acts, _ = play_fs.list_acts()
         act_lookup = [(a.act_id, a.title) for a in acts]
@@ -2576,6 +2638,28 @@ class CairnToolHandler:
                 "error": "Cannot delete 'Stage Direction' - it is a protected system Scene",
             }
 
+        # Check if this execution has been confirmed
+        if not confirmation_id:
+            # Count beats to show impact
+            beats = play_fs.list_beats(act_id=act_id, scene_id=scene_id)
+
+            # Create pending confirmation - user must explicitly approve
+            pending = self.store.create_pending_confirmation(
+                tool_name="cairn_delete_scene",
+                tool_args={"act_name": act_name, "scene_name": scene_name},
+                description=f"Delete Scene '{scene_title}' from Act '{act_title}' with {len(beats)} beats",
+                warning="This will permanently delete the Scene and ALL its beats.",
+            )
+            return {
+                "success": False,
+                "awaiting_confirmation": True,
+                "confirmation_id": pending.confirmation_id,
+                "action": f"Delete Scene '{scene_title}'",
+                "warning": f"This will permanently delete '{scene_title}' including {len(beats)} beats.",
+                "message": f"⚠️ Are you sure you want to delete Scene '{scene_title}' and all its beats? Say 'yes' or 'confirm' to proceed, or 'cancel' to abort.",
+            }
+
+        # Execution is confirmed - proceed with delete
         try:
             play_fs.delete_scene(act_id=act_id, scene_id=scene_id)
             return {
@@ -2721,21 +2805,16 @@ class CairnToolHandler:
             return {"success": False, "error": str(e)}
 
     def _delete_beat(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Delete a beat."""
+        """Delete a beat. Requires explicit user confirmation."""
         from reos import play_fs
 
         beat_name = args.get("beat_name")
-        confirm = args.get("confirm", False)
+        confirmation_id = args.get("_confirmation_id")  # Internal: set by confirm_action
 
         if not beat_name:
             raise CairnToolError("missing_param", "beat_name is required")
-        if not confirm:
-            return {
-                "success": False,
-                "error": "Deletion requires confirm=true",
-            }
 
-        # Find the beat
+        # Find the beat first to get accurate details
         acts, _ = play_fs.list_acts()
         all_beats = []
 
@@ -2768,6 +2847,25 @@ class CairnToolHandler:
                 act_title = act.title
                 break
 
+        # Check if this execution has been confirmed
+        if not confirmation_id:
+            # Create pending confirmation - user must explicitly approve
+            pending = self.store.create_pending_confirmation(
+                tool_name="cairn_delete_beat",
+                tool_args={"beat_name": beat_name},
+                description=f"Delete Beat '{beat_title}' from Act '{act_title}'",
+                warning="This action cannot be undone. The Beat and all its data will be permanently deleted.",
+            )
+            return {
+                "success": False,
+                "awaiting_confirmation": True,
+                "confirmation_id": pending.confirmation_id,
+                "action": f"Delete Beat '{beat_title}'",
+                "warning": "This action cannot be undone. The Beat will be permanently deleted.",
+                "message": f"⚠️ Are you sure you want to delete '{beat_title}'? Say 'yes' or 'confirm' to proceed, or 'cancel' to abort.",
+            }
+
+        # Execution is confirmed - proceed with delete
         try:
             play_fs.delete_beat(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
 
@@ -2904,3 +3002,119 @@ class CairnToolHandler:
             code="unknown_reverse_tool",
             message=f"No handler for reverse tool: {tool_name}",
         )
+
+    # =========================================================================
+    # Confirmation Handlers (for irreversible actions)
+    # =========================================================================
+
+    def _confirm_action(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Confirm a pending irreversible action and execute it.
+
+        IMPORTANT: This should only be called AFTER the user has explicitly
+        said 'yes', 'confirm', 'do it', or similar approval.
+        """
+        confirmation_id = args.get("confirmation_id")
+
+        # Get pending confirmation (by ID or most recent)
+        if confirmation_id:
+            pending = self.store.get_pending_confirmation(confirmation_id)
+        else:
+            pending = self.store.get_latest_pending_confirmation()
+
+        if pending is None:
+            return {
+                "success": False,
+                "error": "No pending action to confirm",
+                "message": "There is no pending action waiting for confirmation.",
+            }
+
+        if pending.is_expired:
+            return {
+                "success": False,
+                "error": "Confirmation expired",
+                "message": f"The confirmation for '{pending.description}' has expired. Please request the action again.",
+            }
+
+        if not pending.is_actionable:
+            return {
+                "success": False,
+                "error": "Action already processed",
+                "message": "This action has already been confirmed, executed, or cancelled.",
+            }
+
+        # Mark as confirmed
+        if not self.store.confirm_pending(pending.confirmation_id):
+            return {
+                "success": False,
+                "error": "Could not confirm action",
+                "message": "Failed to confirm the pending action.",
+            }
+
+        # Execute the confirmed action
+        # Add the confirmation_id to args so the tool knows it's confirmed
+        tool_args = dict(pending.tool_args)
+        tool_args["_confirmation_id"] = pending.confirmation_id
+
+        # Dispatch to the appropriate tool
+        tool_methods = {
+            "cairn_delete_beat": self._delete_beat,
+            "cairn_delete_act": self._delete_act,
+            "cairn_delete_scene": self._delete_scene,
+        }
+
+        method = tool_methods.get(pending.tool_name)
+        if not method:
+            return {
+                "success": False,
+                "error": f"Unknown tool: {pending.tool_name}",
+            }
+
+        # Execute the tool
+        result = method(tool_args)
+
+        # Mark as executed if successful
+        if result.get("success"):
+            self.store.mark_confirmation_executed(pending.confirmation_id)
+
+        return result
+
+    def _cancel_action(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Cancel a pending irreversible action.
+
+        Use when the user says 'no', 'cancel', 'never mind', etc.
+        """
+        confirmation_id = args.get("confirmation_id")
+
+        # Get pending confirmation (by ID or most recent)
+        if confirmation_id:
+            pending = self.store.get_pending_confirmation(confirmation_id)
+        else:
+            pending = self.store.get_latest_pending_confirmation()
+
+        if pending is None:
+            return {
+                "success": False,
+                "error": "No pending action to cancel",
+                "message": "There is no pending action waiting for cancellation.",
+            }
+
+        if not pending.is_actionable:
+            return {
+                "success": False,
+                "error": "Action already processed",
+                "message": "This action has already been confirmed, executed, or cancelled.",
+            }
+
+        # Cancel the pending action
+        if self.store.cancel_pending(pending.confirmation_id):
+            return {
+                "success": True,
+                "message": f"Cancelled: {pending.description}",
+                "cancelled_action": pending.description,
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Could not cancel action",
+                "message": "Failed to cancel the pending action.",
+            }

@@ -286,6 +286,77 @@ class UndoContext:
 
 
 @dataclass
+class PendingConfirmation:
+    """An action awaiting explicit user confirmation.
+
+    Irreversible actions (like delete) must go through this confirmation flow
+    to ensure the user explicitly approves before execution.
+    """
+
+    confirmation_id: str                    # Unique ID for this pending action
+    tool_name: str                          # Tool that will be executed
+    tool_args: dict[str, Any]               # Arguments for the tool
+    description: str                        # Human-readable description of what will happen
+    warning: str                            # Why this needs confirmation
+    created_at: datetime                    # When the confirmation was requested
+    expires_at: datetime                    # Confirmation expires after this time
+    confirmed: bool = False                 # Has user confirmed?
+    executed: bool = False                  # Has action been executed?
+    cancelled: bool = False                 # Was it cancelled?
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for storage."""
+        return {
+            "confirmation_id": self.confirmation_id,
+            "tool_name": self.tool_name,
+            "tool_args": self.tool_args,
+            "description": self.description,
+            "warning": self.warning,
+            "created_at": self.created_at.isoformat(),
+            "expires_at": self.expires_at.isoformat(),
+            "confirmed": self.confirmed,
+            "executed": self.executed,
+            "cancelled": self.cancelled,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PendingConfirmation:
+        """Create from dictionary."""
+        return cls(
+            confirmation_id=data["confirmation_id"],
+            tool_name=data["tool_name"],
+            tool_args=data.get("tool_args", {}),
+            description=data.get("description", ""),
+            warning=data.get("warning", ""),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            expires_at=datetime.fromisoformat(data["expires_at"]),
+            confirmed=data.get("confirmed", False),
+            executed=data.get("executed", False),
+            cancelled=data.get("cancelled", False),
+        )
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if this confirmation has expired."""
+        return datetime.now() > self.expires_at
+
+    @property
+    def is_actionable(self) -> bool:
+        """Check if this confirmation can still be acted upon."""
+        return not self.is_expired and not self.executed and not self.cancelled
+
+
+# Tools that require explicit user confirmation before execution
+# These are irreversible operations that cannot be undone
+TOOLS_REQUIRING_CONFIRMATION: set[str] = {
+    "cairn_delete_act",
+    "cairn_delete_scene",
+    "cairn_delete_beat",
+    # Add future irreversible tools here
+}
+
+
+@dataclass
 class SurfacedItem:
     """An item surfaced by CAIRN for attention."""
 

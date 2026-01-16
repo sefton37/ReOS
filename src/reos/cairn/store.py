@@ -22,6 +22,7 @@ from reos.cairn.models import (
     ContactLink,
     ContactRelationship,
     KanbanState,
+    PendingConfirmation,
     PriorityQueueItem,
     UndoContext,
 )
@@ -194,6 +195,26 @@ class CairnStore:
                     ON extended_thinking_traces(conversation_id);
                 CREATE INDEX IF NOT EXISTS idx_ext_thinking_decision
                     ON extended_thinking_traces(decision);
+
+                -- Pending confirmations for irreversible actions
+                -- These require explicit user approval before execution
+                CREATE TABLE IF NOT EXISTS pending_confirmations (
+                    confirmation_id TEXT PRIMARY KEY,
+                    tool_name TEXT NOT NULL,
+                    tool_args_json TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    warning TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    confirmed INTEGER DEFAULT 0,
+                    executed INTEGER DEFAULT 0,
+                    cancelled INTEGER DEFAULT 0
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_pending_confirmations_created
+                    ON pending_confirmations(created_at);
+                CREATE INDEX IF NOT EXISTS idx_pending_confirmations_status
+                    ON pending_confirmations(confirmed, executed, cancelled);
             """)
 
             # Migrations for existing databases
@@ -681,6 +702,222 @@ class CairnStore:
 
             except json.JSONDecodeError:
                 return False
+
+    # =========================================================================
+    # Pending Confirmations (Irreversible Action Guard)
+    # =========================================================================
+
+    def create_pending_confirmation(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        description: str,
+        warning: str,
+        expires_in_minutes: int = 5,
+    ) -> PendingConfirmation:
+        """Create a pending confirmation for an irreversible action.
+
+        The action will not execute until explicitly confirmed by the user.
+
+        Args:
+            tool_name: Name of the tool to execute.
+            tool_args: Arguments for the tool.
+            description: Human-readable description of what will happen.
+            warning: Why this action needs confirmation.
+            expires_in_minutes: How long until confirmation expires (default 5 min).
+
+        Returns:
+            PendingConfirmation object with unique ID.
+        """
+        confirmation_id = str(uuid.uuid4())[:8]  # Short ID for easy reference
+        now = datetime.now()
+        expires_at = now + timedelta(minutes=expires_in_minutes)
+
+        pending = PendingConfirmation(
+            confirmation_id=confirmation_id,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            description=description,
+            warning=warning,
+            created_at=now,
+            expires_at=expires_at,
+        )
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO pending_confirmations (
+                    confirmation_id, tool_name, tool_args_json, description,
+                    warning, created_at, expires_at, confirmed, executed, cancelled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0)
+                """,
+                (
+                    confirmation_id,
+                    tool_name,
+                    json.dumps(tool_args),
+                    description,
+                    warning,
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+
+        return pending
+
+    def get_pending_confirmation(
+        self,
+        confirmation_id: str,
+    ) -> PendingConfirmation | None:
+        """Get a pending confirmation by ID.
+
+        Args:
+            confirmation_id: The confirmation ID.
+
+        Returns:
+            PendingConfirmation if found, None otherwise.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM pending_confirmations WHERE confirmation_id = ?",
+                (confirmation_id,),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            return PendingConfirmation(
+                confirmation_id=row["confirmation_id"],
+                tool_name=row["tool_name"],
+                tool_args=json.loads(row["tool_args_json"]),
+                description=row["description"],
+                warning=row["warning"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                expires_at=datetime.fromisoformat(row["expires_at"]),
+                confirmed=bool(row["confirmed"]),
+                executed=bool(row["executed"]),
+                cancelled=bool(row["cancelled"]),
+            )
+
+    def get_latest_pending_confirmation(self) -> PendingConfirmation | None:
+        """Get the most recent actionable pending confirmation.
+
+        Returns:
+            Most recent PendingConfirmation that can still be acted upon, or None.
+        """
+        now = datetime.now().isoformat()
+
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM pending_confirmations
+                WHERE confirmed = 0 AND executed = 0 AND cancelled = 0
+                    AND expires_at > ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (now,),
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            return PendingConfirmation(
+                confirmation_id=row["confirmation_id"],
+                tool_name=row["tool_name"],
+                tool_args=json.loads(row["tool_args_json"]),
+                description=row["description"],
+                warning=row["warning"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                expires_at=datetime.fromisoformat(row["expires_at"]),
+                confirmed=bool(row["confirmed"]),
+                executed=bool(row["executed"]),
+                cancelled=bool(row["cancelled"]),
+            )
+
+    def confirm_pending(self, confirmation_id: str) -> bool:
+        """Mark a pending confirmation as confirmed by user.
+
+        Args:
+            confirmation_id: The confirmation ID.
+
+        Returns:
+            True if confirmed, False if not found or not actionable.
+        """
+        now = datetime.now().isoformat()
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE pending_confirmations
+                SET confirmed = 1
+                WHERE confirmation_id = ?
+                    AND confirmed = 0 AND executed = 0 AND cancelled = 0
+                    AND expires_at > ?
+                """,
+                (confirmation_id, now),
+            )
+            return cursor.rowcount > 0
+
+    def mark_confirmation_executed(self, confirmation_id: str) -> bool:
+        """Mark a confirmed action as executed.
+
+        Args:
+            confirmation_id: The confirmation ID.
+
+        Returns:
+            True if marked, False if not found.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE pending_confirmations
+                SET executed = 1
+                WHERE confirmation_id = ? AND confirmed = 1
+                """,
+                (confirmation_id,),
+            )
+            return cursor.rowcount > 0
+
+    def cancel_pending(self, confirmation_id: str) -> bool:
+        """Cancel a pending confirmation.
+
+        Args:
+            confirmation_id: The confirmation ID.
+
+        Returns:
+            True if cancelled, False if not found or already actioned.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE pending_confirmations
+                SET cancelled = 1
+                WHERE confirmation_id = ?
+                    AND confirmed = 0 AND executed = 0 AND cancelled = 0
+                """,
+                (confirmation_id,),
+            )
+            return cursor.rowcount > 0
+
+    def cleanup_expired_confirmations(self) -> int:
+        """Clean up expired pending confirmations.
+
+        Returns:
+            Number of confirmations cancelled.
+        """
+        now = datetime.now().isoformat()
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE pending_confirmations
+                SET cancelled = 1
+                WHERE confirmed = 0 AND executed = 0 AND cancelled = 0
+                    AND expires_at <= ?
+                """,
+                (now,),
+            )
+            return cursor.rowcount
 
     # =========================================================================
     # Beat-Calendar Event Links
