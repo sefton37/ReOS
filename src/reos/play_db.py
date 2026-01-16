@@ -370,7 +370,7 @@ def list_acts() -> tuple[list[dict[str, Any]], str | None]:
     conn = _get_connection()
 
     cursor = conn.execute("""
-        SELECT act_id, title, active, notes, repo_path, artifact_type, code_config
+        SELECT act_id, title, active, notes, repo_path, artifact_type, code_config, color
         FROM acts
         ORDER BY position ASC
     """)
@@ -394,6 +394,7 @@ def list_acts() -> tuple[list[dict[str, Any]], str | None]:
             "repo_path": row["repo_path"],
             "artifact_type": row["artifact_type"],
             "code_config": code_config,
+            "color": row["color"],
         }
         acts.append(act)
 
@@ -407,7 +408,7 @@ def get_act(act_id: str) -> dict[str, Any] | None:
     """Get a single act by ID."""
     conn = _get_connection()
     cursor = conn.execute("""
-        SELECT act_id, title, active, notes, repo_path, artifact_type, code_config
+        SELECT act_id, title, active, notes, repo_path, artifact_type, code_config, color
         FROM acts WHERE act_id = ?
     """, (act_id,))
 
@@ -427,7 +428,7 @@ def get_act(act_id: str) -> dict[str, Any] | None:
         "title": row["title"],
         "active": bool(row["active"]),
         "notes": row["notes"],
-        "color": row["color"] if "color" in row.keys() else None,
+        "color": row["color"],
         "repo_path": row["repo_path"],
         "artifact_type": row["artifact_type"],
         "code_config": code_config,
