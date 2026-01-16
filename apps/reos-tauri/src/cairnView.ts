@@ -64,6 +64,9 @@ export function createCairnView(
     extendedThinkingEnabled: false,
   };
 
+  // Fingerprint of current surfaced items to avoid unnecessary re-renders
+  let surfacedFingerprint = '';
+
   // Inject syntax highlighting styles
   injectSyntaxHighlightStyles();
 
@@ -988,6 +991,19 @@ export function createCairnView(
     scene_id?: string;
     act_title?: string;
   }>): void {
+    // Compute fingerprint to detect changes and avoid unnecessary re-renders
+    const newFingerprint = JSON.stringify(items.map(i => ({
+      id: i.entity_id,
+      t: i.title,
+      u: i.urgency,
+      a: i.act_id,
+    })));
+
+    if (newFingerprint === surfacedFingerprint) {
+      return;  // No changes, skip DOM update
+    }
+
+    surfacedFingerprint = newFingerprint;
     state.surfacedItems = items;
     surfacedList.innerHTML = '';
 

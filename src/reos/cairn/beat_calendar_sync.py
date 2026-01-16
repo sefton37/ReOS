@@ -157,6 +157,7 @@ def sync_calendar_to_beats(
         _get_stage_direction_scene_id,
         create_beat,
         ensure_your_story_act,
+        find_beat_location,
     )
 
     # First, refresh next_occurrence for ALL recurring beats
@@ -184,13 +185,17 @@ def sync_calendar_to_beats(
             if event.recurrence_rule:
                 next_occ = get_next_occurrence(event.recurrence_rule, event.start)
                 if next_occ:
+                    # Get canonical location from play_fs (source of truth) instead of stale cache
+                    beat_location = find_beat_location(existing["beat_id"])
+                    canonical_act_id = beat_location["act_id"] if beat_location else YOUR_STORY_ACT_ID
+                    canonical_scene_id = beat_location["scene_id"] if beat_location else stage_direction_id
                     store.update_beat_calendar_link(
                         beat_id=existing["beat_id"],
                         calendar_event_id=base_event_id,
                         recurrence_rule=event.recurrence_rule,
                         next_occurrence=next_occ,
-                        act_id=existing.get("act_id") or YOUR_STORY_ACT_ID,
-                        scene_id=existing.get("scene_id") or stage_direction_id,
+                        act_id=canonical_act_id,
+                        scene_id=canonical_scene_id,
                     )
             continue
 

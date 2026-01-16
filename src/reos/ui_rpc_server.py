@@ -2433,7 +2433,7 @@ def _handle_play_beats_update(
 
 
 def _handle_play_beats_move(
-    _db: Database,
+    db: Database,
     *,
     beat_id: str,
     source_act_id: str,
@@ -2452,6 +2452,18 @@ def _handle_play_beats_move(
         )
     except ValueError as exc:
         raise RpcError(code=-32602, message=str(exc)) from exc
+
+    # After successful move, update CAIRN cache so "What Needs Attention" shows correct Act
+    try:
+        play_path = get_current_play_path(db)
+        if play_path:
+            from .cairn.store import CairnStore
+
+            store = CairnStore(Path(play_path) / ".cairn" / "cairn.db")
+            store.update_beat_location(beat_id, target_act_id, target_scene_id)
+    except Exception:
+        pass  # Don't fail the move if cache update fails
+
     return result
 
 
@@ -3393,6 +3405,59 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             return None
 
         # Authentication methods (Polkit - native system dialog)
+        if method == "auth/login":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            username = params.get("username")
+            if not isinstance(username, str) or not username:
+                raise RpcError(code=-32602, message="username is required")
+            # Rate limit login attempts
+            try:
+                check_rate_limit("auth")
+            except RateLimitExceeded as e:
+                audit_log(
+                    AuditEventType.RATE_LIMIT_EXCEEDED,
+                    {"category": "auth", "username": username},
+                )
+                return _jsonrpc_result(req_id=req_id, result={"success": False, "error": str(e)})
+            result = auth.login(username)
+            # Audit the attempt
+            if result.get("success"):
+                audit_log(AuditEventType.AUTH_LOGIN_SUCCESS, {"username": username})
+            else:
+                audit_log(
+                    AuditEventType.AUTH_LOGIN_FAILED,
+                    {"username": username, "error": result.get("error", "unknown")},
+                )
+            return _jsonrpc_result(req_id=req_id, result=result)
+
+        if method == "auth/logout":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_token = params.get("session_token")
+            if not isinstance(session_token, str) or not session_token:
+                raise RpcError(code=-32602, message="session_token is required")
+            result = auth.logout(session_token)
+            if result.get("success"):
+                audit_log(AuditEventType.AUTH_LOGOUT, {"session_id": session_token[:16]})
+            return _jsonrpc_result(req_id=req_id, result=result)
+
+        if method == "auth/validate":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_token = params.get("session_token")
+            if not isinstance(session_token, str) or not session_token:
+                raise RpcError(code=-32602, message="session_token is required")
+            return _jsonrpc_result(req_id=req_id, result=auth.validate_session(session_token))
+
+        if method == "auth/refresh":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            session_token = params.get("session_token")
+            if not isinstance(session_token, str) or not session_token:
+                raise RpcError(code=-32602, message="session_token is required")
+            refreshed = auth.refresh_session(session_token)
+            return _jsonrpc_result(req_id=req_id, result={"success": refreshed})
 
         # Fast path: Check simple handler registries first
         if method in _SIMPLE_HANDLERS:

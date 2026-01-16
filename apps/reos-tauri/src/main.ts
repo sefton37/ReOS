@@ -480,6 +480,73 @@ function buildUi() {
     }
   })();
 
+  // Refresh attention items - called after Play mutations and on polling interval
+  async function refreshAttentionItems(): Promise<void> {
+    try {
+      const result = await kernelRequest('cairn/attention', { hours: 168, limit: 50 }) as {
+        count: number;
+        items: Array<{
+          entity_type: string;
+          entity_id: string;
+          title: string;
+          reason: string;
+          urgency: string;
+          calendar_start?: string;
+          calendar_end?: string;
+          is_recurring?: boolean;
+          recurrence_frequency?: string;
+          next_occurrence?: string;
+          act_id?: string;
+          scene_id?: string;
+          act_title?: string;
+        }>;
+      };
+      cairnView.updateSurfaced(result.items.map(item => ({
+        title: item.title,
+        reason: item.reason,
+        urgency: item.urgency,
+        is_recurring: item.is_recurring,
+        recurrence_frequency: item.recurrence_frequency,
+        next_occurrence: item.next_occurrence,
+        entity_type: item.entity_type,
+        entity_id: item.entity_id,
+        act_id: item.act_id,
+        scene_id: item.scene_id,
+        act_title: item.act_title,
+      })));
+    } catch (e) {
+      console.log('Could not refresh attention items:', e);
+    }
+  }
+
+  // Adaptive polling for attention items: 10s when user active, 60s when idle
+  let lastActivityTime = Date.now();
+  const ACTIVE_POLL_INTERVAL = 10000;  // 10 seconds when active
+  const IDLE_POLL_INTERVAL = 60000;    // 60 seconds when idle
+  const IDLE_THRESHOLD = 30000;        // Consider idle after 30 seconds of no activity
+
+  function updateActivityTime(): void {
+    lastActivityTime = Date.now();
+  }
+
+  // Track user activity
+  document.addEventListener('mousemove', updateActivityTime);
+  document.addEventListener('keydown', updateActivityTime);
+  document.addEventListener('click', updateActivityTime);
+
+  // Start adaptive polling
+  function scheduleNextPoll(): void {
+    const isIdle = Date.now() - lastActivityTime > IDLE_THRESHOLD;
+    const interval = isIdle ? IDLE_POLL_INTERVAL : ACTIVE_POLL_INTERVAL;
+
+    setTimeout(() => {
+      void refreshAttentionItems().then(scheduleNextPoll);
+    }, interval);
+  }
+
+  // Start polling after a small delay to avoid duplicate initial fetch
+  setTimeout(scheduleNextPoll, ACTIVE_POLL_INTERVAL);
+
   // Handle CAIRN chat messages (default conversational mode)
   async function handleCairnMessage(message: string, options?: { extendedThinking?: boolean }): Promise<void> {
     // Show thinking indicator while waiting for response
@@ -500,6 +567,9 @@ function buildUi() {
       }
       // Use addAssistantMessage to include full response data (thinking steps, tool calls)
       cairnView.addAssistantMessage(result);
+
+      // Refresh attention items after CAIRN chat - beat moves may have changed act assignments
+      void refreshAttentionItems();
     } catch (error) {
       cairnView.hideThinking();
       cairnView.addChatMessage('assistant', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -1246,6 +1316,7 @@ function buildUi() {
               notes: tNotes.value
             });
             await refreshBeats(activeActId, selectedSceneId);
+            void refreshAttentionItems();  // Refresh attention items after beat update
             renderPlayInspector();
           })();
         });
@@ -1263,6 +1334,7 @@ function buildUi() {
             status: newStatus.value
           });
           await refreshBeats(activeActId, selectedSceneId);
+          void refreshAttentionItems();  // Refresh attention items after beat create
           renderPlayInspector();
         })();
       });
