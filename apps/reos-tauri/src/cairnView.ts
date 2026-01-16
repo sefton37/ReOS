@@ -998,6 +998,7 @@ export function createCairnView(
       t: i.title,
       u: i.urgency,
       a: i.act_id,
+      c: i.act_color,
     })));
 
     if (newFingerprint === surfacedFingerprint) {
