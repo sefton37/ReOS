@@ -17,6 +17,57 @@ var { cal } = ChromeUtils.importESModule
   ? ChromeUtils.importESModule("resource:///modules/calendar/calUtils.sys.mjs")
   : ChromeUtils.import("resource:///modules/calendar/calUtils.jsm");
 
+// TB 140+ uses separate classes for events and datetimes
+var CalEvent, CalDateTime;
+try {
+  ({ CalEvent } = ChromeUtils.importESModule("resource:///modules/calendar/CalEvent.sys.mjs"));
+  ({ CalDateTime } = ChromeUtils.importESModule("resource:///modules/calendar/CalDateTime.sys.mjs"));
+} catch (e) {
+  // Try alternate paths (TB 140+ uses different location)
+  try {
+    ({ CalEvent } = ChromeUtils.importESModule("resource:///modules/CalEvent.sys.mjs"));
+    ({ CalDateTime } = ChromeUtils.importESModule("resource:///modules/CalDateTime.sys.mjs"));
+  } catch (e2) {
+    // Older TB versions - will use cal.createEvent/createDateTime
+    CalEvent = null;
+    CalDateTime = null;
+  }
+}
+
+/**
+ * Create a new calendar event instance.
+ */
+function createNewEvent() {
+  if (CalEvent) {
+    try {
+      return new CalEvent();
+    } catch (e) {
+      // Fall through to cal.createEvent
+    }
+  }
+  if (cal.createEvent) {
+    return cal.createEvent();
+  }
+  throw new Error("No method available to create calendar event");
+}
+
+/**
+ * Create a new DateTime instance.
+ */
+function createNewDateTime() {
+  if (CalDateTime) {
+    try {
+      return new CalDateTime();
+    } catch (e) {
+      // Fall through to cal.createDateTime
+    }
+  }
+  if (cal.createDateTime) {
+    return cal.createDateTime();
+  }
+  throw new Error("No method available to create datetime");
+}
+
 const PORT = 19192;
 const HOST = "127.0.0.1";
 
@@ -40,20 +91,29 @@ async function findEventById(eventId) {
     if (calendar.readOnly) continue;
 
     try {
-      const item = await new Promise((resolve) => {
-        const listener = {
-          QueryInterface: ChromeUtils.generateQI(["calIOperationListener"]),
-          onOperationComplete(aCalendar, aStatus, aOperationType, aId, aDetail) {
-            if (Components.isSuccessCode(aStatus)) {
-              resolve(aDetail);
-            } else {
-              resolve(null);
-            }
-          },
-          onGetResult() {}
-        };
-        calendar.getItem(eventId, listener);
-      });
+      // TB 140+ uses Promise-based API
+      const result = calendar.getItem(eventId);
+
+      let item = null;
+      if (result && typeof result.then === "function") {
+        item = await result;
+      } else {
+        // Fallback to listener-based API
+        item = await new Promise((resolve) => {
+          const listener = {
+            QueryInterface: ChromeUtils.generateQI(["calIOperationListener"]),
+            onOperationComplete(aCalendar, aStatus, aOperationType, aId, aDetail) {
+              if (Components.isSuccessCode(aStatus)) {
+                resolve(aDetail);
+              } else {
+                resolve(null);
+              }
+            },
+            onGetResult() {}
+          };
+          calendar.getItem(eventId, listener);
+        });
+      }
 
       if (item) {
         return { item, calendar };
@@ -70,14 +130,14 @@ async function findEventById(eventId) {
  * Create a calendar event item from parameters.
  */
 function createEventItem(params) {
-  const event = cal.createEvent();
+  const event = createNewEvent();
 
   if (params.title) {
     event.title = params.title;
   }
 
   if (params.startDate) {
-    const startDate = cal.createDateTime();
+    const startDate = createNewDateTime();
     const startDateObj = new Date(params.startDate);
     if (params.allDay) {
       // For all-day events, use date only format
@@ -90,7 +150,7 @@ function createEventItem(params) {
   }
 
   if (params.endDate) {
-    const endDate = cal.createDateTime();
+    const endDate = createNewDateTime();
     const endDateObj = new Date(params.endDate);
     if (params.allDay) {
       endDate.icalString = endDateObj.toISOString().split("T")[0].replace(/-/g, "");
@@ -113,6 +173,41 @@ function createEventItem(params) {
 }
 
 /**
+ * Convert a calendar datetime to ISO string.
+ */
+function dateTimeToISO(dt) {
+  if (!dt) return null;
+
+  // Try jsDate property first (older TB), then try native date conversion
+  if (dt.jsDate && typeof dt.jsDate.toISOString === "function") {
+    return dt.jsDate.toISOString();
+  }
+  // TB 140+ might use different property or method
+  if (dt.nativeTime) {
+    // nativeTime is microseconds since epoch
+    return new Date(dt.nativeTime / 1000).toISOString();
+  }
+  if (typeof dt.toICALString === "function") {
+    // Parse from iCal string
+    const icalStr = dt.toICALString();
+    // Format: YYYYMMDDTHHMMSSZ or YYYYMMDD
+    if (icalStr.length >= 8) {
+      const year = icalStr.substring(0, 4);
+      const month = icalStr.substring(4, 6);
+      const day = icalStr.substring(6, 8);
+      if (icalStr.length >= 15) {
+        const hour = icalStr.substring(9, 11);
+        const min = icalStr.substring(11, 13);
+        const sec = icalStr.substring(13, 15);
+        return `${year}-${month}-${day}T${hour}:${min}:${sec}Z`;
+      }
+      return `${year}-${month}-${day}T00:00:00Z`;
+    }
+  }
+  return null;
+}
+
+/**
  * Convert a calendar item to a plain object for JSON serialization.
  */
 function eventToObject(item) {
@@ -121,8 +216,8 @@ function eventToObject(item) {
   return {
     id: item.id,
     title: item.title || "",
-    startDate: item.startDate ? item.startDate.jsDate.toISOString() : null,
-    endDate: item.endDate ? item.endDate.jsDate.toISOString() : null,
+    startDate: dateTimeToISO(item.startDate),
+    endDate: dateTimeToISO(item.endDate),
     description: item.getProperty("DESCRIPTION") || "",
     location: item.getProperty("LOCATION") || "",
     allDay: item.startDate ? item.startDate.isDate : false,
@@ -205,24 +300,48 @@ const calendarOps = {
       allDay
     });
 
-    return new Promise((resolve, reject) => {
-      const listener = {
-        QueryInterface: ChromeUtils.generateQI(["calIOperationListener"]),
-        onOperationComplete(aCalendar, aStatus, aOperationType, aId, aDetail) {
-          if (Components.isSuccessCode(aStatus)) {
-            resolve({
-              id: aId || event.id,
-              calendarId: calendar.id
-            });
-          } else {
-            reject(new Error(`Failed to create event: ${aStatus}`));
-          }
-        },
-        onGetResult() {}
-      };
+    // TB 140+ uses Promise-based API instead of listener-based
+    try {
+      const result = calendar.addItem(event);
 
-      calendar.addItem(event, listener);
-    });
+      // Check if it's a Promise
+      if (result && typeof result.then === "function") {
+        const addedItem = await result;
+        return {
+          id: addedItem?.id || event.id,
+          calendarId: calendar.id
+        };
+      }
+
+      // If not a Promise, might be the item directly or need listener
+      if (result && result.id) {
+        return {
+          id: result.id,
+          calendarId: calendar.id
+        };
+      }
+
+      // Fall back to listener-based approach (older TB versions)
+      return new Promise((resolve, reject) => {
+        const listener = {
+          QueryInterface: ChromeUtils.generateQI(["calIOperationListener"]),
+          onOperationComplete(aCalendar, aStatus, aOperationType, aId, aDetail) {
+            if (Components.isSuccessCode(aStatus)) {
+              resolve({
+                id: aId || event.id,
+                calendarId: calendar.id
+              });
+            } else {
+              reject(new Error(`Failed to create event: ${aStatus}`));
+            }
+          },
+          onGetResult() {}
+        };
+        calendar.addItem(event, listener);
+      });
+    } catch (e) {
+      throw e;
+    }
   },
 
   async updateEvent(eventId, title, startDate, endDate, description, location, allDay) {
@@ -240,7 +359,7 @@ const calendarOps = {
     }
 
     if (startDate !== undefined && startDate !== null) {
-      const start = cal.createDateTime();
+      const start = createNewDateTime();
       const startDateObj = new Date(startDate);
       if (allDay) {
         start.icalString = startDateObj.toISOString().split("T")[0].replace(/-/g, "");
@@ -252,7 +371,7 @@ const calendarOps = {
     }
 
     if (endDate !== undefined && endDate !== null) {
-      const end = cal.createDateTime();
+      const end = createNewDateTime();
       const endDateObj = new Date(endDate);
       if (allDay) {
         end.icalString = endDateObj.toISOString().split("T")[0].replace(/-/g, "");
@@ -279,25 +398,41 @@ const calendarOps = {
       }
     }
 
-    return new Promise((resolve, reject) => {
-      const listener = {
-        QueryInterface: ChromeUtils.generateQI(["calIOperationListener"]),
-        onOperationComplete(aCalendar, aStatus, aOperationType, aId, aDetail) {
-          if (Components.isSuccessCode(aStatus)) {
-            resolve({
-              id: eventId,
-              calendarId: calendar.id,
-              updated: true
-            });
-          } else {
-            reject(new Error(`Failed to update event: ${aStatus}`));
-          }
-        },
-        onGetResult() {}
-      };
+    // TB 140+ uses Promise-based API
+    try {
+      const result = calendar.modifyItem(mutableItem, item);
 
-      calendar.modifyItem(mutableItem, item, listener);
-    });
+      if (result && typeof result.then === "function") {
+        await result;
+        return {
+          id: eventId,
+          calendarId: calendar.id,
+          updated: true
+        };
+      }
+
+      // Fallback to listener-based API
+      return new Promise((resolve, reject) => {
+        const listener = {
+          QueryInterface: ChromeUtils.generateQI(["calIOperationListener"]),
+          onOperationComplete(aCalendar, aStatus, aOperationType, aId, aDetail) {
+            if (Components.isSuccessCode(aStatus)) {
+              resolve({
+                id: eventId,
+                calendarId: calendar.id,
+                updated: true
+              });
+            } else {
+              reject(new Error(`Failed to update event: ${aStatus}`));
+            }
+          },
+          onGetResult() {}
+        };
+        calendar.modifyItem(mutableItem, item, listener);
+      });
+    } catch (e) {
+      throw new Error(`Failed to update event: ${e.message}`);
+    }
   },
 
   async deleteEvent(eventId) {
@@ -309,21 +444,33 @@ const calendarOps = {
 
     const { item, calendar } = found;
 
-    return new Promise((resolve, reject) => {
-      const listener = {
-        QueryInterface: ChromeUtils.generateQI(["calIOperationListener"]),
-        onOperationComplete(aCalendar, aStatus, aOperationType, aId, aDetail) {
-          if (Components.isSuccessCode(aStatus)) {
-            resolve({ id: eventId, deleted: true });
-          } else {
-            reject(new Error(`Failed to delete event: ${aStatus}`));
-          }
-        },
-        onGetResult() {}
-      };
+    // TB 140+ uses Promise-based API
+    try {
+      const result = calendar.deleteItem(item);
 
-      calendar.deleteItem(item, listener);
-    });
+      if (result && typeof result.then === "function") {
+        await result;
+        return { id: eventId, deleted: true };
+      }
+
+      // Fallback to listener-based API
+      return new Promise((resolve, reject) => {
+        const listener = {
+          QueryInterface: ChromeUtils.generateQI(["calIOperationListener"]),
+          onOperationComplete(aCalendar, aStatus, aOperationType, aId, aDetail) {
+            if (Components.isSuccessCode(aStatus)) {
+              resolve({ id: eventId, deleted: true });
+            } else {
+              reject(new Error(`Failed to delete event: ${aStatus}`));
+            }
+          },
+          onGetResult() {}
+        };
+        calendar.deleteItem(item, listener);
+      });
+    } catch (e) {
+      throw new Error(`Failed to delete event: ${e.message}`);
+    }
   },
 
   async getEvent(eventId) {
@@ -348,6 +495,7 @@ class TalkingRockHttpServer {
   constructor() {
     this.socket = null;
     this.connections = new Set();
+    this.listener = null; // Keep strong reference to prevent GC
   }
 
   start() {
@@ -361,14 +509,19 @@ class TalkingRockHttpServer {
 
       this.socket.init(PORT, true, -1); // loopback only
 
-      this.socket.asyncListen({
-        onSocketAccepted: (serverSocket, transport) => {
-          this.handleConnection(transport);
+      const self = this;
+      // Store listener as property to prevent garbage collection
+      this.listener = {
+        QueryInterface: ChromeUtils.generateQI(["nsIServerSocketListener"]),
+        onSocketAccepted: function(serverSocket, transport) {
+          console.log("Talking Rock Bridge: New connection");
+          self.handleConnection(transport);
         },
-        onStopListening: (serverSocket, status) => {
+        onStopListening: function(serverSocket, status) {
           console.log("Talking Rock Bridge: Server stopped", status);
         }
-      });
+      };
+      this.socket.asyncListen(this.listener);
 
       console.log(`Talking Rock Bridge: HTTP server listening on ${HOST}:${PORT}`);
     } catch (e) {
@@ -393,44 +546,100 @@ class TalkingRockHttpServer {
 
   handleConnection(transport) {
     this.connections.add(transport);
+    const self = this;
 
-    const inputStream = transport.openInputStream(0, 0, 0);
-    const outputStream = transport.openOutputStream(0, 0, 0);
+    // Use ThreadManager to handle async operations properly
+    const tm = Cc["@mozilla.org/thread-manager;1"].getService(Ci.nsIThreadManager);
 
-    const scriptableInput = Cc["@mozilla.org/scriptableinputstream;1"]
-      .createInstance(Ci.nsIScriptableInputStream);
-    scriptableInput.init(inputStream);
+    let inputStream, outputStream, bis, bos;
 
-    // Read request data
-    let requestData = "";
-    const pump = Cc["@mozilla.org/network/input-stream-pump;1"]
-      .createInstance(Ci.nsIInputStreamPump);
+    try {
+      inputStream = transport.openInputStream(0, 0, 0);
+      outputStream = transport.openOutputStream(Ci.nsITransport.OPEN_BLOCKING, 0, 0);
 
-    pump.init(inputStream, 0, 0, true);
-    pump.asyncRead({
-      onStartRequest: () => {},
-      onStopRequest: async () => {
-        try {
-          const response = await this.processRequest(requestData);
-          this.sendResponse(outputStream, response);
-        } catch (e) {
-          console.error("Talking Rock Bridge: Request error:", e);
-          this.sendResponse(outputStream, this.buildErrorResponse(500, e.message));
-        } finally {
-          try {
-            inputStream.close();
-            outputStream.close();
-            transport.close(0);
-          } catch (e) {
-            // Ignore close errors
-          }
-          this.connections.delete(transport);
+      bis = Cc["@mozilla.org/binaryinputstream;1"]
+        .createInstance(Ci.nsIBinaryInputStream);
+      bis.setInputStream(inputStream);
+
+      bos = Cc["@mozilla.org/binaryoutputstream;1"]
+        .createInstance(Ci.nsIBinaryOutputStream);
+      bos.setOutputStream(outputStream);
+
+      // Use async wait for data
+      const asyncInput = inputStream.QueryInterface(Ci.nsIAsyncInputStream);
+
+      // Store callback to prevent GC
+      const callback = {
+        QueryInterface: ChromeUtils.generateQI(["nsIInputStreamCallback"]),
+        onInputStreamReady: function(stream) {
+          (async () => {
+            try {
+              // Read available data
+              let requestData = "";
+              try {
+                const available = bis.available();
+                if (available > 0) {
+                  requestData = String.fromCharCode.apply(null, bis.readByteArray(available));
+                }
+              } catch (e) {
+                // Stream closed or error - ignore
+              }
+
+              // Process and respond
+              if (requestData.length > 0) {
+                const response = await self.processRequest(requestData);
+                self.writeResponse(bos, outputStream, response);
+              }
+            } catch (e) {
+              console.error("Talking Rock Bridge: Request handler error:", e);
+              try {
+                self.writeResponse(bos, outputStream, self.buildErrorResponse(500, e.message));
+              } catch (e2) {
+                // Ignore send errors
+              }
+            } finally {
+              try {
+                inputStream.close();
+                outputStream.close();
+                transport.close(0);
+              } catch (e) {
+                // Ignore
+              }
+              self.connections.delete(transport);
+            }
+          })().catch(e => {
+            console.error("Talking Rock Bridge: Async handler error:", e);
+          });
         }
-      },
-      onDataAvailable: (request, inputStream, offset, count) => {
-        requestData += scriptableInput.read(count);
+      };
+
+      asyncInput.asyncWait(callback, 0, 0, tm.mainThread);
+
+    } catch (e) {
+      console.error("Talking Rock Bridge: Connection setup error:", e);
+      try {
+        if (inputStream) inputStream.close();
+        if (outputStream) outputStream.close();
+        transport.close(0);
+      } catch (e2) {
+        // Ignore
       }
-    });
+      this.connections.delete(transport);
+    }
+  }
+
+  writeResponse(bos, outputStream, response) {
+    try {
+      // Write as bytes
+      const bytes = [];
+      for (let i = 0; i < response.length; i++) {
+        bytes.push(response.charCodeAt(i));
+      }
+      bos.writeByteArray(bytes);
+      outputStream.flush();
+    } catch (e) {
+      console.error("Talking Rock Bridge: Failed to write response:", e);
+    }
   }
 
   async processRequest(rawRequest) {
@@ -553,10 +762,11 @@ class TalkingRockHttpServer {
 
   buildResponse(status, statusText, body) {
     const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
+    // Use string length - for ASCII/UTF-8 JSON this equals byte length
     const headers = [
       `HTTP/1.1 ${status} ${statusText}`,
-      "Content-Type: application/json",
-      `Content-Length: ${new TextEncoder().encode(bodyStr).length}`,
+      "Content-Type: application/json; charset=utf-8",
+      `Content-Length: ${bodyStr.length}`,
       "Access-Control-Allow-Origin: *",
       "Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS",
       "Access-Control-Allow-Headers: Content-Type",
@@ -570,16 +780,6 @@ class TalkingRockHttpServer {
 
   buildErrorResponse(status, message) {
     return this.buildResponse(status, "Error", { error: message });
-  }
-
-  sendResponse(outputStream, response) {
-    try {
-      const bytes = new TextEncoder().encode(response);
-      outputStream.write(response, bytes.length);
-      outputStream.flush();
-    } catch (e) {
-      console.error("Talking Rock Bridge: Failed to send response:", e);
-    }
   }
 }
 
