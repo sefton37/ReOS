@@ -36,10 +36,10 @@ def _get_stage_direction_scene_id(act_id: str) -> str:
     return f"{STAGE_DIRECTION_SCENE_ID_PREFIX}{act_id[:12]}"
 
 
-class BeatStage(Enum):
-    """The stage/state of a Beat in The Play.
+class SceneStage(Enum):
+    """The stage/state of a Scene in The Play.
 
-    Beats progress through these stages:
+    Scenes progress through these stages:
     - PLANNING: No date set, still being organized
     - IN_PROGRESS: Has a date, actively working on it
     - AWAITING_DATA: Waiting for external input/data
@@ -51,19 +51,23 @@ class BeatStage(Enum):
     COMPLETE = "complete"
 
 
+# Backward compatibility alias
+BeatStage = SceneStage
+
+
 def _migrate_status_to_stage(status: str) -> str:
-    """Migrate old Beat status values to new stage values."""
+    """Migrate old status values to new stage values."""
     mapping = {
-        "pending": BeatStage.PLANNING.value,
-        "todo": BeatStage.PLANNING.value,
-        "in_progress": BeatStage.IN_PROGRESS.value,
-        "active": BeatStage.IN_PROGRESS.value,
-        "blocked": BeatStage.AWAITING_DATA.value,
-        "waiting": BeatStage.AWAITING_DATA.value,
-        "completed": BeatStage.COMPLETE.value,
-        "done": BeatStage.COMPLETE.value,
+        "pending": SceneStage.PLANNING.value,
+        "todo": SceneStage.PLANNING.value,
+        "in_progress": SceneStage.IN_PROGRESS.value,
+        "active": SceneStage.IN_PROGRESS.value,
+        "blocked": SceneStage.AWAITING_DATA.value,
+        "waiting": SceneStage.AWAITING_DATA.value,
+        "completed": SceneStage.COMPLETE.value,
+        "done": SceneStage.COMPLETE.value,
     }
-    return mapping.get(status.lower().strip(), BeatStage.PLANNING.value)
+    return mapping.get(status.lower().strip(), SceneStage.PLANNING.value)
 
 
 # Color palette for Acts - visually distinct colors that work well in UI
@@ -105,34 +109,42 @@ class Act:
 
 @dataclass(frozen=True)
 class Scene:
+    """A Scene in The Play - an atomic task or event.
+
+    Scenes can be linked to calendar events. For recurring events,
+    ONE Scene represents the entire series (not expanded occurrences).
+
+    Calendar integration fields:
+    - calendar_event_id: Inbound sync - ID of the Thunderbird event this Scene reflects
+    - thunderbird_event_id: Outbound sync - ID of the Thunderbird event created for this Scene
+    """
     scene_id: str
+    act_id: str  # Parent Act ID
     title: str
-    intent: str
-    status: str
-    time_horizon: str
+    stage: str  # SceneStage value
     notes: str
+    link: str | None = None
+    # Calendar integration fields
+    calendar_event_id: str | None = None      # Inbound sync: TB event that Scene reflects
+    recurrence_rule: str | None = None        # RRULE string if recurring
+    thunderbird_event_id: str | None = None   # Outbound sync: TB event created for Scene
 
 
 @dataclass(frozen=True)
 class Beat:
-    """A Beat in The Play - an atomic task or event.
+    """Backward compatibility alias for Scene.
 
-    Beats can be linked to calendar events. For recurring events,
-    ONE Beat represents the entire series (not expanded occurrences).
-
-    Calendar integration fields:
-    - calendar_event_id: Inbound sync - ID of the Thunderbird event this Beat reflects
-    - thunderbird_event_id: Outbound sync - ID of the Thunderbird event created for this Beat
+    DEPRECATED: Use Scene instead. Beats have been merged into Scenes in v4.
     """
     beat_id: str
     title: str
-    stage: str  # BeatStage value
+    stage: str  # SceneStage value
     notes: str
     link: str | None = None
     # Calendar integration fields
-    calendar_event_id: str | None = None      # Inbound sync: TB event that Beat reflects
-    recurrence_rule: str | None = None        # RRULE string if recurring
-    thunderbird_event_id: str | None = None   # Outbound sync: TB event created for Beat
+    calendar_event_id: str | None = None
+    recurrence_rule: str | None = None
+    thunderbird_event_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -344,23 +356,26 @@ def _dict_to_act(d: dict[str, Any]) -> Act:
 
 
 def _dict_to_scene(d: dict[str, Any]) -> Scene:
-    """Convert a dict to a Scene dataclass."""
+    """Convert a dict to a Scene dataclass (v4 structure)."""
     return Scene(
         scene_id=d.get("scene_id", ""),
+        act_id=d.get("act_id", ""),
         title=d.get("title", ""),
-        intent=d.get("intent", ""),
-        status=d.get("status", ""),
-        time_horizon=d.get("time_horizon", ""),
+        stage=d.get("stage", SceneStage.PLANNING.value),
         notes=d.get("notes", ""),
+        link=d.get("link"),
+        calendar_event_id=d.get("calendar_event_id"),
+        recurrence_rule=d.get("recurrence_rule"),
+        thunderbird_event_id=d.get("thunderbird_event_id"),
     )
 
 
 def _dict_to_beat(d: dict[str, Any]) -> Beat:
-    """Convert a dict to a Beat dataclass."""
+    """Convert a dict to a Beat dataclass (backward compat)."""
     return Beat(
-        beat_id=d.get("beat_id", ""),
+        beat_id=d.get("beat_id", d.get("scene_id", "")),  # Accept either
         title=d.get("title", ""),
-        stage=d.get("stage", BeatStage.PLANNING.value),
+        stage=d.get("stage", SceneStage.PLANNING.value),
         notes=d.get("notes", ""),
         link=d.get("link"),
         calendar_event_id=d.get("calendar_event_id"),
@@ -502,11 +517,10 @@ def list_scenes(*, act_id: str) -> list[Scene]:
         scenes_data = play_db.list_scenes(act_id)
         return [_dict_to_scene(d) for d in scenes_data]
 
-    # JSON fallback
+    # JSON fallback (legacy format migration)
     ensure_play_skeleton()
     scenes_path = _scenes_path(act_id)
     if not scenes_path.exists():
-        # No scenes yet.
         return []
 
     data = _load_json(scenes_path)
@@ -520,24 +534,31 @@ def list_scenes(*, act_id: str) -> list[Scene]:
             continue
         scene_id = item.get("scene_id")
         title = item.get("title")
-        intent = item.get("intent")
-        status = item.get("status")
-        time_horizon = item.get("time_horizon")
-        notes = item.get("notes")
 
         if not isinstance(scene_id, str) or not scene_id:
             continue
         if not isinstance(title, str) or not title:
             continue
 
+        # Handle both old format (with beats inside) and new format
+        stage = item.get("stage", SceneStage.PLANNING.value)
+        notes = item.get("notes", "")
+        link = item.get("link")
+        calendar_event_id = item.get("calendar_event_id")
+        recurrence_rule = item.get("recurrence_rule")
+        thunderbird_event_id = item.get("thunderbird_event_id")
+
         out.append(
             Scene(
                 scene_id=scene_id,
+                act_id=act_id,
                 title=title,
-                intent=str(intent or ""),
-                status=str(status or ""),
-                time_horizon=str(time_horizon or ""),
+                stage=str(stage or SceneStage.PLANNING.value),
                 notes=str(notes or ""),
+                link=link,
+                calendar_event_id=calendar_event_id,
+                recurrence_rule=recurrence_rule,
+                thunderbird_event_id=thunderbird_event_id,
             )
         )
 
@@ -621,36 +642,41 @@ def list_beats(*, act_id: str, scene_id: str) -> list[Beat]:
     return []
 
 
-def find_beat_location(beat_id: str) -> dict[str, str | None] | None:
-    """Find the Act and Scene containing a Beat.
+def find_scene_location(scene_id: str) -> dict[str, str | None] | None:
+    """Find the Act containing a Scene.
 
-    This is the CANONICAL source for beat location - never cache this elsewhere.
+    This is the CANONICAL source for scene location - never cache this elsewhere.
 
     Args:
-        beat_id: The Beat ID to find.
+        scene_id: The Scene ID to find.
 
     Returns:
-        Dict with act_id, act_title, scene_id, scene_title, or None if not found.
+        Dict with act_id, act_title, scene_id, or None if not found.
     """
     if USE_SQLITE_BACKEND:
         from . import play_db
-        return play_db.find_beat_location(beat_id)
+        return play_db.find_scene_location(scene_id)
 
     # JSON fallback
     acts, _ = list_acts()
     for act in acts:
         scenes = list_scenes(act_id=act.act_id)
         for scene in scenes:
-            beats = list_beats(act_id=act.act_id, scene_id=scene.scene_id)
-            for beat in beats:
-                if beat.beat_id == beat_id:
-                    return {
-                        "act_id": act.act_id,
-                        "act_title": act.title,
-                        "scene_id": scene.scene_id,
-                        "scene_title": scene.title,
-                    }
+            if scene.scene_id == scene_id:
+                return {
+                    "act_id": act.act_id,
+                    "act_title": act.title,
+                    "scene_id": scene.scene_id,
+                }
     return None
+
+
+def find_beat_location(beat_id: str) -> dict[str, str | None] | None:
+    """Backward compatibility wrapper - finds a scene by beat_id.
+
+    DEPRECATED: Use find_scene_location instead.
+    """
+    return find_scene_location(beat_id)
 
 
 def _validate_id(*, name: str, value: str) -> None:
@@ -959,31 +985,56 @@ def create_scene(
     *,
     act_id: str,
     title: str,
-    intent: str = "",
-    status: str = "",
-    time_horizon: str = "",
+    stage: str = "",
     notes: str = "",
-) -> list[Scene]:
-    """Create a Scene under an Act."""
+    link: str | None = None,
+    calendar_event_id: str | None = None,
+    recurrence_rule: str | None = None,
+    thunderbird_event_id: str | None = None,
+) -> tuple[list[Scene], str]:
+    """Create a Scene under an Act.
+
+    Args:
+        act_id: The Act to add the Scene to.
+        title: Scene title.
+        stage: SceneStage value (planning, in_progress, awaiting_data, complete).
+        notes: Optional notes.
+        link: Optional external link.
+        calendar_event_id: Optional calendar event ID this Scene is linked to (inbound sync).
+        recurrence_rule: Optional RRULE string for recurring events.
+        thunderbird_event_id: Optional Thunderbird event ID created for this Scene (outbound sync).
+
+    Returns:
+        Tuple of (list of scenes in act, new scene_id).
+    """
     _validate_id(name="act_id", value=act_id)
     if not isinstance(title, str) or not title.strip():
         raise ValueError("title is required")
-    if not isinstance(intent, str):
-        raise ValueError("intent must be a string")
-    if not isinstance(status, str):
-        raise ValueError("status must be a string")
-    if not isinstance(time_horizon, str):
-        raise ValueError("time_horizon must be a string")
+    if not isinstance(stage, str):
+        raise ValueError("stage must be a string")
     if not isinstance(notes, str):
         raise ValueError("notes must be a string")
+    if link is not None and not isinstance(link, str):
+        raise ValueError("link must be a string or null")
+    if calendar_event_id is not None and not isinstance(calendar_event_id, str):
+        raise ValueError("calendar_event_id must be a string or null")
+    if recurrence_rule is not None and not isinstance(recurrence_rule, str):
+        raise ValueError("recurrence_rule must be a string or null")
+    if thunderbird_event_id is not None and not isinstance(thunderbird_event_id, str):
+        raise ValueError("thunderbird_event_id must be a string or null")
+
+    # Default stage to PLANNING if not specified
+    if not stage:
+        stage = SceneStage.PLANNING.value
 
     if USE_SQLITE_BACKEND:
         from . import play_db
-        scenes_data, _ = play_db.create_scene(
-            act_id=act_id, title=title.strip(), intent=intent,
-            status=status, time_horizon=time_horizon, notes=notes
+        scenes_data, scene_id = play_db.create_scene(
+            act_id=act_id, title=title.strip(), stage=stage, notes=notes, link=link,
+            calendar_event_id=calendar_event_id, recurrence_rule=recurrence_rule,
+            thunderbird_event_id=thunderbird_event_id
         )
-        return [_dict_to_scene(d) for d in scenes_data]
+        return [_dict_to_scene(d) for d in scenes_data], scene_id
 
     # JSON fallback
     scenes_path = _ensure_scenes_file(act_id=act_id)
@@ -993,19 +1044,24 @@ def create_scene(
         scenes_raw = []
 
     scene_id = _new_id("scene")
-    scenes_raw.append(
-        {
-            "scene_id": scene_id,
-            "title": title.strip(),
-            "intent": intent,
-            "status": status,
-            "time_horizon": time_horizon,
-            "notes": notes,
-            "beats": [],
-        }
-    )
+    scene_data: dict[str, Any] = {
+        "scene_id": scene_id,
+        "title": title.strip(),
+        "stage": stage,
+        "notes": notes,
+        "link": link,
+    }
+    # Only include calendar fields if set
+    if calendar_event_id:
+        scene_data["calendar_event_id"] = calendar_event_id
+    if recurrence_rule:
+        scene_data["recurrence_rule"] = recurrence_rule
+    if thunderbird_event_id:
+        scene_data["thunderbird_event_id"] = thunderbird_event_id
+
+    scenes_raw.append(scene_data)
     _write_json(scenes_path, {"scenes": scenes_raw})
-    return list_scenes(act_id=act_id)
+    return list_scenes(act_id=act_id), scene_id
 
 
 def update_scene(
@@ -1013,20 +1069,44 @@ def update_scene(
     act_id: str,
     scene_id: str,
     title: str | None = None,
-    intent: str | None = None,
-    status: str | None = None,
-    time_horizon: str | None = None,
+    stage: str | None = None,
     notes: str | None = None,
+    link: str | None = None,
+    calendar_event_id: str | None = None,
+    recurrence_rule: str | None = None,
+    thunderbird_event_id: str | None = None,
 ) -> list[Scene]:
-    """Update a Scene's fields (beats preserved)."""
+    """Update a Scene's fields.
+
+    Args:
+        act_id: The Act containing the Scene.
+        scene_id: The Scene to update.
+        title: New title (optional).
+        stage: New SceneStage value (optional).
+        notes: New notes (optional).
+        link: New external link (optional).
+        calendar_event_id: New calendar event ID (optional).
+        recurrence_rule: New recurrence rule (optional).
+        thunderbird_event_id: New Thunderbird event ID (optional).
+    """
     _validate_id(name="act_id", value=act_id)
     _validate_id(name="scene_id", value=scene_id)
+    if title is not None and (not isinstance(title, str) or not title.strip()):
+        raise ValueError("title must be a non-empty string")
+    if stage is not None and not isinstance(stage, str):
+        raise ValueError("stage must be a string")
+    if notes is not None and not isinstance(notes, str):
+        raise ValueError("notes must be a string")
+    if link is not None and not isinstance(link, str):
+        raise ValueError("link must be a string or null")
 
     if USE_SQLITE_BACKEND:
         from . import play_db
         scenes_data = play_db.update_scene(
-            act_id=act_id, scene_id=scene_id, title=title, intent=intent,
-            status=status, time_horizon=time_horizon, notes=notes
+            act_id=act_id, scene_id=scene_id, title=title.strip() if title else None,
+            stage=stage, notes=notes, link=link,
+            calendar_event_id=calendar_event_id, recurrence_rule=recurrence_rule,
+            thunderbird_event_id=thunderbird_event_id
         )
         return [_dict_to_scene(d) for d in scenes_data]
 
@@ -1046,26 +1126,32 @@ def update_scene(
             out.append(item)
             continue
         found = True
-        beats = item.get("beats")
-        if not isinstance(beats, list):
-            beats = []
         new_title = title.strip() if isinstance(title, str) and title.strip() else item.get("title")
         if not isinstance(new_title, str) or not new_title.strip():
             raise ValueError("title must be a non-empty string")
 
-        out.append(
-            {
-                "scene_id": scene_id,
-                "title": new_title,
-                "intent": (intent if isinstance(intent, str) else str(item.get("intent") or "")),
-                "status": (status if isinstance(status, str) else str(item.get("status") or "")),
-                "time_horizon": (
-                    time_horizon if isinstance(time_horizon, str) else str(item.get("time_horizon") or "")
-                ),
-                "notes": (notes if isinstance(notes, str) else str(item.get("notes") or "")),
-                "beats": beats,
-            }
-        )
+        scene_data: dict[str, Any] = {
+            "scene_id": scene_id,
+            "title": new_title,
+            "stage": (stage if isinstance(stage, str) else item.get("stage", SceneStage.PLANNING.value)),
+            "notes": (notes if isinstance(notes, str) else str(item.get("notes") or "")),
+            "link": (link if isinstance(link, str) else item.get("link")),
+        }
+        # Preserve calendar fields
+        if calendar_event_id is not None:
+            scene_data["calendar_event_id"] = calendar_event_id if calendar_event_id else None
+        elif item.get("calendar_event_id"):
+            scene_data["calendar_event_id"] = item["calendar_event_id"]
+        if recurrence_rule is not None:
+            scene_data["recurrence_rule"] = recurrence_rule if recurrence_rule else None
+        elif item.get("recurrence_rule"):
+            scene_data["recurrence_rule"] = item["recurrence_rule"]
+        if thunderbird_event_id is not None:
+            scene_data["thunderbird_event_id"] = thunderbird_event_id if thunderbird_event_id else None
+        elif item.get("thunderbird_event_id"):
+            scene_data["thunderbird_event_id"] = item["thunderbird_event_id"]
+
+        out.append(scene_data)
 
     if not found:
         raise ValueError("unknown scene_id")
@@ -1128,6 +1214,82 @@ def delete_scene(*, act_id: str, scene_id: str) -> list[Scene]:
 
     _write_json(scenes_path, {"scenes": remaining})
     return list_scenes(act_id=act_id)
+
+
+def move_scene(
+    *,
+    scene_id: str,
+    source_act_id: str,
+    target_act_id: str,
+) -> dict[str, Any]:
+    """Move a Scene to a different Act.
+
+    Args:
+        scene_id: The Scene to move.
+        source_act_id: The source Act.
+        target_act_id: The target Act.
+
+    Returns:
+        Dict with moved scene_id and target_act_id.
+
+    Raises:
+        ValueError: If scene or acts not found.
+    """
+    _validate_id(name="scene_id", value=scene_id)
+    _validate_id(name="source_act_id", value=source_act_id)
+    _validate_id(name="target_act_id", value=target_act_id)
+
+    if USE_SQLITE_BACKEND:
+        from . import play_db
+        return play_db.move_scene(
+            scene_id=scene_id,
+            source_act_id=source_act_id,
+            target_act_id=target_act_id,
+        )
+
+    # JSON fallback
+    # 1. Find and remove the scene from the source act
+    source_scenes_path = _scenes_path(source_act_id)
+    if not source_scenes_path.exists():
+        raise ValueError("source act not found")
+
+    source_data = _load_json(source_scenes_path)
+    source_scenes_raw = source_data.get("scenes", [])
+    if not isinstance(source_scenes_raw, list):
+        source_scenes_raw = []
+
+    scene_data: dict[str, Any] | None = None
+    new_source_scenes: list[dict[str, Any]] = []
+
+    for scene in source_scenes_raw:
+        if not isinstance(scene, dict):
+            continue
+        if scene.get("scene_id") == scene_id:
+            scene_data = dict(scene)  # Extract the scene
+        else:
+            new_source_scenes.append(scene)
+
+    if scene_data is None:
+        raise ValueError("scene not found in source act")
+
+    # 2. Add the scene to the target act
+    target_scenes_path = _scenes_path(target_act_id)
+    _ensure_scenes_file(act_id=target_act_id)
+    target_data = _load_json(target_scenes_path)
+    target_scenes_raw = target_data.get("scenes", [])
+    if not isinstance(target_scenes_raw, list):
+        target_scenes_raw = []
+
+    target_scenes_raw.append(scene_data)
+
+    # 3. Write changes
+    _write_json(source_scenes_path, {"scenes": new_source_scenes})
+    _write_json(target_scenes_path, {"scenes": target_scenes_raw})
+
+    return {
+        "scene_id": scene_id,
+        "target_act_id": target_act_id,
+    }
 
 
 def create_beat(
@@ -1425,130 +1587,21 @@ def move_beat(
     target_act_id: str,
     target_scene_id: str,
 ) -> dict[str, Any]:
-    """Move a Beat from one Scene to another (possibly different Acts).
+    """Backward compatibility wrapper - moves a scene between acts.
 
-    Args:
-        beat_id: The Beat to move.
-        source_act_id: The source Act.
-        source_scene_id: The source Scene.
-        target_act_id: The target Act.
-        target_scene_id: The target Scene.
-
-    Returns:
-        Dict with moved beat_id and target location.
-
-    Raises:
-        ValueError: If beat, source, or target not found.
+    DEPRECATED: Use move_scene instead. In the new 2-tier structure,
+    beats are now scenes. The source_scene_id and target_scene_id
+    parameters are ignored.
     """
-    _validate_id(name="beat_id", value=beat_id)
-    _validate_id(name="source_act_id", value=source_act_id)
-    _validate_id(name="source_scene_id", value=source_scene_id)
-    _validate_id(name="target_act_id", value=target_act_id)
-    _validate_id(name="target_scene_id", value=target_scene_id)
-
-    if USE_SQLITE_BACKEND:
-        from . import play_db
-        return play_db.move_beat(
-            beat_id=beat_id,
-            source_act_id=source_act_id,
-            source_scene_id=source_scene_id,
-            target_act_id=target_act_id,
-            target_scene_id=target_scene_id,
-        )
-
-    # JSON fallback
-    # 1. Find and remove the beat from the source scene
-    source_scenes_path = _scenes_path(source_act_id)
-    if not source_scenes_path.exists():
-        raise ValueError("source act not found")
-
-    source_data = _load_json(source_scenes_path)
-    source_scenes_raw = source_data.get("scenes", [])
-    if not isinstance(source_scenes_raw, list):
-        source_scenes_raw = []
-
-    beat_data: dict[str, Any] | None = None
-    new_source_scenes: list[dict[str, Any]] = []
-
-    for scene in source_scenes_raw:
-        if not isinstance(scene, dict):
-            continue
-        if scene.get("scene_id") != source_scene_id:
-            new_source_scenes.append(scene)
-            continue
-
-        # Found source scene - look for the beat
-        beats = scene.get("beats", [])
-        if not isinstance(beats, list):
-            beats = []
-
-        new_beats: list[dict[str, Any]] = []
-        for b in beats:
-            if not isinstance(b, dict):
-                continue
-            if b.get("beat_id") == beat_id:
-                beat_data = dict(b)  # Extract the beat
-            else:
-                new_beats.append(b)
-
-        scene_copy = dict(scene)
-        scene_copy["beats"] = new_beats
-        new_source_scenes.append(scene_copy)
-
-    if beat_data is None:
-        raise ValueError("beat not found in source scene")
-
-    # 2. Add the beat to the target scene
-    if source_act_id == target_act_id:
-        # Same act - work with the same scenes list
-        target_scenes_raw = new_source_scenes
-    else:
-        target_scenes_path = _scenes_path(target_act_id)
-        if not target_scenes_path.exists():
-            raise ValueError("target act not found")
-        target_data = _load_json(target_scenes_path)
-        target_scenes_raw = target_data.get("scenes", [])
-        if not isinstance(target_scenes_raw, list):
-            target_scenes_raw = []
-
-    target_found = False
-    new_target_scenes: list[dict[str, Any]] = []
-
-    for scene in target_scenes_raw:
-        if not isinstance(scene, dict):
-            continue
-        if scene.get("scene_id") != target_scene_id:
-            new_target_scenes.append(scene)
-            continue
-
-        target_found = True
-        # Found target scene - add the beat
-        beats = scene.get("beats", [])
-        if not isinstance(beats, list):
-            beats = []
-        beats.append(beat_data)
-
-        scene_copy = dict(scene)
-        scene_copy["beats"] = beats
-        new_target_scenes.append(scene_copy)
-
-    if not target_found:
-        raise ValueError("target scene not found")
-
-    # 3. Write changes
-    if source_act_id == target_act_id:
-        # Same act - write once
-        _write_json(source_scenes_path, {"scenes": new_target_scenes})
-    else:
-        # Different acts - write both
-        _write_json(source_scenes_path, {"scenes": new_source_scenes})
-        target_scenes_path = _scenes_path(target_act_id)
-        _write_json(target_scenes_path, {"scenes": new_target_scenes})
-
+    result = move_scene(
+        scene_id=beat_id,
+        source_act_id=source_act_id,
+        target_act_id=target_act_id,
+    )
     return {
-        "beat_id": beat_id,
-        "target_act_id": target_act_id,
-        "target_scene_id": target_scene_id,
+        "beat_id": result["scene_id"],
+        "target_act_id": result["target_act_id"],
+        "target_scene_id": target_scene_id,  # Return for backward compat
     }
 
 

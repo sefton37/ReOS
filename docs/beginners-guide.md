@@ -66,11 +66,13 @@ CAIRN: Created Act "Side Projects". Want to add a Scene?
 
 You: What needs my attention?
 CAIRN: Based on your Play:
-       - Scene "Learn Rust" hasn't been touched in 2 weeks
-       - Beat "Review PR #42" is waiting on Alex since Monday
+       - Scene "Review PR #42" is waiting on Alex since Monday
+       - Scene "Learn Rust" has a session scheduled for tomorrow
 ```
 
-CAIRN helps you organize without guilt-tripping.
+CAIRN helps you organize without guilt-tripping. The Play uses just two levels:
+- **Acts** = Life narratives (months to years)
+- **Scenes** = Calendar events that make up the moments
 
 ### With RIVA (Coding Agent)
 

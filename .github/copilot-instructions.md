@@ -20,7 +20,7 @@ Talking Rock is **not** a productivity tracker or surveillance tool. It is a loc
 
 1. **CAIRN (Attention Minder)**
    - Default agent users interact with
-   - Manages The Play knowledge base (Acts/Scenes/Beats)
+   - Manages The Play (Acts = narratives, Scenes = calendar events)
    - Routes to ReOS (system) or RIVA (code) based on request
    - Coherence Kernel filters attention through user identity
    - Files: `src/reos/cairn/`

@@ -47,22 +47,19 @@ Each tool has:
 - `description`: Human-readable description (for LLM)
 - `input_schema`: JSON Schema for arguments
 
-### CAIRN Tools (14 Play CRUD tools)
+### CAIRN Tools (Play CRUD tools)
 
 | Tool | Purpose |
 |------|---------|
 | cairn_list_acts | List Acts |
 | cairn_create_act | Create Act |
 | cairn_update_act | Rename Act |
-| cairn_delete_act | Delete Act (protected: Your Story) |
+| cairn_delete_act | Delete Act |
 | cairn_list_scenes | List Scenes in Act |
-| cairn_create_scene | Create Scene |
-| cairn_delete_scene | Delete Scene (protected: Stage Direction) |
-| cairn_list_beats | List Beats |
-| cairn_create_beat | Create Beat |
-| cairn_update_beat | Update Beat |
-| cairn_delete_beat | Delete Beat |
-| cairn_move_beat_to_act | Move Beat between Acts |
+| cairn_create_scene | Create Scene in Act |
+| cairn_update_scene | Update Scene title/stage/notes |
+| cairn_delete_scene | Delete Scene |
+| cairn_move_scene | Move Scene between Acts |
 
 ## Consequences
 

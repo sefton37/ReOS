@@ -79,8 +79,8 @@ We don't compete on speed. We compete on **reliability and trust**.
 │  │   ┌─────────────────┐    ┌─────────────────┐    ┌───────────────┐  │     │
 │  │   │  Request Router │    │   The Play KB   │    │ System State  │  │     │
 │  │   │                 │    │                 │    │   Indexer     │  │     │
-│  │   │ Linux vs Code?  │    │ Acts/Scenes/    │    │               │  │     │
-│  │   │ Query vs Action?│    │ Beats + Notes   │    │ Snapshots     │  │     │
+│  │   │ Linux vs Code?  │    │ Acts/Scenes     │    │               │  │     │
+│  │   │ Query vs Action?│    │ + Notes         │    │ Snapshots     │  │     │
 │  │   └────────┬────────┘    └────────┬────────┘    └───────┬───────┘  │     │
 │  │            │                      │                     │          │     │
 │  └────────────┼──────────────────────┼─────────────────────┼──────────┘     │
@@ -185,7 +185,7 @@ We don't compete on speed. We compete on **reliability and trust**.
 - [x] Gap analysis and iterative completion
 
 ### The Play (Complete)
-- [x] Hierarchical knowledge structure (Acts → Scenes → Beats)
+- [x] Two-tier organizational structure (Acts → Scenes)
 - [x] Markdown notebooks at each level
 - [x] File attachments
 - [x] Context selection (active Acts provide context)

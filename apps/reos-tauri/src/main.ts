@@ -262,7 +262,7 @@ function buildUi() {
   actsTitle.title = 'Click to manage all Acts';
 
   const actsHint = el('span');
-  actsHint.textContent = 'includes scenes & beats';
+  actsHint.textContent = 'includes scenes';
   actsHint.style.fontSize = '9px';
   actsHint.style.color = 'rgba(255, 255, 255, 0.4)';
 

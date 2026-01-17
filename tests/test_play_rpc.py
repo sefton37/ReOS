@@ -31,7 +31,8 @@ def test_play_rpc_me_and_acts_defaults(tmp_path, monkeypatch, isolated_db_single
     assert result["active_act_id"] is None
 
 
-def test_play_rpc_set_active_unknown_act_is_invalid_params(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+def test_play_rpc_set_active_unknown_act_silently_ignored(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+    """Setting an unknown act_id is silently ignored (no error, no act becomes active)."""
     monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
 
     from reos.db import get_db
@@ -39,23 +40,27 @@ def test_play_rpc_set_active_unknown_act_is_invalid_params(tmp_path, monkeypatch
     db = get_db()
 
     resp = _rpc(db, req_id=1, method="play/acts/set_active", params={"act_id": "does-not-exist"})
-    assert "error" in resp
-    assert resp["error"]["code"] == -32602
+    # No error - silently ignored
+    assert "result" in resp
+    assert resp["result"]["active_act_id"] is None
 
 
-def test_play_rpc_create_scene_beat_and_kb_write_flow(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+def test_play_rpc_create_scene_and_kb_write_flow(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+    """Test the 2-tier structure: Acts → Scenes (Scenes are todo/calendar items)."""
     monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
 
     from reos.db import get_db
 
     db = get_db()
 
+    # Create an Act
     create_act = _rpc(db, req_id=1, method="play/acts/create", params={"title": "Act 1", "notes": "n"})
     assert "result" in create_act
     act_id = create_act["result"]["created_act_id"]
     assert isinstance(act_id, str)
-    assert create_act["result"]["acts"][0]["active"] is True
+    # Note: Acts are not auto-activated on creation
 
+    # Create a Scene (the todo/calendar item level)
     create_scene = _rpc(
         db,
         req_id=2,
@@ -63,35 +68,24 @@ def test_play_rpc_create_scene_beat_and_kb_write_flow(tmp_path, monkeypatch, iso
         params={
             "act_id": act_id,
             "title": "Scene 1",
-            "intent": "ship",
-            "status": "now",
-            "time_horizon": "today",
-            "notes": "scene-notes",
         },
     )
     scenes = create_scene["result"]["scenes"]
     assert len(scenes) == 1
     scene_id = scenes[0]["scene_id"]
+    assert isinstance(scene_id, str)
+    # Scenes now have stage, notes, link fields (formerly beat fields)
+    assert "stage" in scenes[0]
+    assert scenes[0]["stage"] == "planning"  # Default stage
 
-    create_beat = _rpc(
-        db,
-        req_id=3,
-        method="play/beats/create",
-        params={"act_id": act_id, "scene_id": scene_id, "title": "Beat 1", "status": "todo"},
-    )
-    beats = create_beat["result"]["beats"]
-    assert len(beats) == 1
-    beat_id = beats[0]["beat_id"]
-    assert isinstance(beat_id, str)
-
+    # Write to KB at scene level
     preview = _rpc(
         db,
-        req_id=4,
+        req_id=3,
         method="play/kb/write_preview",
         params={
             "act_id": act_id,
             "scene_id": scene_id,
-            "beat_id": beat_id,
             "path": "kb.md",
             "text": "hello\n",
         },
@@ -102,12 +96,11 @@ def test_play_rpc_create_scene_beat_and_kb_write_flow(tmp_path, monkeypatch, iso
 
     applied = _rpc(
         db,
-        req_id=5,
+        req_id=4,
         method="play/kb/write_apply",
         params={
             "act_id": act_id,
             "scene_id": scene_id,
-            "beat_id": beat_id,
             "path": "kb.md",
             "text": "hello\n",
             "expected_sha256_current": preview["expected_sha256_current"],
@@ -117,9 +110,9 @@ def test_play_rpc_create_scene_beat_and_kb_write_flow(tmp_path, monkeypatch, iso
 
     read_back = _rpc(
         db,
-        req_id=6,
+        req_id=5,
         method="play/kb/read",
-        params={"act_id": act_id, "scene_id": scene_id, "beat_id": beat_id, "path": "kb.md"},
+        params={"act_id": act_id, "scene_id": scene_id, "path": "kb.md"},
     )["result"]
     assert read_back["text"] == "hello\n"
 

@@ -22,7 +22,7 @@ from reos.cairn.models import (
     SurfaceContext,
     SurfacedItem,
 )
-from reos.play_fs import find_beat_location
+from reos.play_fs import find_scene_location
 
 if TYPE_CHECKING:
     from reos.cairn.store import CairnStore
@@ -179,10 +179,10 @@ class CairnSurfacer:
     def surface_attention(
         self, hours: int = 168, limit: int = 10
     ) -> list[SurfacedItem]:
-        """Surface items that need attention - Beats with upcoming calendar events.
+        """Surface items that need attention - Scenes with upcoming calendar events.
 
         This is designed for the "What Needs My Attention" section at app startup.
-        It shows Beats linked to calendar events (not raw calendar events).
+        It shows Scenes linked to calendar events (not raw calendar events).
         For recurring events, shows the next occurrence.
 
         Args:
@@ -190,26 +190,26 @@ class CairnSurfacer:
             limit: Maximum items to return.
 
         Returns:
-            List of items needing attention, primarily Beats with calendar links.
+            List of items needing attention, primarily Scenes with calendar links.
         """
         candidates: list[SurfacedItem] = []
 
-        # 1. Sync calendar events to Beats (creates Beats for new events)
+        # 1. Sync calendar events to Scenes (creates Scenes for new events)
         if self.thunderbird:
             try:
-                from reos.cairn.beat_calendar_sync import sync_calendar_to_beats
-                new_beat_ids = sync_calendar_to_beats(self.thunderbird, self.store, hours)
-                if new_beat_ids:
-                    logger.debug("Created %d new Beats from calendar events", len(new_beat_ids))
+                from reos.cairn.scene_calendar_sync import sync_calendar_to_scenes
+                new_scene_ids = sync_calendar_to_scenes(self.thunderbird, self.store, hours)
+                if new_scene_ids:
+                    logger.debug("Created %d new Scenes from calendar events", len(new_scene_ids))
             except Exception as e:
-                logger.warning("Failed to sync calendar to beats: %s", e)
+                logger.warning("Failed to sync calendar to scenes: %s", e)
 
-        # 2. Get Beats with upcoming calendar events
-        beats_with_events = self.store.get_beats_with_upcoming_events(hours=hours)
+        # 2. Get Scenes with upcoming calendar events
+        scenes_with_events = self.store.get_scenes_with_upcoming_events(hours=hours)
 
-        for beat_info in beats_with_events:
+        for scene_info in scenes_with_events:
             # Determine the effective time (next occurrence for recurring, else start)
-            effective_time_str = beat_info.get("next_occurrence") or beat_info.get("start")
+            effective_time_str = scene_info.get("next_occurrence") or scene_info.get("start")
             if effective_time_str:
                 if isinstance(effective_time_str, str):
                     effective_time = datetime.fromisoformat(effective_time_str)
@@ -240,36 +240,35 @@ class CairnSurfacer:
                 urgency = "medium"
 
             # Check if recurring
-            is_recurring = beat_info.get("recurrence_rule") is not None
+            is_recurring = scene_info.get("recurrence_rule") is not None
             recurrence_freq = None
-            if is_recurring and beat_info.get("recurrence_rule"):
-                rrule = beat_info["recurrence_rule"]
+            if is_recurring and scene_info.get("recurrence_rule"):
+                rrule = scene_info["recurrence_rule"]
                 if "FREQ=" in rrule:
                     recurrence_freq = rrule.split("FREQ=")[1].split(";")[0]
 
             # Parse calendar times
             cal_start = None
             cal_end = None
-            if beat_info.get("start"):
-                cal_start = datetime.fromisoformat(beat_info["start"]) if isinstance(beat_info["start"], str) else beat_info["start"]
-            if beat_info.get("end"):
-                cal_end = datetime.fromisoformat(beat_info["end"]) if isinstance(beat_info["end"], str) else beat_info["end"]
+            if scene_info.get("start"):
+                cal_start = datetime.fromisoformat(scene_info["start"]) if isinstance(scene_info["start"], str) else scene_info["start"]
+            if scene_info.get("end"):
+                cal_end = datetime.fromisoformat(scene_info["end"]) if isinstance(scene_info["end"], str) else scene_info["end"]
 
             # Parse next occurrence
             next_occ = None
-            if beat_info.get("next_occurrence"):
-                next_occ = datetime.fromisoformat(beat_info["next_occurrence"]) if isinstance(beat_info["next_occurrence"], str) else beat_info["next_occurrence"]
+            if scene_info.get("next_occurrence"):
+                next_occ = datetime.fromisoformat(scene_info["next_occurrence"]) if isinstance(scene_info["next_occurrence"], str) else scene_info["next_occurrence"]
 
-            # Get beat location from CANONICAL source (play_fs), not stale CAIRN cache
-            beat_location = find_beat_location(beat_info["beat_id"])
-            act_id = beat_location["act_id"] if beat_location else None
-            scene_id = beat_location["scene_id"] if beat_location else None
+            # Get scene location from CANONICAL source (play_fs), not stale CAIRN cache
+            scene_location = find_scene_location(scene_info["scene_id"])
+            act_id = scene_location["act_id"] if scene_location else None
 
             candidates.append(
                 SurfacedItem(
-                    entity_type="beat",
-                    entity_id=beat_info["beat_id"],
-                    title=beat_info.get("title", "Untitled"),
+                    entity_type="scene",
+                    entity_id=scene_info["scene_id"],
+                    title=scene_info.get("title", "Untitled"),
                     reason=reason,
                     urgency=urgency,
                     calendar_start=cal_start,
@@ -278,7 +277,6 @@ class CairnSurfacer:
                     recurrence_frequency=recurrence_freq,
                     next_occurrence=next_occ,
                     act_id=act_id,
-                    scene_id=scene_id,
                 )
             )
 
@@ -653,7 +651,7 @@ class CairnSurfacer:
         """Get the title of a Play entity.
 
         Args:
-            entity_type: Type of entity (act, scene, beat).
+            entity_type: Type of entity (act, scene).
             entity_id: ID of the entity.
 
         Returns:
@@ -669,9 +667,10 @@ class CairnSurfacer:
             elif entity_type == "scene":
                 scene = self.play.get_scene(entity_id)
                 return scene.title if scene else entity_id
+            # Backward compatibility for old "beat" entity type
             elif entity_type == "beat":
-                beat = self.play.get_beat(entity_id)
-                return beat.content[:50] if beat else entity_id
+                scene = self.play.get_scene(entity_id)
+                return scene.title if scene else entity_id
         except Exception as e:
             logger.debug("Failed to get entity title for %s/%s: %s", entity_type, entity_id, e)
 

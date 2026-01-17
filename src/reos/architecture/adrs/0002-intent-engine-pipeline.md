@@ -25,7 +25,7 @@ We implemented a 4-stage pipeline in `intent_engine.py`:
 ### Stage 2: Intent Verification
 - Check if we have a tool for this category
 - Build tool arguments from natural language
-- Support fuzzy matching for names (acts, beats, etc.)
+- Support fuzzy matching for names (acts, scenes, etc.)
 - Output: `VerifiedIntent` with tool_name and tool_args
 
 ### Stage 3: Tool Execution

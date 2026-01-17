@@ -92,7 +92,7 @@ Pros:
    - Command preview and approval
 
 4. **The Play (CAIRN)**
-   - Navigate Acts/Scenes/Beats
+   - Navigate Acts/Scenes (2-tier structure)
    - View/edit KB content
    - Preview diffs before applying
 
@@ -151,7 +151,7 @@ For first Tauri cut: **chat/respond only**, with trace in inspection pane.
 - Command preview/approval workflow.
 
 ### Phase 3: Port The Play (CAIRN)
-- Acts/Scenes/Beats navigation.
+- Acts/Scenes navigation (2-tier structure).
 - KB editor with diff-confirm behavior.
 
 ### Phase 4: Port Code Mode (RIVA)

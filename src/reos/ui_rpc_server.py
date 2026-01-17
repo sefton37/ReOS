@@ -70,7 +70,9 @@ from .play_fs import set_active_act_id as play_set_active_act_id
 from .play_fs import update_act as play_update_act
 from .play_fs import update_beat as play_update_beat
 from .play_fs import move_beat as play_move_beat
+from .play_fs import move_scene as play_move_scene
 from .play_fs import update_scene as play_update_scene
+from .play_fs import delete_scene as play_delete_scene
 from .play_fs import assign_repo_to_act as play_assign_repo_to_act
 from .context_meter import calculate_context_stats, estimate_tokens
 from .knowledge_store import KnowledgeStore
@@ -2177,11 +2179,14 @@ def _handle_play_scenes_list(_db: Database, *, act_id: str) -> dict[str, Any]:
         "scenes": [
             {
                 "scene_id": s.scene_id,
+                "act_id": s.act_id,
                 "title": s.title,
-                "intent": s.intent,
-                "status": s.status,
-                "time_horizon": s.time_horizon,
+                "stage": s.stage,
                 "notes": s.notes,
+                "link": s.link,
+                "calendar_event_id": s.calendar_event_id,
+                "recurrence_rule": s.recurrence_rule,
+                "thunderbird_event_id": s.thunderbird_event_id,
             }
             for s in scenes
         ]
@@ -2189,19 +2194,21 @@ def _handle_play_scenes_list(_db: Database, *, act_id: str) -> dict[str, Any]:
 
 
 def _handle_play_beats_list(_db: Database, *, act_id: str, scene_id: str) -> dict[str, Any]:
-    beats = play_list_beats(act_id=act_id, scene_id=scene_id)
+    """Backward compatibility: beats are now scenes. The scene_id param is ignored."""
+    scenes = play_list_scenes(act_id=act_id)
     return {
         "beats": [
             {
-                "beat_id": b.beat_id,
-                "title": b.title,
-                "stage": b.stage,
-                "notes": b.notes,
-                "link": b.link,
-                "calendar_event_id": b.calendar_event_id,
-                "recurrence_rule": b.recurrence_rule,
+                "beat_id": s.scene_id,
+                "title": s.title,
+                "stage": s.stage,
+                "notes": s.notes,
+                "link": s.link,
+                "calendar_event_id": s.calendar_event_id,
+                "recurrence_rule": s.recurrence_rule,
+                "thunderbird_event_id": s.thunderbird_event_id,
             }
-            for b in beats
+            for s in scenes
         ]
     }
 
@@ -2288,31 +2295,39 @@ def _handle_play_scenes_create(
     *,
     act_id: str,
     title: str,
-    intent: str | None = None,
-    status: str | None = None,
-    time_horizon: str | None = None,
+    stage: str | None = None,
     notes: str | None = None,
+    link: str | None = None,
+    calendar_event_id: str | None = None,
+    recurrence_rule: str | None = None,
+    thunderbird_event_id: str | None = None,
 ) -> dict[str, Any]:
     try:
-        scenes = play_create_scene(
+        scenes, scene_id = play_create_scene(
             act_id=act_id,
             title=title,
-            intent=intent or "",
-            status=status or "",
-            time_horizon=time_horizon or "",
+            stage=stage or "",
             notes=notes or "",
+            link=link,
+            calendar_event_id=calendar_event_id,
+            recurrence_rule=recurrence_rule,
+            thunderbird_event_id=thunderbird_event_id,
         )
     except ValueError as exc:
         raise RpcError(code=-32602, message=str(exc)) from exc
     return {
+        "created_scene_id": scene_id,
         "scenes": [
             {
                 "scene_id": s.scene_id,
+                "act_id": s.act_id,
                 "title": s.title,
-                "intent": s.intent,
-                "status": s.status,
-                "time_horizon": s.time_horizon,
+                "stage": s.stage,
                 "notes": s.notes,
+                "link": s.link,
+                "calendar_event_id": s.calendar_event_id,
+                "recurrence_rule": s.recurrence_rule,
+                "thunderbird_event_id": s.thunderbird_event_id,
             }
             for s in scenes
         ]
@@ -2325,20 +2340,24 @@ def _handle_play_scenes_update(
     act_id: str,
     scene_id: str,
     title: str | None = None,
-    intent: str | None = None,
-    status: str | None = None,
-    time_horizon: str | None = None,
+    stage: str | None = None,
     notes: str | None = None,
+    link: str | None = None,
+    calendar_event_id: str | None = None,
+    recurrence_rule: str | None = None,
+    thunderbird_event_id: str | None = None,
 ) -> dict[str, Any]:
     try:
         scenes = play_update_scene(
             act_id=act_id,
             scene_id=scene_id,
             title=title,
-            intent=intent,
-            status=status,
-            time_horizon=time_horizon,
+            stage=stage,
             notes=notes,
+            link=link,
+            calendar_event_id=calendar_event_id,
+            recurrence_rule=recurrence_rule,
+            thunderbird_event_id=thunderbird_event_id,
         )
     except ValueError as exc:
         raise RpcError(code=-32602, message=str(exc)) from exc
@@ -2346,11 +2365,14 @@ def _handle_play_scenes_update(
         "scenes": [
             {
                 "scene_id": s.scene_id,
+                "act_id": s.act_id,
                 "title": s.title,
-                "intent": s.intent,
-                "status": s.status,
-                "time_horizon": s.time_horizon,
+                "stage": s.stage,
                 "notes": s.notes,
+                "link": s.link,
+                "calendar_event_id": s.calendar_event_id,
+                "recurrence_rule": s.recurrence_rule,
+                "thunderbird_event_id": s.thunderbird_event_id,
             }
             for s in scenes
         ]
@@ -2361,16 +2383,16 @@ def _handle_play_beats_create(
     _db: Database,
     *,
     act_id: str,
-    scene_id: str,
+    scene_id: str,  # Ignored in v4 - beats are now scenes
     title: str,
     stage: str | None = None,
     notes: str | None = None,
     link: str | None = None,
 ) -> dict[str, Any]:
+    """Backward compatibility: create a scene (formerly beat)."""
     try:
-        beats = play_create_beat(
+        scenes, scene_id = play_create_scene(
             act_id=act_id,
-            scene_id=scene_id,
             title=title,
             stage=stage or "",
             notes=notes or "",
@@ -2381,15 +2403,16 @@ def _handle_play_beats_create(
     return {
         "beats": [
             {
-                "beat_id": b.beat_id,
-                "title": b.title,
-                "stage": b.stage,
-                "notes": b.notes,
-                "link": b.link,
-                "calendar_event_id": b.calendar_event_id,
-                "recurrence_rule": b.recurrence_rule,
+                "beat_id": s.scene_id,
+                "title": s.title,
+                "stage": s.stage,
+                "notes": s.notes,
+                "link": s.link,
+                "calendar_event_id": s.calendar_event_id,
+                "recurrence_rule": s.recurrence_rule,
+                "thunderbird_event_id": s.thunderbird_event_id,
             }
-            for b in beats
+            for s in scenes
         ]
     }
 
@@ -2398,18 +2421,18 @@ def _handle_play_beats_update(
     _db: Database,
     *,
     act_id: str,
-    scene_id: str,
+    scene_id: str,  # Ignored in v4 - beats are now scenes
     beat_id: str,
     title: str | None = None,
     stage: str | None = None,
     notes: str | None = None,
     link: str | None = None,
 ) -> dict[str, Any]:
+    """Backward compatibility: update a scene (formerly beat)."""
     try:
-        beats = play_update_beat(
+        scenes = play_update_scene(
             act_id=act_id,
-            scene_id=scene_id,
-            beat_id=beat_id,
+            scene_id=beat_id,  # beat_id is now scene_id
             title=title,
             stage=stage,
             notes=notes,
@@ -2420,15 +2443,16 @@ def _handle_play_beats_update(
     return {
         "beats": [
             {
-                "beat_id": b.beat_id,
-                "title": b.title,
-                "stage": b.stage,
-                "notes": b.notes,
-                "link": b.link,
-                "calendar_event_id": b.calendar_event_id,
-                "recurrence_rule": b.recurrence_rule,
+                "beat_id": s.scene_id,
+                "title": s.title,
+                "stage": s.stage,
+                "notes": s.notes,
+                "link": s.link,
+                "calendar_event_id": s.calendar_event_id,
+                "recurrence_rule": s.recurrence_rule,
+                "thunderbird_event_id": s.thunderbird_event_id,
             }
-            for b in beats
+            for s in scenes
         ]
     }
 
@@ -2438,18 +2462,16 @@ def _handle_play_beats_move(
     *,
     beat_id: str,
     source_act_id: str,
-    source_scene_id: str,
+    source_scene_id: str,  # Ignored in v4
     target_act_id: str,
-    target_scene_id: str,
+    target_scene_id: str,  # Ignored in v4
 ) -> dict[str, Any]:
-    """Move a Beat from one Scene to another."""
+    """Backward compatibility: move a scene (formerly beat) between acts."""
     try:
-        result = play_move_beat(
-            beat_id=beat_id,
+        result = play_move_scene(
+            scene_id=beat_id,
             source_act_id=source_act_id,
-            source_scene_id=source_scene_id,
             target_act_id=target_act_id,
-            target_scene_id=target_scene_id,
         )
     except ValueError as exc:
         raise RpcError(code=-32602, message=str(exc)) from exc
@@ -2461,11 +2483,15 @@ def _handle_play_beats_move(
             from .cairn.store import CairnStore
 
             store = CairnStore(Path(play_path) / ".cairn" / "cairn.db")
-            store.update_beat_location(beat_id, target_act_id, target_scene_id)
+            store.update_scene_location(beat_id, target_act_id)
     except Exception:
         pass  # Don't fail the move if cache update fails
 
-    return result
+    return {
+        "beat_id": result["scene_id"],
+        "target_act_id": result["target_act_id"],
+        "target_scene_id": target_scene_id,  # Return for backward compat
+    }
 
 
 def _handle_play_kb_list(
@@ -3773,15 +3799,19 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                 raise RpcError(code=-32602, message="act_id is required")
             if not isinstance(title, str) or not title.strip():
                 raise RpcError(code=-32602, message="title is required")
-            intent = params.get("intent")
-            status = params.get("status")
-            time_horizon = params.get("time_horizon")
+            stage = params.get("stage")
             notes = params.get("notes")
+            link = params.get("link")
+            calendar_event_id = params.get("calendar_event_id")
+            recurrence_rule = params.get("recurrence_rule")
+            thunderbird_event_id = params.get("thunderbird_event_id")
             for k, v in {
-                "intent": intent,
-                "status": status,
-                "time_horizon": time_horizon,
+                "stage": stage,
                 "notes": notes,
+                "link": link,
+                "calendar_event_id": calendar_event_id,
+                "recurrence_rule": recurrence_rule,
+                "thunderbird_event_id": thunderbird_event_id,
             }.items():
                 if v is not None and not isinstance(v, str):
                     raise RpcError(code=-32602, message=f"{k} must be a string or null")
@@ -3791,10 +3821,12 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                     db,
                     act_id=act_id,
                     title=title,
-                    intent=intent,
-                    status=status,
-                    time_horizon=time_horizon,
+                    stage=stage,
                     notes=notes,
+                    link=link,
+                    calendar_event_id=calendar_event_id,
+                    recurrence_rule=recurrence_rule,
+                    thunderbird_event_id=thunderbird_event_id,
                 ),
             )
 
@@ -3808,16 +3840,20 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             if not isinstance(scene_id, str) or not scene_id:
                 raise RpcError(code=-32602, message="scene_id is required")
             title = params.get("title")
-            intent = params.get("intent")
-            status = params.get("status")
-            time_horizon = params.get("time_horizon")
+            stage = params.get("stage")
             notes = params.get("notes")
+            link = params.get("link")
+            calendar_event_id = params.get("calendar_event_id")
+            recurrence_rule = params.get("recurrence_rule")
+            thunderbird_event_id = params.get("thunderbird_event_id")
             for k, v in {
                 "title": title,
-                "intent": intent,
-                "status": status,
-                "time_horizon": time_horizon,
+                "stage": stage,
                 "notes": notes,
+                "link": link,
+                "calendar_event_id": calendar_event_id,
+                "recurrence_rule": recurrence_rule,
+                "thunderbird_event_id": thunderbird_event_id,
             }.items():
                 if v is not None and not isinstance(v, str):
                     raise RpcError(code=-32602, message=f"{k} must be a string or null")
@@ -3828,10 +3864,12 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                     act_id=act_id,
                     scene_id=scene_id,
                     title=title,
-                    intent=intent,
-                    status=status,
-                    time_horizon=time_horizon,
+                    stage=stage,
                     notes=notes,
+                    link=link,
+                    calendar_event_id=calendar_event_id,
+                    recurrence_rule=recurrence_rule,
+                    thunderbird_event_id=thunderbird_event_id,
                 ),
             )
 

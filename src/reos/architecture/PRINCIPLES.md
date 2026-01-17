@@ -44,13 +44,13 @@ ReOS agents (CAIRN, RIVA) should be able to:
 **Best Practices for Searchability:**
 ```python
 # Good: Descriptive name + docstring
-def sync_calendar_to_beats(thunderbird, store, hours=168):
-    """Sync calendar events to Beats in The Play.
+def sync_calendar_to_scenes(thunderbird, store, hours=168):
+    """Sync calendar events to Scenes in The Play.
 
     For each calendar event (NOT expanded recurring events):
-    1. Check if a Beat already exists
-    2. If not, create Beat in Your Story -> Stage Direction
-    3. Link the Beat to the calendar event
+    1. Check if a Scene already exists for this event
+    2. If not, create Scene in the appropriate Act
+    3. Link the Scene to the calendar event
     """
 
 # Bad: Vague name, no docstring
@@ -107,31 +107,29 @@ Every public function/class should have:
 5. Raises (if applicable)
 
 ```python
-def create_beat(
+def create_scene(
     *,
     act_id: str,
-    scene_id: str,
     title: str,
     stage: str = "planning",
     notes: str = "",
-) -> list[Beat]:
-    """Create a new Beat in a Scene.
+) -> list[Scene]:
+    """Create a new Scene in an Act.
 
-    Beats represent individual tasks or items within a Scene.
+    Scenes represent calendar events or tasks within an Act's narrative.
     They progress through stages: planning → in_progress → awaiting_data → complete.
 
     Args:
-        act_id: ID of the Act containing the Scene.
-        scene_id: ID of the Scene to add the Beat to.
-        title: Title for the new Beat.
+        act_id: ID of the Act to add the Scene to.
+        title: Title for the new Scene.
         stage: Initial stage (default: "planning").
-        notes: Optional notes for the Beat.
+        notes: Optional notes for the Scene.
 
     Returns:
-        Updated list of all Beats in the Scene.
+        Updated list of all Scenes in the Act.
 
     Raises:
-        ValueError: If the Act or Scene doesn't exist.
+        ValueError: If the Act doesn't exist.
     """
 ```
 
@@ -162,17 +160,16 @@ Every tool should have:
 
 ```python
 Tool(
-    name="cairn_move_beat_to_act",
+    name="cairn_move_scene",
     description=(
-        "Move a Beat to a different Act. Uses fuzzy matching for names. "
-        "The Beat will be placed in the target Act's Stage Direction scene."
+        "Move a Scene to a different Act. Uses fuzzy matching for names."
     ),
     input_schema={
         "type": "object",
         "properties": {
-            "beat_name": {
+            "scene_name": {
                 "type": "string",
-                "description": "Name of the Beat to move (fuzzy matched)"
+                "description": "Name of the Scene to move (fuzzy matched)"
             },
             "target_act_name": {
                 "type": "string",
@@ -208,8 +205,8 @@ After changes, verify agents can:
 1. "How does the intent engine work?"
    → Should describe 4-stage pipeline
 
-2. "Where is beat creation implemented?"
-   → Should find play_fs.py:create_beat
+2. "Where is scene creation implemented?"
+   → Should find play_fs.py:create_scene
 
 3. "Why do we use a theatrical metaphor?"
    → Should reference ADR-0001

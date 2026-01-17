@@ -1,10 +1,16 @@
 """SQLite-based storage for The Play.
 
-This module provides atomic, efficient storage for Play data (Acts, Scenes, Beats)
+This module provides atomic, efficient storage for Play data (Acts, Scenes)
 using SQLite instead of JSON files. The KB files (markdown) remain as files since
 they are human-editable and can be large.
 
 Migration: On first use, existing JSON data is automatically migrated to SQLite.
+
+Architecture (v4):
+- Acts: Major chapters/themes in your journey
+- Scenes: Individual todo items/tasks (formerly called Beats)
+
+The old 3-tier hierarchy (Acts → Scenes → Beats) is now 2-tier (Acts → Scenes).
 """
 
 from __future__ import annotations
@@ -15,7 +21,6 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -32,7 +37,8 @@ _local = threading.local()
 # v1: Initial schema
 # v2: Added color column to acts table
 # v3: Added thunderbird_event_id column to beats table
-SCHEMA_VERSION = 3
+# v4: Flatten hierarchy - remove old scenes tier, beats become scenes
+SCHEMA_VERSION = 4
 
 
 def _play_db_path() -> Path:
@@ -81,8 +87,27 @@ def _transaction() -> Iterator[sqlite3.Connection]:
 
 
 def _init_schema(conn: sqlite3.Connection) -> None:
-    """Initialize the database schema."""
-    # Step 1: Create tables (without indexes that depend on new columns)
+    """Initialize the database schema.
+
+    For fresh databases (v4+), creates the new 2-tier schema directly.
+    For existing databases, runs migrations to get to v4.
+    """
+    # Check if we have an existing schema version
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
+    )
+    has_schema_version = cursor.fetchone() is not None
+
+    if has_schema_version:
+        cursor = conn.execute("SELECT version FROM schema_version LIMIT 1")
+        row = cursor.fetchone()
+        if row is not None:
+            current_version = row[0]
+            if current_version < SCHEMA_VERSION:
+                _run_schema_migrations(conn, current_version)
+            return  # Schema already exists and is up to date
+
+    # Fresh database - create v4 schema directly
     conn.executescript("""
         -- Schema version tracking
         CREATE TABLE IF NOT EXISTS schema_version (
@@ -104,48 +129,31 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL
         );
 
-        -- Scenes table
+        -- Scenes table (v4: the todo/task items, formerly called Beats)
         CREATE TABLE IF NOT EXISTS scenes (
             scene_id TEXT PRIMARY KEY,
             act_id TEXT NOT NULL REFERENCES acts(act_id) ON DELETE CASCADE,
-            title TEXT NOT NULL,
-            intent TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT '',
-            time_horizon TEXT NOT NULL DEFAULT '',
-            notes TEXT NOT NULL DEFAULT '',
-            is_stage_direction INTEGER NOT NULL DEFAULT 0,
-            position INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_scenes_act_id ON scenes(act_id);
-
-        -- Beats table
-        CREATE TABLE IF NOT EXISTS beats (
-            beat_id TEXT PRIMARY KEY,
-            scene_id TEXT NOT NULL REFERENCES scenes(scene_id) ON DELETE CASCADE,
             title TEXT NOT NULL,
             stage TEXT NOT NULL DEFAULT 'planning',
             notes TEXT NOT NULL DEFAULT '',
             link TEXT,
             calendar_event_id TEXT,
             recurrence_rule TEXT,
-            thunderbird_event_id TEXT,  -- Outbound sync: TB event created for this Beat
+            thunderbird_event_id TEXT,
             position INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_beats_scene_id ON beats(scene_id);
-        CREATE INDEX IF NOT EXISTS idx_beats_calendar_event ON beats(calendar_event_id);
+        CREATE INDEX IF NOT EXISTS idx_scenes_act_id ON scenes(act_id);
+        CREATE INDEX IF NOT EXISTS idx_scenes_calendar_event ON scenes(calendar_event_id);
+        CREATE INDEX IF NOT EXISTS idx_scenes_thunderbird_event ON scenes(thunderbird_event_id);
 
         -- Attachments table
         CREATE TABLE IF NOT EXISTS attachments (
             attachment_id TEXT PRIMARY KEY,
             act_id TEXT REFERENCES acts(act_id) ON DELETE CASCADE,
             scene_id TEXT REFERENCES scenes(scene_id) ON DELETE CASCADE,
-            beat_id TEXT REFERENCES beats(beat_id) ON DELETE CASCADE,
             file_path TEXT NOT NULL,
             file_name TEXT NOT NULL,
             file_type TEXT NOT NULL,
@@ -154,25 +162,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_attachments_act ON attachments(act_id);
         CREATE INDEX IF NOT EXISTS idx_attachments_scene ON attachments(scene_id);
-        CREATE INDEX IF NOT EXISTS idx_attachments_beat ON attachments(beat_id);
     """)
 
-    # Set schema version if not exists
-    cursor = conn.execute("SELECT version FROM schema_version LIMIT 1")
-    row = cursor.fetchone()
-    if row is None:
-        conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
-    else:
-        current_version = row[0]
-        # Run migrations
-        _run_schema_migrations(conn, current_version)
-
-    # Step 2: Create indexes that depend on potentially new columns (after migrations)
-    # This ensures columns exist before creating indexes on them
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_beats_thunderbird_event "
-        "ON beats(thunderbird_event_id)"
-    )
+    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
 
 
 def _run_schema_migrations(conn: sqlite3.Connection, current_version: int) -> None:
@@ -184,7 +176,6 @@ def _run_schema_migrations(conn: sqlite3.Connection, current_version: int) -> No
 
     # Migration v1 -> v2: Add color column to acts table
     if current_version < 2:
-        # Check if color column already exists
         cursor = conn.execute("PRAGMA table_info(acts)")
         columns = [row[1] for row in cursor.fetchall()]
         if "color" not in columns:
@@ -193,17 +184,127 @@ def _run_schema_migrations(conn: sqlite3.Connection, current_version: int) -> No
 
     # Migration v2 -> v3: Add thunderbird_event_id column to beats table
     if current_version < 3 and current_version > 0:
-        # Check if thunderbird_event_id column already exists
         cursor = conn.execute("PRAGMA table_info(beats)")
         columns = [row[1] for row in cursor.fetchall()]
         if "thunderbird_event_id" not in columns:
             logger.info("Adding thunderbird_event_id column to beats table")
             conn.execute("ALTER TABLE beats ADD COLUMN thunderbird_event_id TEXT")
-        # Note: Index is created after _init_schema completes
+
+    # Migration v3 -> v4: Flatten hierarchy (beats become scenes)
+    if current_version < 4:
+        logger.info("Running v4 migration: Flatten hierarchy (beats → scenes)")
+        _migrate_v3_to_v4(conn)
 
     # Update schema version
     conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
     logger.info(f"Schema migrated to v{SCHEMA_VERSION}")
+
+
+def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
+    """Migrate from v3 (3-tier) to v4 (2-tier) schema.
+
+    Beats become Scenes, old Scenes tier is removed.
+    """
+    # Step 1: Check if beats table exists (might be fresh install)
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='beats'"
+    )
+    if not cursor.fetchone():
+        logger.info("No beats table found, nothing to migrate")
+        return
+
+    # Step 2: Add act_id column to beats table
+    cursor = conn.execute("PRAGMA table_info(beats)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "act_id" not in columns:
+        logger.info("Adding act_id column to beats table")
+        conn.execute("ALTER TABLE beats ADD COLUMN act_id TEXT")
+
+    # Step 3: Backfill act_id from parent scene
+    logger.info("Backfilling act_id from parent scenes")
+    conn.execute("""
+        UPDATE beats
+        SET act_id = (SELECT act_id FROM scenes WHERE scenes.scene_id = beats.scene_id)
+        WHERE act_id IS NULL
+    """)
+
+    # Step 4: Create new scenes table with v4 structure
+    logger.info("Creating new scenes table structure")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS scenes_new (
+            scene_id TEXT PRIMARY KEY,
+            act_id TEXT NOT NULL REFERENCES acts(act_id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            stage TEXT NOT NULL DEFAULT 'planning',
+            notes TEXT NOT NULL DEFAULT '',
+            link TEXT,
+            calendar_event_id TEXT,
+            recurrence_rule TEXT,
+            thunderbird_event_id TEXT,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    # Step 5: Copy beats → scenes_new (using beat_id as scene_id)
+    logger.info("Copying beats to new scenes table")
+    conn.execute("""
+        INSERT INTO scenes_new (scene_id, act_id, title, stage, notes, link,
+            calendar_event_id, recurrence_rule, thunderbird_event_id, position, created_at, updated_at)
+        SELECT beat_id, act_id, title, stage, notes, link,
+            calendar_event_id, recurrence_rule, thunderbird_event_id, position, created_at, updated_at
+        FROM beats
+        WHERE act_id IS NOT NULL
+    """)
+
+    # Step 6: Update attachments - migrate beat_id references to scene_id
+    logger.info("Migrating attachment references")
+    # First check if beat_id column exists in attachments
+    cursor = conn.execute("PRAGMA table_info(attachments)")
+    att_columns = [row[1] for row in cursor.fetchall()]
+    if "beat_id" in att_columns:
+        conn.execute("""
+            UPDATE attachments SET scene_id = beat_id WHERE beat_id IS NOT NULL
+        """)
+
+    # Step 7: Drop old tables and rename new
+    logger.info("Dropping old tables and renaming")
+    conn.execute("DROP TABLE IF EXISTS beats")
+    conn.execute("DROP TABLE IF EXISTS scenes")
+    conn.execute("ALTER TABLE scenes_new RENAME TO scenes")
+
+    # Step 8: Create indexes on new scenes table
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_scenes_act_id ON scenes(act_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_scenes_calendar_event ON scenes(calendar_event_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_scenes_thunderbird_event ON scenes(thunderbird_event_id)")
+
+    # Step 9: Clean up attachments table - remove beat_id column if it exists
+    # SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
+    if "beat_id" in att_columns:
+        logger.info("Cleaning up attachments table")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS attachments_new (
+                attachment_id TEXT PRIMARY KEY,
+                act_id TEXT REFERENCES acts(act_id) ON DELETE CASCADE,
+                scene_id TEXT REFERENCES scenes(scene_id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                file_type TEXT NOT NULL,
+                added_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO attachments_new (attachment_id, act_id, scene_id, file_path, file_name, file_type, added_at)
+            SELECT attachment_id, act_id, scene_id, file_path, file_name, file_type, added_at
+            FROM attachments
+        """)
+        conn.execute("DROP TABLE attachments")
+        conn.execute("ALTER TABLE attachments_new RENAME TO attachments")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_attachments_act ON attachments(act_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_attachments_scene ON attachments(scene_id)")
+
+    logger.info("v4 migration complete")
 
 
 def _now_iso() -> str:
@@ -221,7 +322,10 @@ def _new_id(prefix: str) -> str:
 # =============================================================================
 
 def _migrate_from_json(conn: sqlite3.Connection) -> None:
-    """Migrate existing JSON data to SQLite."""
+    """Migrate existing JSON data to SQLite.
+
+    This handles fresh JSON imports into the v4 schema.
+    """
     base = Path(os.environ.get("REOS_DATA_DIR", settings.data_dir))
     play_root = base / "play"
     acts_json = play_root / "acts.json"
@@ -236,7 +340,7 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
         logger.info("SQLite already has data, skipping JSON migration")
         return
 
-    logger.info("Migrating Play data from JSON to SQLite...")
+    logger.info("Migrating Play data from JSON to SQLite (v4 schema)...")
 
     try:
         # Load acts
@@ -275,7 +379,7 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
                 now,
             ))
 
-            # Load scenes for this act
+            # Load scenes for this act (these contain beats in old structure)
             scenes_json = play_root / "acts" / act_id / "scenes.json"
             if scenes_json.exists():
                 try:
@@ -283,36 +387,15 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
                         scenes_data = json.load(f)
 
                     scenes_list = scenes_data.get("scenes", [])
-                    for scene_pos, scene in enumerate(scenes_list):
-                        if not isinstance(scene, dict):
+                    scene_position = 0
+
+                    for old_scene in scenes_list:
+                        if not isinstance(old_scene, dict):
                             continue
 
-                        scene_id = scene.get("scene_id", "")
-                        if not scene_id:
-                            continue
-
-                        # Insert scene
-                        conn.execute("""
-                            INSERT OR IGNORE INTO scenes
-                            (scene_id, act_id, title, intent, status, time_horizon, notes, is_stage_direction, position, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            scene_id,
-                            act_id,
-                            scene.get("title", "Untitled"),
-                            scene.get("intent", ""),
-                            scene.get("status", ""),
-                            scene.get("time_horizon", ""),
-                            scene.get("notes", ""),
-                            1 if scene.get("is_stage_direction") else 0,
-                            scene_pos,
-                            now,
-                            now,
-                        ))
-
-                        # Load beats for this scene
-                        beats_list = scene.get("beats", [])
-                        for beat_pos, beat in enumerate(beats_list):
+                        # Load beats from this old scene and convert to new scenes
+                        beats_list = old_scene.get("beats", [])
+                        for beat in beats_list:
                             if not isinstance(beat, dict):
                                 continue
 
@@ -329,24 +412,28 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
                             elif stage in ("completed", "done"):
                                 stage = "complete"
 
-                            # Insert beat
+                            # Insert as new scene (beat_id becomes scene_id)
                             conn.execute("""
-                                INSERT OR IGNORE INTO beats
-                                (beat_id, scene_id, title, stage, notes, link, calendar_event_id, recurrence_rule, position, created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                INSERT OR IGNORE INTO scenes
+                                (scene_id, act_id, title, stage, notes, link, calendar_event_id,
+                                 recurrence_rule, thunderbird_event_id, position, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
-                                beat_id,
-                                scene_id,
+                                beat_id,  # beat_id becomes scene_id
+                                act_id,
                                 beat.get("title", "Untitled"),
                                 stage,
                                 beat.get("notes", ""),
                                 beat.get("link"),
                                 beat.get("calendar_event_id"),
                                 beat.get("recurrence_rule"),
-                                beat_pos,
+                                beat.get("thunderbird_event_id"),
+                                scene_position,
                                 now,
                                 now,
                             ))
+                            scene_position += 1
+
                 except Exception as e:
                     logger.warning(f"Error migrating scenes for act {act_id}: {e}")
 
@@ -362,15 +449,17 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
                             if not isinstance(att, dict):
                                 continue
 
+                            # Map beat_id to scene_id
+                            scene_id = att.get("beat_id") or att.get("scene_id")
+
                             conn.execute("""
                                 INSERT OR IGNORE INTO attachments
-                                (attachment_id, act_id, scene_id, beat_id, file_path, file_name, file_type, added_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                (attachment_id, act_id, scene_id, file_path, file_name, file_type, added_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 att.get("attachment_id", _new_id("att")),
                                 att.get("act_id"),
-                                att.get("scene_id"),
-                                att.get("beat_id"),
+                                scene_id,
                                 att.get("file_path", ""),
                                 att.get("file_name", ""),
                                 att.get("file_type", ""),
@@ -483,9 +572,6 @@ def create_act(*, title: str, notes: str = "", color: str | None = None) -> tupl
             VALUES (?, ?, 0, ?, ?, ?, ?, ?)
         """, (act_id, title, notes, color, position, now, now))
 
-        # Create stage direction scene
-        _ensure_stage_direction_scene_db(conn, act_id)
-
     acts, _ = list_acts()
     return acts, act_id
 
@@ -540,7 +626,7 @@ def set_active_act(act_id: str | None) -> tuple[list[dict[str, Any]], str | None
 
 
 def delete_act(act_id: str) -> tuple[list[dict[str, Any]], str | None]:
-    """Delete an act and all its scenes/beats."""
+    """Delete an act and all its scenes."""
     with _transaction() as conn:
         conn.execute("DELETE FROM acts WHERE act_id = ?", (act_id,))
 
@@ -561,38 +647,16 @@ def assign_repo_to_act(*, act_id: str, repo_path: str | None, artifact_type: str
 
 
 # =============================================================================
-# Scenes Operations
+# Scenes Operations (formerly Beats)
 # =============================================================================
-
-def _ensure_stage_direction_scene_db(conn: sqlite3.Connection, act_id: str) -> str:
-    """Ensure an act has a stage direction scene."""
-    stage_direction_id = f"stage-direction-{act_id[:12]}"
-    now = _now_iso()
-
-    # Check if exists
-    cursor = conn.execute(
-        "SELECT scene_id FROM scenes WHERE scene_id = ?",
-        (stage_direction_id,)
-    )
-    if cursor.fetchone():
-        return stage_direction_id
-
-    # Create it at position 0
-    conn.execute("""
-        INSERT INTO scenes
-        (scene_id, act_id, title, intent, is_stage_direction, position, created_at, updated_at)
-        VALUES (?, ?, 'Stage Direction', 'Default container for unassigned Beats', 1, 0, ?, ?)
-    """, (stage_direction_id, act_id, now, now))
-
-    return stage_direction_id
-
 
 def list_scenes(act_id: str) -> list[dict[str, Any]]:
     """List all scenes for an act."""
     conn = _get_connection()
 
     cursor = conn.execute("""
-        SELECT scene_id, act_id, title, intent, status, time_horizon, notes, is_stage_direction
+        SELECT scene_id, act_id, title, stage, notes, link, calendar_event_id,
+               recurrence_rule, thunderbird_event_id
         FROM scenes
         WHERE act_id = ?
         ORDER BY position ASC
@@ -603,18 +667,47 @@ def list_scenes(act_id: str) -> list[dict[str, Any]]:
             "scene_id": row["scene_id"],
             "act_id": row["act_id"],
             "title": row["title"],
-            "intent": row["intent"],
-            "status": row["status"],
-            "time_horizon": row["time_horizon"],
+            "stage": row["stage"],
             "notes": row["notes"],
-            "is_stage_direction": bool(row["is_stage_direction"]),
+            "link": row["link"],
+            "calendar_event_id": row["calendar_event_id"],
+            "recurrence_rule": row["recurrence_rule"],
+            "thunderbird_event_id": row["thunderbird_event_id"],
         }
         for row in cursor
     ]
 
 
-def create_scene(*, act_id: str, title: str, intent: str = "", status: str = "",
-                 time_horizon: str = "", notes: str = "") -> tuple[list[dict[str, Any]], str]:
+def get_scene(scene_id: str) -> dict[str, Any] | None:
+    """Get a scene by ID."""
+    conn = _get_connection()
+    cursor = conn.execute("""
+        SELECT scene_id, act_id, title, stage, notes, link, calendar_event_id,
+               recurrence_rule, thunderbird_event_id
+        FROM scenes WHERE scene_id = ?
+    """, (scene_id,))
+
+    row = cursor.fetchone()
+    if not row:
+        return None
+
+    return {
+        "scene_id": row["scene_id"],
+        "act_id": row["act_id"],
+        "title": row["title"],
+        "stage": row["stage"],
+        "notes": row["notes"],
+        "link": row["link"],
+        "calendar_event_id": row["calendar_event_id"],
+        "recurrence_rule": row["recurrence_rule"],
+        "thunderbird_event_id": row["thunderbird_event_id"],
+    }
+
+
+def create_scene(*, act_id: str, title: str, stage: str = "planning",
+                 notes: str = "", link: str | None = None, calendar_event_id: str | None = None,
+                 recurrence_rule: str | None = None,
+                 thunderbird_event_id: str | None = None) -> tuple[list[dict[str, Any]], str]:
     """Create a new scene."""
     scene_id = _new_id("scene")
     now = _now_iso()
@@ -629,146 +722,20 @@ def create_scene(*, act_id: str, title: str, intent: str = "", status: str = "",
 
         conn.execute("""
             INSERT INTO scenes
-            (scene_id, act_id, title, intent, status, time_horizon, notes, position, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (scene_id, act_id, title, intent, status, time_horizon, notes, position, now, now))
+            (scene_id, act_id, title, stage, notes, link, calendar_event_id, recurrence_rule,
+             thunderbird_event_id, position, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (scene_id, act_id, title, stage, notes, link, calendar_event_id, recurrence_rule,
+              thunderbird_event_id, position, now, now))
 
     return list_scenes(act_id), scene_id
 
 
-def update_scene(*, act_id: str, scene_id: str, title: str | None = None, intent: str | None = None,
-                 status: str | None = None, time_horizon: str | None = None,
-                 notes: str | None = None) -> list[dict[str, Any]]:
+def update_scene(*, act_id: str, scene_id: str, title: str | None = None,
+                 stage: str | None = None, notes: str | None = None, link: str | None = None,
+                 calendar_event_id: str | None = None, recurrence_rule: str | None = None,
+                 thunderbird_event_id: str | None = None) -> list[dict[str, Any]]:
     """Update a scene."""
-    now = _now_iso()
-
-    with _transaction() as conn:
-        updates = ["updated_at = ?"]
-        params: list[Any] = [now]
-
-        if title is not None:
-            updates.append("title = ?")
-            params.append(title)
-        if intent is not None:
-            updates.append("intent = ?")
-            params.append(intent)
-        if status is not None:
-            updates.append("status = ?")
-            params.append(status)
-        if time_horizon is not None:
-            updates.append("time_horizon = ?")
-            params.append(time_horizon)
-        if notes is not None:
-            updates.append("notes = ?")
-            params.append(notes)
-
-        params.append(scene_id)
-
-        conn.execute(f"""
-            UPDATE scenes SET {', '.join(updates)} WHERE scene_id = ?
-        """, params)
-
-    return list_scenes(act_id)
-
-
-def delete_scene(act_id: str, scene_id: str) -> list[dict[str, Any]]:
-    """Delete a scene and all its beats."""
-    with _transaction() as conn:
-        conn.execute("DELETE FROM scenes WHERE scene_id = ?", (scene_id,))
-
-    return list_scenes(act_id)
-
-
-# =============================================================================
-# Beats Operations
-# =============================================================================
-
-def list_beats(act_id: str, scene_id: str) -> list[dict[str, Any]]:
-    """List all beats for a scene."""
-    conn = _get_connection()
-
-    cursor = conn.execute("""
-        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id,
-               recurrence_rule, thunderbird_event_id
-        FROM beats
-        WHERE scene_id = ?
-        ORDER BY position ASC
-    """, (scene_id,))
-
-    return [
-        {
-            "beat_id": row["beat_id"],
-            "scene_id": row["scene_id"],
-            "title": row["title"],
-            "stage": row["stage"],
-            "notes": row["notes"],
-            "link": row["link"],
-            "calendar_event_id": row["calendar_event_id"],
-            "recurrence_rule": row["recurrence_rule"],
-            "thunderbird_event_id": row["thunderbird_event_id"],
-        }
-        for row in cursor
-    ]
-
-
-def get_beat(beat_id: str) -> dict[str, Any] | None:
-    """Get a beat by ID."""
-    conn = _get_connection()
-    cursor = conn.execute("""
-        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id,
-               recurrence_rule, thunderbird_event_id
-        FROM beats WHERE beat_id = ?
-    """, (beat_id,))
-
-    row = cursor.fetchone()
-    if not row:
-        return None
-
-    return {
-        "beat_id": row["beat_id"],
-        "scene_id": row["scene_id"],
-        "title": row["title"],
-        "stage": row["stage"],
-        "notes": row["notes"],
-        "link": row["link"],
-        "calendar_event_id": row["calendar_event_id"],
-        "recurrence_rule": row["recurrence_rule"],
-        "thunderbird_event_id": row["thunderbird_event_id"],
-    }
-
-
-def create_beat(*, act_id: str, scene_id: str, title: str, stage: str = "planning",
-                notes: str = "", link: str | None = None, calendar_event_id: str | None = None,
-                recurrence_rule: str | None = None,
-                thunderbird_event_id: str | None = None) -> tuple[list[dict[str, Any]], str]:
-    """Create a new beat."""
-    beat_id = _new_id("beat")
-    now = _now_iso()
-
-    with _transaction() as conn:
-        # Get max position for this scene
-        cursor = conn.execute(
-            "SELECT COALESCE(MAX(position), -1) + 1 FROM beats WHERE scene_id = ?",
-            (scene_id,)
-        )
-        position = cursor.fetchone()[0]
-
-        conn.execute("""
-            INSERT INTO beats
-            (beat_id, scene_id, title, stage, notes, link, calendar_event_id, recurrence_rule,
-             thunderbird_event_id, position, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (beat_id, scene_id, title, stage, notes, link, calendar_event_id, recurrence_rule,
-              thunderbird_event_id, position, now, now))
-
-    return list_beats(act_id, scene_id), beat_id
-
-
-def update_beat(*, act_id: str, scene_id: str, beat_id: str, title: str | None = None,
-                stage: str | None = None, notes: str | None = None, link: str | None = None,
-                calendar_event_id: str | None = None, recurrence_rule: str | None = None,
-                thunderbird_event_id: str | None = None) -> list[dict[str, Any]]:
-    """Update a beat."""
     now = _now_iso()
 
     with _transaction() as conn:
@@ -797,68 +764,66 @@ def update_beat(*, act_id: str, scene_id: str, beat_id: str, title: str | None =
             updates.append("thunderbird_event_id = ?")
             params.append(thunderbird_event_id if thunderbird_event_id else None)
 
-        params.append(beat_id)
+        params.append(scene_id)
 
         conn.execute(f"""
-            UPDATE beats SET {', '.join(updates)} WHERE beat_id = ?
+            UPDATE scenes SET {', '.join(updates)} WHERE scene_id = ?
         """, params)
 
-    return list_beats(act_id, scene_id)
+    return list_scenes(act_id)
 
 
-def delete_beat(act_id: str, scene_id: str, beat_id: str) -> list[dict[str, Any]]:
-    """Delete a beat."""
+def delete_scene(act_id: str, scene_id: str) -> list[dict[str, Any]]:
+    """Delete a scene."""
     with _transaction() as conn:
-        conn.execute("DELETE FROM beats WHERE beat_id = ?", (beat_id,))
+        conn.execute("DELETE FROM scenes WHERE scene_id = ?", (scene_id,))
 
-    return list_beats(act_id, scene_id)
+    return list_scenes(act_id)
 
 
-def move_beat(*, beat_id: str, source_act_id: str, source_scene_id: str,
-              target_act_id: str, target_scene_id: str) -> dict[str, Any]:
-    """Move a beat to a different scene."""
+def move_scene(*, scene_id: str, source_act_id: str,
+               target_act_id: str) -> dict[str, Any]:
+    """Move a scene to a different act."""
     now = _now_iso()
 
     with _transaction() as conn:
-        # Verify beat exists
-        cursor = conn.execute("SELECT beat_id FROM beats WHERE beat_id = ?", (beat_id,))
+        # Verify scene exists
+        cursor = conn.execute("SELECT scene_id FROM scenes WHERE scene_id = ?", (scene_id,))
         if not cursor.fetchone():
-            raise ValueError(f"Beat not found: {beat_id}")
+            raise ValueError(f"Scene not found: {scene_id}")
 
-        # Get max position in target scene
+        # Get max position in target act
         cursor = conn.execute(
-            "SELECT COALESCE(MAX(position), -1) + 1 FROM beats WHERE scene_id = ?",
-            (target_scene_id,)
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM scenes WHERE act_id = ?",
+            (target_act_id,)
         )
         position = cursor.fetchone()[0]
 
-        # Move the beat
+        # Move the scene
         conn.execute("""
-            UPDATE beats SET scene_id = ?, position = ?, updated_at = ?
-            WHERE beat_id = ?
-        """, (target_scene_id, position, now, beat_id))
+            UPDATE scenes SET act_id = ?, position = ?, updated_at = ?
+            WHERE scene_id = ?
+        """, (target_act_id, position, now, scene_id))
 
     return {
-        "beat_id": beat_id,
+        "scene_id": scene_id,
         "target_act_id": target_act_id,
-        "target_scene_id": target_scene_id,
     }
 
 
-def find_beat_location(beat_id: str) -> dict[str, str | None] | None:
-    """Find the act and scene containing a beat.
+def find_scene_location(scene_id: str) -> dict[str, str | None] | None:
+    """Find the act containing a scene.
 
-    This is the CANONICAL source for beat location.
+    This is the CANONICAL source for scene location.
     """
     conn = _get_connection()
 
     cursor = conn.execute("""
-        SELECT b.beat_id, s.scene_id, s.title as scene_title, a.act_id, a.title as act_title
-        FROM beats b
-        JOIN scenes s ON b.scene_id = s.scene_id
+        SELECT s.scene_id, a.act_id, a.title as act_title
+        FROM scenes s
         JOIN acts a ON s.act_id = a.act_id
-        WHERE b.beat_id = ?
-    """, (beat_id,))
+        WHERE s.scene_id = ?
+    """, (scene_id,))
 
     row = cursor.fetchone()
     if not row:
@@ -868,18 +833,17 @@ def find_beat_location(beat_id: str) -> dict[str, str | None] | None:
         "act_id": row["act_id"],
         "act_title": row["act_title"],
         "scene_id": row["scene_id"],
-        "scene_title": row["scene_title"],
     }
 
 
-def find_beat_by_calendar_event(calendar_event_id: str) -> dict[str, Any] | None:
-    """Find a beat by its calendar event ID (inbound sync)."""
+def find_scene_by_calendar_event(calendar_event_id: str) -> dict[str, Any] | None:
+    """Find a scene by its calendar event ID (inbound sync)."""
     conn = _get_connection()
 
     cursor = conn.execute("""
-        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id,
+        SELECT scene_id, act_id, title, stage, notes, link, calendar_event_id,
                recurrence_rule, thunderbird_event_id
-        FROM beats WHERE calendar_event_id = ?
+        FROM scenes WHERE calendar_event_id = ?
     """, (calendar_event_id,))
 
     row = cursor.fetchone()
@@ -887,8 +851,8 @@ def find_beat_by_calendar_event(calendar_event_id: str) -> dict[str, Any] | None
         return None
 
     return {
-        "beat_id": row["beat_id"],
         "scene_id": row["scene_id"],
+        "act_id": row["act_id"],
         "title": row["title"],
         "stage": row["stage"],
         "notes": row["notes"],
@@ -899,14 +863,14 @@ def find_beat_by_calendar_event(calendar_event_id: str) -> dict[str, Any] | None
     }
 
 
-def find_beat_by_thunderbird_event(thunderbird_event_id: str) -> dict[str, Any] | None:
-    """Find a beat by its Thunderbird event ID (outbound sync)."""
+def find_scene_by_thunderbird_event(thunderbird_event_id: str) -> dict[str, Any] | None:
+    """Find a scene by its Thunderbird event ID (outbound sync)."""
     conn = _get_connection()
 
     cursor = conn.execute("""
-        SELECT beat_id, scene_id, title, stage, notes, link, calendar_event_id,
+        SELECT scene_id, act_id, title, stage, notes, link, calendar_event_id,
                recurrence_rule, thunderbird_event_id
-        FROM beats WHERE thunderbird_event_id = ?
+        FROM scenes WHERE thunderbird_event_id = ?
     """, (thunderbird_event_id,))
 
     row = cursor.fetchone()
@@ -914,8 +878,8 @@ def find_beat_by_thunderbird_event(thunderbird_event_id: str) -> dict[str, Any] 
         return None
 
     return {
-        "beat_id": row["beat_id"],
         "scene_id": row["scene_id"],
+        "act_id": row["act_id"],
         "title": row["title"],
         "stage": row["stage"],
         "notes": row["notes"],
@@ -926,37 +890,192 @@ def find_beat_by_thunderbird_event(thunderbird_event_id: str) -> dict[str, Any] 
     }
 
 
-def set_beat_thunderbird_event_id(beat_id: str, thunderbird_event_id: str | None) -> bool:
-    """Set the Thunderbird event ID for a Beat (outbound sync).
+def set_scene_thunderbird_event_id(scene_id: str, thunderbird_event_id: str | None) -> bool:
+    """Set the Thunderbird event ID for a Scene (outbound sync).
 
     Args:
-        beat_id: The Beat ID to update.
+        scene_id: The Scene ID to update.
         thunderbird_event_id: The Thunderbird event ID, or None to clear.
 
     Returns:
-        True if updated, False if beat not found.
+        True if updated, False if scene not found.
     """
     now = _now_iso()
 
     with _transaction() as conn:
         cursor = conn.execute("""
-            UPDATE beats SET thunderbird_event_id = ?, updated_at = ?
-            WHERE beat_id = ?
-        """, (thunderbird_event_id, now, beat_id))
+            UPDATE scenes SET thunderbird_event_id = ?, updated_at = ?
+            WHERE scene_id = ?
+        """, (thunderbird_event_id, now, scene_id))
 
         return cursor.rowcount > 0
 
 
-def clear_beat_thunderbird_event_id(beat_id: str) -> bool:
-    """Clear the Thunderbird event ID for a Beat.
+def clear_scene_thunderbird_event_id(scene_id: str) -> bool:
+    """Clear the Thunderbird event ID for a Scene.
 
     Args:
-        beat_id: The Beat ID to update.
+        scene_id: The Scene ID to update.
 
     Returns:
-        True if updated, False if beat not found.
+        True if updated, False if scene not found.
     """
-    return set_beat_thunderbird_event_id(beat_id, None)
+    return set_scene_thunderbird_event_id(scene_id, None)
+
+
+# =============================================================================
+# Backward Compatibility Aliases (Beat → Scene)
+# =============================================================================
+# These aliases allow existing code to continue working during migration.
+
+def list_beats(act_id: str, scene_id: str | None = None) -> list[dict[str, Any]]:
+    """Legacy alias for list_scenes. The scene_id parameter is ignored."""
+    return list_scenes(act_id)
+
+
+def get_beat(beat_id: str) -> dict[str, Any] | None:
+    """Legacy alias for get_scene."""
+    scene = get_scene(beat_id)
+    if scene:
+        # Map scene fields to beat fields for compatibility
+        return {
+            "beat_id": scene["scene_id"],
+            "scene_id": scene["act_id"],  # Old beats had scene_id reference
+            "title": scene["title"],
+            "stage": scene["stage"],
+            "notes": scene["notes"],
+            "link": scene["link"],
+            "calendar_event_id": scene["calendar_event_id"],
+            "recurrence_rule": scene["recurrence_rule"],
+            "thunderbird_event_id": scene["thunderbird_event_id"],
+        }
+    return None
+
+
+def create_beat(*, act_id: str, scene_id: str | None = None, title: str, stage: str = "planning",
+                notes: str = "", link: str | None = None, calendar_event_id: str | None = None,
+                recurrence_rule: str | None = None,
+                thunderbird_event_id: str | None = None) -> tuple[list[dict[str, Any]], str]:
+    """Legacy alias for create_scene. The scene_id parameter is ignored."""
+    scenes, new_id = create_scene(
+        act_id=act_id, title=title, stage=stage, notes=notes, link=link,
+        calendar_event_id=calendar_event_id, recurrence_rule=recurrence_rule,
+        thunderbird_event_id=thunderbird_event_id
+    )
+    # Return in beat format
+    return [
+        {
+            "beat_id": s["scene_id"],
+            "title": s["title"],
+            "stage": s["stage"],
+            "notes": s["notes"],
+            "link": s["link"],
+            "calendar_event_id": s["calendar_event_id"],
+            "recurrence_rule": s["recurrence_rule"],
+            "thunderbird_event_id": s["thunderbird_event_id"],
+        }
+        for s in scenes
+    ], new_id
+
+
+def update_beat(*, act_id: str, scene_id: str | None = None, beat_id: str,
+                title: str | None = None, stage: str | None = None,
+                notes: str | None = None, link: str | None = None,
+                calendar_event_id: str | None = None, recurrence_rule: str | None = None,
+                thunderbird_event_id: str | None = None) -> list[dict[str, Any]]:
+    """Legacy alias for update_scene."""
+    scenes = update_scene(
+        act_id=act_id, scene_id=beat_id, title=title, stage=stage, notes=notes,
+        link=link, calendar_event_id=calendar_event_id, recurrence_rule=recurrence_rule,
+        thunderbird_event_id=thunderbird_event_id
+    )
+    return [
+        {
+            "beat_id": s["scene_id"],
+            "title": s["title"],
+            "stage": s["stage"],
+            "notes": s["notes"],
+            "link": s["link"],
+            "calendar_event_id": s["calendar_event_id"],
+            "recurrence_rule": s["recurrence_rule"],
+            "thunderbird_event_id": s["thunderbird_event_id"],
+        }
+        for s in scenes
+    ]
+
+
+def delete_beat(act_id: str, scene_id_param: str, beat_id: str) -> list[dict[str, Any]]:
+    """Legacy alias for delete_scene."""
+    scenes = delete_scene(act_id, beat_id)
+    return [
+        {
+            "beat_id": s["scene_id"],
+            "title": s["title"],
+            "stage": s["stage"],
+            "notes": s["notes"],
+            "link": s["link"],
+            "calendar_event_id": s["calendar_event_id"],
+            "recurrence_rule": s["recurrence_rule"],
+            "thunderbird_event_id": s["thunderbird_event_id"],
+        }
+        for s in scenes
+    ]
+
+
+def find_beat_location(beat_id: str) -> dict[str, str | None] | None:
+    """Legacy alias for find_scene_location."""
+    location = find_scene_location(beat_id)
+    if location:
+        # Add scene_id for backward compat (though it's not meaningful in v4)
+        location["scene_id"] = None
+        location["scene_title"] = None
+    return location
+
+
+def find_beat_by_calendar_event(calendar_event_id: str) -> dict[str, Any] | None:
+    """Legacy alias for find_scene_by_calendar_event."""
+    scene = find_scene_by_calendar_event(calendar_event_id)
+    if scene:
+        return {
+            "beat_id": scene["scene_id"],
+            "scene_id": scene["act_id"],
+            "title": scene["title"],
+            "stage": scene["stage"],
+            "notes": scene["notes"],
+            "link": scene["link"],
+            "calendar_event_id": scene["calendar_event_id"],
+            "recurrence_rule": scene["recurrence_rule"],
+            "thunderbird_event_id": scene["thunderbird_event_id"],
+        }
+    return None
+
+
+def find_beat_by_thunderbird_event(thunderbird_event_id: str) -> dict[str, Any] | None:
+    """Legacy alias for find_scene_by_thunderbird_event."""
+    scene = find_scene_by_thunderbird_event(thunderbird_event_id)
+    if scene:
+        return {
+            "beat_id": scene["scene_id"],
+            "scene_id": scene["act_id"],
+            "title": scene["title"],
+            "stage": scene["stage"],
+            "notes": scene["notes"],
+            "link": scene["link"],
+            "calendar_event_id": scene["calendar_event_id"],
+            "recurrence_rule": scene["recurrence_rule"],
+            "thunderbird_event_id": scene["thunderbird_event_id"],
+        }
+    return None
+
+
+def set_beat_thunderbird_event_id(beat_id: str, thunderbird_event_id: str | None) -> bool:
+    """Legacy alias for set_scene_thunderbird_event_id."""
+    return set_scene_thunderbird_event_id(beat_id, thunderbird_event_id)
+
+
+def clear_beat_thunderbird_event_id(beat_id: str) -> bool:
+    """Legacy alias for clear_scene_thunderbird_event_id."""
+    return clear_scene_thunderbird_event_id(beat_id)
 
 
 # =============================================================================
@@ -965,8 +1084,15 @@ def clear_beat_thunderbird_event_id(beat_id: str) -> bool:
 
 def list_attachments(*, act_id: str | None = None, scene_id: str | None = None,
                      beat_id: str | None = None) -> list[dict[str, Any]]:
-    """List attachments, optionally filtered by scope."""
+    """List attachments, optionally filtered by scope.
+
+    For backward compatibility, beat_id is treated as scene_id.
+    """
     conn = _get_connection()
+
+    # Treat beat_id as scene_id for backward compat
+    if beat_id and not scene_id:
+        scene_id = beat_id
 
     query = "SELECT * FROM attachments WHERE 1=1"
     params: list[Any] = []
@@ -977,9 +1103,6 @@ def list_attachments(*, act_id: str | None = None, scene_id: str | None = None,
     if scene_id:
         query += " AND scene_id = ?"
         params.append(scene_id)
-    if beat_id:
-        query += " AND beat_id = ?"
-        params.append(beat_id)
 
     cursor = conn.execute(query, params)
 
@@ -988,7 +1111,7 @@ def list_attachments(*, act_id: str | None = None, scene_id: str | None = None,
             "attachment_id": row["attachment_id"],
             "act_id": row["act_id"],
             "scene_id": row["scene_id"],
-            "beat_id": row["beat_id"],
+            "beat_id": row["scene_id"],  # backward compat
             "file_path": row["file_path"],
             "file_name": row["file_name"],
             "file_type": row["file_type"],
@@ -1001,9 +1124,16 @@ def list_attachments(*, act_id: str | None = None, scene_id: str | None = None,
 def add_attachment(*, act_id: str | None = None, scene_id: str | None = None,
                    beat_id: str | None = None, file_path: str,
                    file_name: str | None = None) -> dict[str, Any]:
-    """Add a file attachment."""
+    """Add a file attachment.
+
+    For backward compatibility, beat_id is treated as scene_id.
+    """
     attachment_id = _new_id("att")
     now = _now_iso()
+
+    # Treat beat_id as scene_id for backward compat
+    if beat_id and not scene_id:
+        scene_id = beat_id
 
     path = Path(file_path)
     if not file_name:
@@ -1013,15 +1143,15 @@ def add_attachment(*, act_id: str | None = None, scene_id: str | None = None,
     with _transaction() as conn:
         conn.execute("""
             INSERT INTO attachments
-            (attachment_id, act_id, scene_id, beat_id, file_path, file_name, file_type, added_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (attachment_id, act_id, scene_id, beat_id, file_path, file_name, file_type, now))
+            (attachment_id, act_id, scene_id, file_path, file_name, file_type, added_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (attachment_id, act_id, scene_id, file_path, file_name, file_type, now))
 
     return {
         "attachment_id": attachment_id,
         "act_id": act_id,
         "scene_id": scene_id,
-        "beat_id": beat_id,
+        "beat_id": scene_id,  # backward compat
         "file_path": file_path,
         "file_name": file_name,
         "file_type": file_type,
@@ -1059,10 +1189,8 @@ def ensure_your_story_act() -> tuple[list[dict[str, Any]], str]:
     with _transaction() as conn:
         conn.execute("""
             INSERT INTO acts (act_id, title, active, notes, position, created_at, updated_at)
-            VALUES (?, 'Your Story', 0, 'The overarching narrative of your life. Unassigned Beats live here.', 0, ?, ?)
+            VALUES (?, 'Your Story', 0, 'The overarching narrative of your life.', 0, ?, ?)
         """, (YOUR_STORY_ACT_ID, now, now))
-
-        _ensure_stage_direction_scene_db(conn, YOUR_STORY_ACT_ID)
 
     acts, _ = list_acts()
     return acts, YOUR_STORY_ACT_ID

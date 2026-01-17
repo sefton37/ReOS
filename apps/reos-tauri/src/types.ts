@@ -349,33 +349,33 @@ export type PlayActsListResult = {
   acts: Array<{ act_id: string; title: string; active: boolean; notes: string; repo_path: string | null; color: string | null }>;
 };
 
-export type PlayScenesListResult = {
-  scenes: Array<{
-    scene_id: string;
-    title: string;
-    intent: string;
-    status: string;
-    time_horizon: string;
-    notes: string;
-  }>;
-};
+// Scene stage types (formerly BeatStage)
+export type SceneStage = 'planning' | 'in_progress' | 'awaiting_data' | 'complete';
 
-// Beat stage types
-export type BeatStage = 'planning' | 'in_progress' | 'awaiting_data' | 'complete';
-
-export type PlayBeat = {
-  beat_id: string;
+// PlayScene is the todo/calendar item level (formerly PlayBeat)
+export type PlayScene = {
+  scene_id: string;
+  act_id: string;
   title: string;
-  stage: BeatStage;
+  stage: SceneStage;
   notes: string;
   link: string | null;
   calendar_event_id: string | null;
   recurrence_rule: string | null;
+  thunderbird_event_id: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
 };
 
-export type PlayBeatsListResult = {
-  beats: PlayBeat[];
+export type PlayScenesListResult = {
+  scenes: PlayScene[];
 };
+
+// Backward compatibility aliases
+export type BeatStage = SceneStage;
+export type PlayBeat = PlayScene;
+export type PlayBeatsListResult = PlayScenesListResult;
 
 export type PlayActsCreateResult = {
   created_act_id: string;
@@ -389,12 +389,11 @@ export type PlayActsAssignRepoResult = {
 };
 
 export type PlayScenesMutationResult = {
-  scenes: PlayScenesListResult['scenes'];
+  scenes: PlayScene[];
 };
 
-export type PlayBeatsMutationResult = {
-  beats: PlayBeatsListResult['beats'];
-};
+// Backward compatibility alias
+export type PlayBeatsMutationResult = PlayScenesMutationResult;
 
 export type PlayKbListResult = {
   files: string[];
@@ -436,8 +435,8 @@ export type PlayAttachmentsMutationResult = {
   attachments: PlayAttachment[];
 };
 
-// Play levels for placeholder text
-export type PlayLevel = 'play' | 'act' | 'scene' | 'beat';
+// Play levels for placeholder text (2-tier: Acts and Scenes)
+export type PlayLevel = 'play' | 'act' | 'scene';
 
 // Intent detection types (Phase 6 - Conversational Troubleshooting)
 export type IntentDetectResult = {
@@ -719,7 +718,7 @@ export type CodeExecCleanupResult = {
 
 // CAIRN Attention types (What Needs My Attention)
 export type CairnAttentionItem = {
-  entity_type: string;  // 'beat', 'calendar_event', etc.
+  entity_type: string;  // 'scene', 'calendar_event', etc.
   entity_id: string;
   title: string;
   reason: string;
@@ -730,7 +729,6 @@ export type CairnAttentionItem = {
   recurrence_frequency: string | null;
   next_occurrence: string | null;
   act_id: string | null;
-  scene_id: string | null;
 };
 
 export type CairnAttentionResult = {

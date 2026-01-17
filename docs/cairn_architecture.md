@@ -11,6 +11,14 @@ CAIRN embodies "No One" - calm, non-coercive, makes room rather than demands att
 - Never gamifies, never guilt-trips
 - **Identity-first**: Filters attention through coherence with your stated values
 
+### A Mirror, Not a Manager
+
+> Every productivity tool asks: *"How can we capture what this person does?"*
+>
+> CAIRN asks: *"How can this person see themselves clearly?"*
+
+Zero trust. Local only. Encrypted at rest. Never phones home. The only report goes to the only stakeholder that matters: you.
+
 ## Architecture Overview
 
 ```
@@ -39,7 +47,7 @@ CAIRN embodies "No One" - calm, non-coercive, makes room rather than demands att
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
 │   Play Store    │  │Thunderbird Bridge│  │  CAIRN SQLite   │
 │  (Acts/Scenes/  │  │ (Calendar, Email,│  │ (Activity logs, │
-│   Beats/KB)     │  │  Contacts)       │  │  priorities,    │
+│   KB)           │  │  Contacts)       │  │  priorities,    │
 │                 │  │                  │  │  coherence)     │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
@@ -48,14 +56,14 @@ CAIRN embodies "No One" - calm, non-coercive, makes room rather than demands att
 
 ### 1. Play Extensions (existing, enhanced)
 
-The Play architecture (Acts → Scenes → Beats) remains the source of truth for projects/tasks.
+The Play architecture (Acts → Scenes) is the source of truth for life narratives and calendar events.
 CAIRN adds **metadata overlays**:
 
 ```python
 @dataclass
 class CairnMetadata:
     """Activity tracking overlay for Play entities."""
-    entity_type: str        # "act", "scene", "beat"
+    entity_type: str        # "act", "scene"
     entity_id: str
 
     # Activity tracking
@@ -138,7 +146,7 @@ class ContactLink:
     """Link between a contact and a Play entity."""
     link_id: str
     contact_id: str         # Thunderbird contact ID
-    entity_type: str        # "act", "scene", "beat"
+    entity_type: str        # "act", "scene"
     entity_id: str
     relationship: str       # "owner", "collaborator", "stakeholder", "waiting_on"
     created_at: datetime
@@ -150,7 +158,7 @@ class ContactLink:
 ```sql
 -- Activity tracking for Play entities
 CREATE TABLE cairn_metadata (
-    entity_type TEXT NOT NULL,      -- 'act', 'scene', 'beat'
+    entity_type TEXT NOT NULL,      -- 'act', 'scene'
     entity_id TEXT NOT NULL,
     last_touched TEXT,              -- ISO timestamp
     touch_count INTEGER DEFAULT 0,
@@ -208,10 +216,10 @@ CREATE TABLE priority_queue (
 
 ## MCP Tools
 
-### Knowledge Base CRUD
+### Play CRUD (Acts & Scenes)
 
 ```
-cairn_list_items        - List items with filters (kanban state, priority, due date, contact)
+cairn_list_items        - List Acts/Scenes with filters (kanban state, priority, due date, contact)
 cairn_get_item          - Get single item with full context
 cairn_touch_item        - Mark item as touched (updates last_touched)
 cairn_set_priority      - Set priority (1-5) with optional reason
@@ -337,7 +345,7 @@ Just as RIVA decomposes complex coding intentions into verifiable steps, CAIRN d
 class IdentityModel:
     """Hierarchical representation of user identity from The Play."""
     core: str                    # me.md content (highest priority)
-    facets: list[IdentityFacet]  # Extracted from Acts/Scenes/Beats
+    facets: list[IdentityFacet]  # Extracted from Acts/Scenes
     anti_patterns: list[str]     # Things the user has rejected
 
 @dataclass

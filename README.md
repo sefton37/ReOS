@@ -21,6 +21,16 @@ We believe AI should be:
 
 **Our goal: Build the best AI assistant in the world. Then give it away.**
 
+### A Mirror That Doesn't Sell Your Reflection
+
+Every productivity tool asks: *"How can we capture what this person does?"*
+
+Talking Rock asks: *"How can this person see themselves clearly?"*
+
+**Zero trust. Local only. Encrypted at rest. Never phones home.**
+
+The only report goes to the only stakeholder that matters: you.
+
 ---
 
 ## Development Priorities: Democratizing AI
@@ -124,28 +134,28 @@ CAIRN: That's a system question. Want me to hand off to ReOS?
 
 ### The Play: Your Life Structure
 
-CAIRN organizes everything in a hierarchy:
+CAIRN organizes everything with deliberate simplicity—just two levels:
 
 | Level | Timeframe | Example |
 |-------|-----------|---------|
-| **The Play** | Your whole life | Your identity, values, long-term goals |
-| **Acts** | Major life chapters | "Building my startup", "Learning music" |
-| **Scenes** | Projects within acts | "Launch MVP", "Complete album" |
-| **Beats** | Tasks within scenes | "Set up database", "Record vocals" |
+| **Acts** | Life narratives (months to years) | "Building my startup", "Learning music" |
+| **Scenes** | Calendar events within acts | "Launch MVP meeting", "Record vocals session" |
 
-This structure lets CAIRN understand context. When you say "what's next?", it knows which act you're in.
+**Why just two levels?** To remove the temptation to obscure responsibility in complexity. Acts answer "What narrative does this belong to?" Scenes answer "When am I doing this?" That's enough.
+
+This structure lets CAIRN understand context. When you say "what's next?", it knows which act you're in and what scenes are coming up.
 
 ### Core Capabilities
 
-- **Project tracking** — Acts, scenes, beats with status and priority
-- **Calendar integration** — Syncs with Thunderbird
+- **Project tracking** — Acts and Scenes with status and priority
+- **Calendar integration** — Syncs with Thunderbird (including recurring events)
 - **Contact knowledge** — Knows who's involved in what
 - **Waiting-on tracking** — Knows what you're blocked on
 - **Coherence Kernel** — Filters distractions based on your stated identity and goals
 
 ### Conclusion
 
-CAIRN is a calm, non-judgmental life organizer. It respects your attention by showing you the next thing—not a wall of everything you haven't done. Because it runs locally, your life data stays on your machine. No company sees your todos, your goals, or your priorities.
+CAIRN is a calm, non-judgmental life organizer. It respects your attention by showing you the next thing—not a wall of everything you haven't done. It's a mirror for self-reflection, not a surveillance tool that reports on you. Because it runs locally, your life data stays on your machine. No company sees your priorities, your goals, or your struggles.
 
 ---
 
@@ -411,7 +421,7 @@ Talking Rock is for you if:
 ## What's Built
 
 ### CAIRN (Attention Minder) — Active Development
-- [x] The Play hierarchy (acts, scenes, beats)
+- [x] The Play hierarchy (Acts → Scenes, 2-tier)
 - [x] Smart surfacing ("what needs attention")
 - [x] Calendar integration (Thunderbird)
 - [x] Contact knowledge graph

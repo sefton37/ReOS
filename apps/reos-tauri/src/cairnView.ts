@@ -1069,15 +1069,14 @@ export function createCairnView(
         itemEl.style.background = 'rgba(255,255,255,0.05)';
       });
 
-      // Click to navigate to Beat in The Play
-      if (item.entity_type === 'beat' && item.act_id && item.scene_id) {
+      // Click to navigate to Scene in The Play
+      if (item.entity_type === 'scene' && item.act_id) {
         itemEl.addEventListener('click', () => {
-          // Dispatch custom event to open The Play at this Beat
-          const event = new CustomEvent('openPlayBeat', {
+          // Dispatch custom event to open The Play at this Scene
+          const event = new CustomEvent('openPlayScene', {
             detail: {
               actId: item.act_id,
-              sceneId: item.scene_id,
-              beatId: item.entity_id,
+              sceneId: item.entity_id,
             },
           });
           window.dispatchEvent(event);

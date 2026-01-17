@@ -143,11 +143,11 @@ class CairnStore:
                     updated_at TEXT NOT NULL
                 );
 
-                -- Beat to Calendar Event links (many-to-many)
-                -- A Beat can have multiple calendar events associated
-                CREATE TABLE IF NOT EXISTS beat_calendar_links (
+                -- Scene to Calendar Event links (many-to-many)
+                -- A Scene can have multiple calendar events associated
+                CREATE TABLE IF NOT EXISTS scene_calendar_links (
                     link_id TEXT PRIMARY KEY,
-                    beat_id TEXT NOT NULL,
+                    scene_id TEXT NOT NULL,
                     calendar_event_id TEXT NOT NULL,
                     calendar_event_title TEXT,
                     calendar_event_start TEXT,
@@ -156,17 +156,16 @@ class CairnStore:
                     notes TEXT,
                     recurrence_rule TEXT,       -- RRULE string for recurring events
                     next_occurrence TEXT,       -- Computed next occurrence datetime
-                    act_id TEXT,                -- Act this Beat belongs to
-                    scene_id TEXT,              -- Scene this Beat belongs to
-                    UNIQUE(beat_id, calendar_event_id)
+                    act_id TEXT,                -- Act this Scene belongs to
+                    UNIQUE(scene_id, calendar_event_id)
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_beat_calendar_beat
-                    ON beat_calendar_links(beat_id);
-                CREATE INDEX IF NOT EXISTS idx_beat_calendar_event
-                    ON beat_calendar_links(calendar_event_id);
-                CREATE INDEX IF NOT EXISTS idx_beat_calendar_start
-                    ON beat_calendar_links(calendar_event_start);
+                CREATE INDEX IF NOT EXISTS idx_scene_calendar_scene
+                    ON scene_calendar_links(scene_id);
+                CREATE INDEX IF NOT EXISTS idx_scene_calendar_event
+                    ON scene_calendar_links(calendar_event_id);
+                CREATE INDEX IF NOT EXISTS idx_scene_calendar_start
+                    ON scene_calendar_links(calendar_event_start);
 
                 -- Extended thinking traces (audit trail for CAIRN's reasoning)
                 CREATE TABLE IF NOT EXISTS extended_thinking_traces (
@@ -222,20 +221,39 @@ class CairnStore:
 
     def _run_migrations(self, conn: sqlite3.Connection) -> None:
         """Run schema migrations for existing databases."""
-        # Add new columns to beat_calendar_links if they don't exist
+        # Migrate beat_calendar_links to scene_calendar_links if old table exists
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='beat_calendar_links'"
+        )
+        if cursor.fetchone():
+            # Old table exists - migrate data
+            logger.info("Migrating beat_calendar_links to scene_calendar_links")
+            conn.execute("""
+                INSERT OR IGNORE INTO scene_calendar_links
+                (link_id, scene_id, calendar_event_id, calendar_event_title,
+                 calendar_event_start, calendar_event_end, created_at, notes,
+                 recurrence_rule, next_occurrence, act_id)
+                SELECT link_id, beat_id, calendar_event_id, calendar_event_title,
+                       calendar_event_start, calendar_event_end, created_at, notes,
+                       recurrence_rule, next_occurrence, act_id
+                FROM beat_calendar_links
+            """)
+            conn.execute("DROP TABLE beat_calendar_links")
+            logger.info("Migration complete: beat_calendar_links -> scene_calendar_links")
+
+        # Add new columns to scene_calendar_links if they don't exist
         columns_to_add = [
             ("recurrence_rule", "TEXT"),
             ("next_occurrence", "TEXT"),
             ("act_id", "TEXT"),
-            ("scene_id", "TEXT"),
         ]
 
         for col_name, col_type in columns_to_add:
             try:
                 conn.execute(
-                    f"ALTER TABLE beat_calendar_links ADD COLUMN {col_name} {col_type}"
+                    f"ALTER TABLE scene_calendar_links ADD COLUMN {col_name} {col_type}"
                 )
-                logger.debug(f"Added column {col_name} to beat_calendar_links")
+                logger.debug(f"Added column {col_name} to scene_calendar_links")
             except sqlite3.OperationalError:
                 # Column already exists
                 pass
@@ -920,22 +938,22 @@ class CairnStore:
             return cursor.rowcount
 
     # =========================================================================
-    # Beat-Calendar Event Links
+    # Scene-Calendar Event Links
     # =========================================================================
 
-    def link_beat_to_calendar_event(
+    def link_scene_to_calendar_event(
         self,
-        beat_id: str,
+        scene_id: str,
         calendar_event_id: str,
         calendar_event_title: str | None = None,
         calendar_event_start: datetime | None = None,
         calendar_event_end: datetime | None = None,
         notes: str | None = None,
     ) -> str:
-        """Link a Beat to a calendar event.
+        """Link a Scene to a calendar event.
 
         Args:
-            beat_id: The Beat ID from The Play.
+            scene_id: The Scene ID from The Play.
             calendar_event_id: The calendar event ID from Thunderbird.
             calendar_event_title: Title of the event (cached for display).
             calendar_event_start: Start time of the event.
@@ -951,15 +969,15 @@ class CairnStore:
         with self._get_connection() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO beat_calendar_links (
-                    link_id, beat_id, calendar_event_id,
+                INSERT OR REPLACE INTO scene_calendar_links (
+                    link_id, scene_id, calendar_event_id,
                     calendar_event_title, calendar_event_start, calendar_event_end,
                     created_at, notes
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     link_id,
-                    beat_id,
+                    scene_id,
                     calendar_event_id,
                     calendar_event_title,
                     calendar_event_start.isoformat() if calendar_event_start else None,
@@ -971,12 +989,16 @@ class CairnStore:
 
         return link_id
 
-    def unlink_beat_from_calendar_event(
+    # Backward compatibility alias
+    def link_beat_to_calendar_event(self, beat_id: str, *args, **kwargs) -> str:
+        return self.link_scene_to_calendar_event(beat_id, *args, **kwargs)
+
+    def unlink_scene_from_calendar_event(
         self,
-        beat_id: str,
+        scene_id: str,
         calendar_event_id: str,
     ) -> bool:
-        """Remove link between Beat and calendar event.
+        """Remove link between Scene and calendar event.
 
         Returns:
             True if a link was removed, False otherwise.
@@ -984,18 +1006,22 @@ class CairnStore:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
-                DELETE FROM beat_calendar_links
-                WHERE beat_id = ? AND calendar_event_id = ?
+                DELETE FROM scene_calendar_links
+                WHERE scene_id = ? AND calendar_event_id = ?
                 """,
-                (beat_id, calendar_event_id),
+                (scene_id, calendar_event_id),
             )
             return cursor.rowcount > 0
 
-    def get_calendar_events_for_beat(
+    # Backward compatibility alias
+    def unlink_beat_from_calendar_event(self, beat_id: str, calendar_event_id: str) -> bool:
+        return self.unlink_scene_from_calendar_event(beat_id, calendar_event_id)
+
+    def get_calendar_events_for_scene(
         self,
-        beat_id: str,
+        scene_id: str,
     ) -> list[dict[str, Any]]:
-        """Get all calendar events linked to a Beat.
+        """Get all calendar events linked to a Scene.
 
         Returns:
             List of calendar event info dicts.
@@ -1003,11 +1029,11 @@ class CairnStore:
         with self._get_connection() as conn:
             rows = conn.execute(
                 """
-                SELECT * FROM beat_calendar_links
-                WHERE beat_id = ?
+                SELECT * FROM scene_calendar_links
+                WHERE scene_id = ?
                 ORDER BY calendar_event_start
                 """,
-                (beat_id,),
+                (scene_id,),
             ).fetchall()
 
             return [
@@ -1022,34 +1048,42 @@ class CairnStore:
                 for row in rows
             ]
 
-    def get_beat_for_calendar_event(
+    # Backward compatibility alias
+    def get_calendar_events_for_beat(self, beat_id: str) -> list[dict[str, Any]]:
+        return self.get_calendar_events_for_scene(beat_id)
+
+    def get_scene_for_calendar_event(
         self,
         calendar_event_id: str,
     ) -> str | None:
-        """Get the Beat ID linked to a calendar event.
+        """Get the Scene ID linked to a calendar event.
 
         Returns:
-            Beat ID or None if not linked.
+            Scene ID or None if not linked.
         """
         with self._get_connection() as conn:
             row = conn.execute(
                 """
-                SELECT beat_id FROM beat_calendar_links
+                SELECT scene_id FROM scene_calendar_links
                 WHERE calendar_event_id = ?
                 """,
                 (calendar_event_id,),
             ).fetchone()
 
-            return row["beat_id"] if row else None
+            return row["scene_id"] if row else None
+
+    # Backward compatibility alias
+    def get_beat_for_calendar_event(self, calendar_event_id: str) -> str | None:
+        return self.get_scene_for_calendar_event(calendar_event_id)
 
     def get_upcoming_linked_events(
         self,
         hours: int = 24,
     ) -> list[dict[str, Any]]:
-        """Get upcoming calendar events that are linked to Beats.
+        """Get upcoming calendar events that are linked to Scenes.
 
         Returns:
-            List of event info with beat_id included.
+            List of event info with scene_id included.
         """
         now = datetime.now()
         end = now + timedelta(hours=hours)
@@ -1057,7 +1091,7 @@ class CairnStore:
         with self._get_connection() as conn:
             rows = conn.execute(
                 """
-                SELECT * FROM beat_calendar_links
+                SELECT * FROM scene_calendar_links
                 WHERE calendar_event_start >= ? AND calendar_event_start <= ?
                 ORDER BY calendar_event_start
                 """,
@@ -1066,7 +1100,8 @@ class CairnStore:
 
             return [
                 {
-                    "beat_id": row["beat_id"],
+                    "scene_id": row["scene_id"],
+                    "beat_id": row["scene_id"],  # backward compat
                     "calendar_event_id": row["calendar_event_id"],
                     "title": row["calendar_event_title"],
                     "start": row["calendar_event_start"],
@@ -1076,13 +1111,13 @@ class CairnStore:
                 for row in rows
             ]
 
-    def get_beats_with_upcoming_events(
+    def get_scenes_with_upcoming_events(
         self,
         hours: int = 168,
     ) -> list[dict[str, Any]]:
-        """Get Beats with upcoming calendar events for surfacing.
+        """Get Scenes with upcoming calendar events for surfacing.
 
-        This method returns Beats that have linked calendar events occurring
+        This method returns Scenes that have linked calendar events occurring
         within the specified time window. For recurring events, it uses the
         next_occurrence field instead of calendar_event_start.
 
@@ -1090,7 +1125,7 @@ class CairnStore:
             hours: Number of hours to look ahead (default 168 = 1 week).
 
         Returns:
-            List of dicts with beat info, calendar event details, and location.
+            List of dicts with scene info, calendar event details, and location.
         """
         now = datetime.now()
         end = now + timedelta(hours=hours)
@@ -1098,12 +1133,12 @@ class CairnStore:
         end_iso = end.isoformat()
 
         with self._get_connection() as conn:
-            # Get beats where either:
+            # Get scenes where either:
             # 1. next_occurrence is within window (for recurring events)
             # 2. calendar_event_start is within window (for one-time events)
             rows = conn.execute(
                 """
-                SELECT * FROM beat_calendar_links
+                SELECT * FROM scene_calendar_links
                 WHERE (
                     (next_occurrence IS NOT NULL AND next_occurrence >= ? AND next_occurrence <= ?)
                     OR
@@ -1116,7 +1151,8 @@ class CairnStore:
 
             return [
                 {
-                    "beat_id": row["beat_id"],
+                    "scene_id": row["scene_id"],
+                    "beat_id": row["scene_id"],  # backward compat
                     "calendar_event_id": row["calendar_event_id"],
                     "title": row["calendar_event_title"],
                     "start": row["calendar_event_start"],
@@ -1124,30 +1160,31 @@ class CairnStore:
                     "recurrence_rule": row["recurrence_rule"],
                     "next_occurrence": row["next_occurrence"],
                     "act_id": row["act_id"],
-                    "scene_id": row["scene_id"],
                     "notes": row["notes"],
                 }
                 for row in rows
             ]
 
-    def update_beat_calendar_link(
+    # Backward compatibility alias
+    def get_beats_with_upcoming_events(self, hours: int = 168) -> list[dict[str, Any]]:
+        return self.get_scenes_with_upcoming_events(hours)
+
+    def update_scene_calendar_link(
         self,
-        beat_id: str,
+        scene_id: str,
         calendar_event_id: str,
         recurrence_rule: str | None = None,
         next_occurrence: datetime | None = None,
         act_id: str | None = None,
-        scene_id: str | None = None,
     ) -> bool:
-        """Update a beat-calendar link with recurrence and location info.
+        """Update a scene-calendar link with recurrence and location info.
 
         Args:
-            beat_id: The Beat ID.
+            scene_id: The Scene ID.
             calendar_event_id: The calendar event ID.
             recurrence_rule: RRULE string for recurring events.
             next_occurrence: Computed next occurrence datetime.
-            act_id: Act this Beat belongs to.
-            scene_id: Scene this Beat belongs to.
+            act_id: Act this Scene belongs to.
 
         Returns:
             True if updated, False if link not found.
@@ -1155,57 +1192,64 @@ class CairnStore:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
-                UPDATE beat_calendar_links
+                UPDATE scene_calendar_links
                 SET recurrence_rule = ?,
                     next_occurrence = ?,
-                    act_id = ?,
-                    scene_id = ?
-                WHERE beat_id = ? AND calendar_event_id = ?
+                    act_id = ?
+                WHERE scene_id = ? AND calendar_event_id = ?
                 """,
                 (
                     recurrence_rule,
                     next_occurrence.isoformat() if next_occurrence else None,
                     act_id,
                     scene_id,
-                    beat_id,
                     calendar_event_id,
                 ),
             )
             return cursor.rowcount > 0
 
-    def get_all_recurring_beats(self) -> list[dict[str, Any]]:
-        """Get all beats with recurrence rules for refreshing next_occurrence.
+    # Backward compatibility alias
+    def update_beat_calendar_link(self, beat_id: str, calendar_event_id: str, **kwargs) -> bool:
+        return self.update_scene_calendar_link(beat_id, calendar_event_id, **kwargs)
+
+    def get_all_recurring_scenes(self) -> list[dict[str, Any]]:
+        """Get all scenes with recurrence rules for refreshing next_occurrence.
 
         Returns:
-            List of dicts with beat_id, recurrence_rule, and calendar_event_start.
+            List of dicts with scene_id, recurrence_rule, and calendar_event_start.
         """
         with self._get_connection() as conn:
             rows = conn.execute(
                 """
-                SELECT beat_id, recurrence_rule, calendar_event_start
-                FROM beat_calendar_links
+                SELECT scene_id, recurrence_rule, calendar_event_start
+                FROM scene_calendar_links
                 WHERE recurrence_rule IS NOT NULL
                 """,
             ).fetchall()
 
             return [
                 {
-                    "beat_id": row["beat_id"],
+                    "scene_id": row["scene_id"],
+                    "beat_id": row["scene_id"],  # backward compat
                     "recurrence_rule": row["recurrence_rule"],
                     "calendar_event_start": row["calendar_event_start"],
                 }
                 for row in rows
             ]
 
-    def update_beat_next_occurrence(
+    # Backward compatibility alias
+    def get_all_recurring_beats(self) -> list[dict[str, Any]]:
+        return self.get_all_recurring_scenes()
+
+    def update_scene_next_occurrence(
         self,
-        beat_id: str,
+        scene_id: str,
         next_occurrence: datetime,
     ) -> bool:
-        """Update just the next_occurrence for a beat.
+        """Update just the next_occurrence for a scene.
 
         Args:
-            beat_id: The Beat ID.
+            scene_id: The Scene ID.
             next_occurrence: The computed next occurrence datetime.
 
         Returns:
@@ -1214,28 +1258,30 @@ class CairnStore:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
-                UPDATE beat_calendar_links
+                UPDATE scene_calendar_links
                 SET next_occurrence = ?
-                WHERE beat_id = ?
+                WHERE scene_id = ?
                 """,
-                (next_occurrence.isoformat(), beat_id),
+                (next_occurrence.isoformat(), scene_id),
             )
             return cursor.rowcount > 0
 
-    def update_beat_location(
-        self,
-        beat_id: str,
-        act_id: str,
-        scene_id: str,
-    ) -> bool:
-        """Update the Act and Scene location for a Beat's calendar link.
+    # Backward compatibility alias
+    def update_beat_next_occurrence(self, beat_id: str, next_occurrence: datetime) -> bool:
+        return self.update_scene_next_occurrence(beat_id, next_occurrence)
 
-        Called when a Beat is moved between Acts/Scenes.
+    def update_scene_location(
+        self,
+        scene_id: str,
+        act_id: str,
+    ) -> bool:
+        """Update the Act location for a Scene's calendar link.
+
+        Called when a Scene is moved between Acts.
 
         Args:
-            beat_id: The Beat ID.
+            scene_id: The Scene ID.
             act_id: The new Act ID.
-            scene_id: The new Scene ID.
 
         Returns:
             True if updated, False if no link found.
@@ -1243,19 +1289,23 @@ class CairnStore:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
-                UPDATE beat_calendar_links
-                SET act_id = ?, scene_id = ?
-                WHERE beat_id = ?
+                UPDATE scene_calendar_links
+                SET act_id = ?
+                WHERE scene_id = ?
                 """,
-                (act_id, scene_id, beat_id),
+                (act_id, scene_id),
             )
             return cursor.rowcount > 0
 
-    def delete_beat_calendar_link(self, beat_id: str) -> bool:
-        """Delete calendar link for a Beat when the Beat is deleted.
+    # Backward compatibility alias
+    def update_beat_location(self, beat_id: str, act_id: str, scene_id: str | None = None) -> bool:
+        return self.update_scene_location(beat_id, act_id)
+
+    def delete_scene_calendar_link(self, scene_id: str) -> bool:
+        """Delete calendar link for a Scene when the Scene is deleted.
 
         Args:
-            beat_id: The Beat ID.
+            scene_id: The Scene ID.
 
         Returns:
             True if deleted, False if no link found.
@@ -1263,13 +1313,79 @@ class CairnStore:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
-                DELETE FROM beat_calendar_links
-                WHERE beat_id = ?
+                DELETE FROM scene_calendar_links
+                WHERE scene_id = ?
                 """,
-                (beat_id,),
+                (scene_id,),
             )
             return cursor.rowcount > 0
 
+    # Backward compatibility alias
+    def delete_beat_calendar_link(self, beat_id: str) -> bool:
+        return self.delete_scene_calendar_link(beat_id)
+
+    def link_scene_to_calendar_event_full(
+        self,
+        scene_id: str,
+        calendar_event_id: str,
+        calendar_event_title: str | None = None,
+        calendar_event_start: datetime | None = None,
+        calendar_event_end: datetime | None = None,
+        recurrence_rule: str | None = None,
+        next_occurrence: datetime | None = None,
+        act_id: str | None = None,
+        notes: str | None = None,
+    ) -> str:
+        """Link a Scene to a calendar event with full metadata.
+
+        This is an extended version of link_scene_to_calendar_event that
+        includes recurrence and location fields.
+
+        Args:
+            scene_id: The Scene ID from The Play.
+            calendar_event_id: The calendar event ID from Thunderbird.
+            calendar_event_title: Title of the event (cached for display).
+            calendar_event_start: Start time of the event.
+            calendar_event_end: End time of the event.
+            recurrence_rule: RRULE string for recurring events.
+            next_occurrence: Computed next occurrence datetime.
+            act_id: Act this Scene belongs to.
+            notes: Optional notes about this link.
+
+        Returns:
+            The link ID.
+        """
+        link_id = str(uuid.uuid4())
+        now = datetime.now()
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO scene_calendar_links (
+                    link_id, scene_id, calendar_event_id,
+                    calendar_event_title, calendar_event_start, calendar_event_end,
+                    recurrence_rule, next_occurrence, act_id,
+                    created_at, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    link_id,
+                    scene_id,
+                    calendar_event_id,
+                    calendar_event_title,
+                    calendar_event_start.isoformat() if calendar_event_start else None,
+                    calendar_event_end.isoformat() if calendar_event_end else None,
+                    recurrence_rule,
+                    next_occurrence.isoformat() if next_occurrence else None,
+                    act_id,
+                    now.isoformat(),
+                    notes,
+                ),
+            )
+
+        return link_id
+
+    # Backward compatibility alias
     def link_beat_to_calendar_event_full(
         self,
         beat_id: str,
@@ -1283,70 +1399,31 @@ class CairnStore:
         scene_id: str | None = None,
         notes: str | None = None,
     ) -> str:
-        """Link a Beat to a calendar event with full metadata.
+        return self.link_scene_to_calendar_event_full(
+            scene_id=beat_id,
+            calendar_event_id=calendar_event_id,
+            calendar_event_title=calendar_event_title,
+            calendar_event_start=calendar_event_start,
+            calendar_event_end=calendar_event_end,
+            recurrence_rule=recurrence_rule,
+            next_occurrence=next_occurrence,
+            act_id=act_id,
+            notes=notes,
+        )
 
-        This is an extended version of link_beat_to_calendar_event that
-        includes recurrence and location fields.
-
-        Args:
-            beat_id: The Beat ID from The Play.
-            calendar_event_id: The calendar event ID from Thunderbird.
-            calendar_event_title: Title of the event (cached for display).
-            calendar_event_start: Start time of the event.
-            calendar_event_end: End time of the event.
-            recurrence_rule: RRULE string for recurring events.
-            next_occurrence: Computed next occurrence datetime.
-            act_id: Act this Beat belongs to.
-            scene_id: Scene this Beat belongs to.
-            notes: Optional notes about this link.
-
-        Returns:
-            The link ID.
-        """
-        link_id = str(uuid.uuid4())
-        now = datetime.now()
-
-        with self._get_connection() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO beat_calendar_links (
-                    link_id, beat_id, calendar_event_id,
-                    calendar_event_title, calendar_event_start, calendar_event_end,
-                    recurrence_rule, next_occurrence, act_id, scene_id,
-                    created_at, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    link_id,
-                    beat_id,
-                    calendar_event_id,
-                    calendar_event_title,
-                    calendar_event_start.isoformat() if calendar_event_start else None,
-                    calendar_event_end.isoformat() if calendar_event_end else None,
-                    recurrence_rule,
-                    next_occurrence.isoformat() if next_occurrence else None,
-                    act_id,
-                    scene_id,
-                    now.isoformat(),
-                    notes,
-                ),
-            )
-
-        return link_id
-
-    def get_beat_id_for_calendar_event(
+    def get_scene_id_for_calendar_event(
         self,
         calendar_event_id: str,
     ) -> dict[str, Any] | None:
-        """Get beat info for a calendar event, including location.
+        """Get scene info for a calendar event, including location.
 
         Returns:
-            Dict with beat_id, act_id, scene_id, or None if not linked.
+            Dict with scene_id and act_id, or None if not linked.
         """
         with self._get_connection() as conn:
             row = conn.execute(
                 """
-                SELECT beat_id, act_id, scene_id FROM beat_calendar_links
+                SELECT scene_id, act_id FROM scene_calendar_links
                 WHERE calendar_event_id = ?
                 """,
                 (calendar_event_id,),
@@ -1356,10 +1433,24 @@ class CairnStore:
                 return None
 
             return {
-                "beat_id": row["beat_id"],
-                "act_id": row["act_id"],
                 "scene_id": row["scene_id"],
+                "act_id": row["act_id"],
             }
+
+    # Backward compatibility alias
+    def get_beat_id_for_calendar_event(
+        self,
+        calendar_event_id: str,
+    ) -> dict[str, Any] | None:
+        result = self.get_scene_id_for_calendar_event(calendar_event_id)
+        if result is None:
+            return None
+        # Provide backward compatible keys
+        return {
+            "beat_id": result["scene_id"],
+            "act_id": result["act_id"],
+            "scene_id": None,  # Old schema had scene_id (middle tier), no longer exists
+        }
 
     # =========================================================================
     # Kanban State Management

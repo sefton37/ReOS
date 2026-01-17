@@ -12,6 +12,16 @@ The Talking Rock Tauri desktop app is the **home base** for your AI assistant. I
 
 **It's not just a terminal wrapper—it's where you interact with your local AI companion.**
 
+### A Mirror That Doesn't Sell Your Reflection
+
+Every productivity tool asks: *"How can we capture what this person does?"*
+
+Talking Rock asks: *"How can this person see themselves clearly?"*
+
+**Zero trust. Local only. Encrypted at rest. Never phones home.**
+
+The only report goes to the only stakeholder that matters: you.
+
 ---
 
 ## Core Pillars
@@ -59,21 +69,27 @@ The Talking Rock Tauri desktop app is the **home base** for your AI assistant. I
   - Conversation history (refer to "it", "that service", "the error from before")
 
 ### 3. The Play (CAIRN's Domain)
-**Your hierarchical knowledge system**
+**Your two-tier organizational system**
 
-- **Structure**:
-  - Acts → Scenes → Beats (life chapters → projects → tasks)
+- **Structure** (deliberately simple):
+  - **Acts** = Life narratives (months to years)
+  - **Scenes** = Calendar events that define the narrative's journey
   - Markdown notebooks at each level
   - Repository assignment to Acts (for RIVA context)
 
+- **Philosophy**:
+  - Two levels prevent obscuring responsibility in complexity
+  - Acts answer "What narrative does this belong to?"
+  - Scenes answer "When am I doing this?"
+
 - **CAIRN Features**:
   - Activity tracking (when you last touched things)
-  - Kanban states (active, backlog, waiting, done)
+  - Calendar sync with Thunderbird (including recurring events)
   - Priority surfacing without guilt-tripping
   - Coherence kernel filtering (blocks distractions based on identity)
 
 - **Navigation**:
-  - Tree view of Acts/Scenes/Beats
+  - Tree view of Acts/Scenes
   - Quick access to recent items
   - Contact knowledge graph (people ↔ projects)
 
@@ -138,8 +154,8 @@ The Talking Rock Tauri desktop app is the **home base** for your AI assistant. I
 │ The Play     │  User: What should I focus   │  [Click response  │
 │ ├─ Act 1     │        on today?             │   to see trail]   │
 │ │  ├─ Scene  │                              │                   │
-│ │  └─ Scene  │  CAIRN: Based on your Play,  │  Agent: CAIRN     │
-│ └─ Act 2     │  I'd suggest focusing on...  │                   │
+│ └─ Act 2     │  CAIRN: Based on your Play,  │  Agent: CAIRN     │
+│    └─ Scene  │  I'd suggest focusing on...  │                   │
 │              │                              │  Context: The Play │
 │ System       │  User: Install docker        │                   │
 │ ├─ CPU 23%   │                              │  Tools Called:    │

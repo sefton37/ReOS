@@ -2,7 +2,9 @@
  * Play Overlay Component
  *
  * Full-screen modal for managing The Play hierarchy:
- * Play → Acts → Scenes → Beats
+ * Play → Acts → Scenes (2-tier structure)
+ *
+ * Scenes are the todo/calendar items (formerly Beats).
  *
  * Features:
  * - Left sidebar with tree navigation
@@ -16,7 +18,7 @@ import { kernelRequest } from './kernel';
 import type {
   PlayActsListResult,
   PlayScenesListResult,
-  PlayBeatsListResult,
+  PlayScene,
   PlayKbReadResult,
   PlayKbWritePreviewResult,
   PlayAttachmentsListResult,
@@ -56,19 +58,12 @@ Select documents from your hard drive to bring into context.
 
 Acts represent significant phases or themes in your work.`,
 
-  scene: `This is the Scene's script - a specific focus area or project.
+  scene: `This is the Scene's notes - an individual task or action item.
 
-Define the intent, timeline, and key details of this Scene.
-Attach relevant project documents, specs, or reference files.
+Capture notes, context, and details for this specific Scene.
+Scenes can be linked to calendar events and have progress stages.
 
-Scenes are the concrete initiatives within an Act.`,
-
-  beat: `This is the Beat's script - an individual task or action.
-
-Capture notes, context, and details for this specific Beat.
-Link to supporting documents or outputs.
-
-Beats are the atomic units of progress.`,
+Scenes are the atomic units of progress within an Act.`,
 };
 
 interface PlayOverlayState {
@@ -76,20 +71,17 @@ interface PlayOverlayState {
   selectedLevel: PlayLevel;
   activeActId: string | null;
   selectedSceneId: string | null;
-  selectedBeatId: string | null;
   actsCache: PlayActsListResult['acts'];
-  scenesCache: PlayScenesListResult['scenes'];
-  beatsCache: PlayBeatsListResult['beats'];
+  scenesCache: PlayScene[];
   kbText: string;
   kbPath: string;
   attachments: PlayAttachment[];
   expandedActs: Set<string>;
-  expandedScenes: Set<string>;
 }
 
 export function createPlayOverlay(onClose: () => void): {
   element: HTMLElement;
-  open: (actId?: string, sceneId?: string, beatId?: string) => void;
+  open: (actId?: string, sceneId?: string) => void;
   close: () => void;
 } {
   // State
@@ -98,15 +90,12 @@ export function createPlayOverlay(onClose: () => void): {
     selectedLevel: 'play',
     activeActId: null,
     selectedSceneId: null,
-    selectedBeatId: null,
     actsCache: [],
     scenesCache: [],
-    beatsCache: [],
     kbText: '',
     kbPath: 'kb.md',
     attachments: [],
     expandedActs: new Set(),
-    expandedScenes: new Set(),
   };
 
   // Create overlay container
@@ -182,21 +171,8 @@ export function createPlayOverlay(onClose: () => void): {
           act_id: state.activeActId,
         })) as PlayScenesListResult;
         state.scenesCache = scenesRes.scenes ?? [];
-
-        // If we have a selected scene, auto-expand it and fetch beats
-        if (state.selectedSceneId) {
-          state.expandedScenes.add(state.selectedSceneId);
-          const beatsRes = (await kernelRequest('play/beats/list', {
-            act_id: state.activeActId,
-            scene_id: state.selectedSceneId,
-          })) as PlayBeatsListResult;
-          state.beatsCache = beatsRes.beats ?? [];
-        } else {
-          state.beatsCache = [];
-        }
       } else {
         state.scenesCache = [];
-        state.beatsCache = [];
       }
 
       // Fetch KB content for current selection
@@ -224,7 +200,6 @@ export function createPlayOverlay(onClose: () => void): {
         const res = (await kernelRequest('play/kb/read', {
           act_id: state.activeActId,
           scene_id: state.selectedSceneId,
-          beat_id: state.selectedBeatId,
           path: state.kbPath,
         })) as PlayKbReadResult;
         state.kbText = res.text ?? '';
@@ -242,7 +217,6 @@ export function createPlayOverlay(onClose: () => void): {
       if (state.selectedLevel !== 'play' && state.activeActId) {
         params.act_id = state.activeActId;
         params.scene_id = state.selectedSceneId;
-        params.beat_id = state.selectedBeatId;
       }
       const res = (await kernelRequest('play/attachments/list', params)) as PlayAttachmentsListResult;
       state.attachments = res.attachments ?? [];
@@ -270,7 +244,6 @@ export function createPlayOverlay(onClose: () => void): {
       const preview = (await kernelRequest('play/kb/write_preview', {
         act_id: state.activeActId,
         scene_id: state.selectedSceneId,
-        beat_id: state.selectedBeatId,
         path: state.kbPath,
         text,
       })) as PlayKbWritePreviewResult;
@@ -279,7 +252,6 @@ export function createPlayOverlay(onClose: () => void): {
       await kernelRequest('play/kb/write_apply', {
         act_id: state.activeActId,
         scene_id: state.selectedSceneId,
-        beat_id: state.selectedBeatId,
         path: state.kbPath,
         text,
         expected_sha256_current: preview.expected_sha256_current,
@@ -309,7 +281,6 @@ export function createPlayOverlay(onClose: () => void): {
         if (state.selectedLevel !== 'play' && state.activeActId) {
           params.act_id = state.activeActId;
           params.scene_id = state.selectedSceneId;
-          params.beat_id = state.selectedBeatId;
         }
         await kernelRequest('play/attachments/add', params);
 
@@ -328,7 +299,6 @@ export function createPlayOverlay(onClose: () => void): {
       if (state.selectedLevel !== 'play' && state.activeActId) {
         params.act_id = state.activeActId;
         params.scene_id = state.selectedSceneId;
-        params.beat_id = state.selectedBeatId;
       }
       await kernelRequest('play/attachments/remove', params);
 
@@ -343,10 +313,8 @@ export function createPlayOverlay(onClose: () => void): {
     // Clear active act and go back to Play level
     state.activeActId = null;
     state.selectedSceneId = null;
-    state.selectedBeatId = null;
     state.selectedLevel = 'play';
     state.scenesCache = [];
-    state.beatsCache = [];
 
     void (async () => {
       // Tell backend to clear the active act
@@ -360,31 +328,20 @@ export function createPlayOverlay(onClose: () => void): {
   function selectLevel(
     level: PlayLevel,
     actId?: string | null,
-    sceneId?: string | null,
-    beatId?: string | null
+    sceneId?: string | null
   ) {
     state.selectedLevel = level;
 
     if (level === 'play') {
       state.selectedSceneId = null;
-      state.selectedBeatId = null;
     } else if (level === 'act' && actId) {
       state.activeActId = actId;
       state.selectedSceneId = null;
-      state.selectedBeatId = null;
       state.expandedActs.add(actId);
     } else if (level === 'scene' && actId && sceneId) {
       state.activeActId = actId;
       state.selectedSceneId = sceneId;
-      state.selectedBeatId = null;
       state.expandedActs.add(actId);
-      state.expandedScenes.add(sceneId);
-    } else if (level === 'beat' && actId && sceneId && beatId) {
-      state.activeActId = actId;
-      state.selectedSceneId = sceneId;
-      state.selectedBeatId = beatId;
-      state.expandedActs.add(actId);
-      state.expandedScenes.add(sceneId);
     }
 
     void (async () => {
@@ -402,15 +359,6 @@ export function createPlayOverlay(onClose: () => void): {
       state.expandedActs.delete(actId);
     } else {
       state.expandedActs.add(actId);
-    }
-    render();
-  }
-
-  function toggleSceneExpand(sceneId: string) {
-    if (state.expandedScenes.has(sceneId)) {
-      state.expandedScenes.delete(sceneId);
-    } else {
-      state.expandedScenes.add(sceneId);
     }
     render();
   }
@@ -653,93 +601,35 @@ export function createPlayOverlay(onClose: () => void): {
         });
         sidebar.appendChild(newSceneBtn);
 
+        // Scenes are now the leaf level (todo/calendar items)
         for (const scene of state.scenesCache) {
-          const sceneExpanded = state.expandedScenes.has(scene.scene_id);
           const sceneSelected =
             state.selectedLevel === 'scene' && state.selectedSceneId === scene.scene_id;
 
           const sceneItem = el('div');
           sceneItem.className = `tree-item scene ${sceneSelected ? 'selected' : ''}`;
 
-          const sceneExpandIcon = el('span');
-          sceneExpandIcon.className = 'tree-expand';
-          sceneExpandIcon.textContent = sceneExpanded ? '▼' : '▶';
-          sceneExpandIcon.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleSceneExpand(scene.scene_id);
-            // Also load beats when expanding
-            if (!sceneExpanded) {
-              void (async () => {
-                const beatsRes = (await kernelRequest('play/beats/list', {
-                  act_id: act.act_id,
-                  scene_id: scene.scene_id,
-                })) as PlayBeatsListResult;
-                state.beatsCache = beatsRes.beats ?? [];
-                render();
-              })();
-            }
-          });
+          const bulletIcon = el('span');
+          bulletIcon.className = 'tree-icon';
+          bulletIcon.textContent = scene.stage === 'complete' ? '✓' : '•';
+          sceneItem.appendChild(bulletIcon);
 
           const sceneLabel = el('span');
-          sceneLabel.textContent = scene.title;
-
-          sceneItem.appendChild(sceneExpandIcon);
+          sceneLabel.textContent = ` ${scene.title}`;
           sceneItem.appendChild(sceneLabel);
+
+          // Add stage badge
+          if (scene.stage && scene.stage !== 'planning') {
+            const stageBadge = el('span');
+            stageBadge.className = `scene-stage scene-stage-${scene.stage}`;
+            stageBadge.textContent = scene.stage.replace('_', ' ');
+            sceneItem.appendChild(stageBadge);
+          }
+
           sceneItem.addEventListener('click', () =>
             selectLevel('scene', act.act_id, scene.scene_id)
           );
           sidebar.appendChild(sceneItem);
-
-          // Beats (if scene is expanded and selected)
-          if (sceneExpanded && state.selectedSceneId === scene.scene_id) {
-            // New beat button
-            const newBeatBtn = el('button');
-            newBeatBtn.className = 'tree-new-btn beat-level';
-            newBeatBtn.textContent = '+ New Beat';
-            newBeatBtn.addEventListener('click', async () => {
-              const title = prompt('Enter Beat title:');
-              if (title?.trim()) {
-                await kernelRequest('play/beats/create', {
-                  act_id: act.act_id,
-                  scene_id: scene.scene_id,
-                  title: title.trim(),
-                });
-                await refreshData();
-                render();
-              }
-            });
-            sidebar.appendChild(newBeatBtn);
-
-            for (const beat of state.beatsCache) {
-              const beatSelected =
-                state.selectedLevel === 'beat' && state.selectedBeatId === beat.beat_id;
-
-              const beatItem = el('div');
-              beatItem.className = `tree-item beat ${beatSelected ? 'selected' : ''}`;
-
-              const bulletIcon = el('span');
-              bulletIcon.className = 'tree-icon';
-              bulletIcon.textContent = beat.stage === 'complete' ? '✓' : '•';
-              beatItem.appendChild(bulletIcon);
-
-              const beatTitle = el('span');
-              beatTitle.textContent = ` ${beat.title}`;
-              beatItem.appendChild(beatTitle);
-
-              // Add stage badge
-              if (beat.stage && beat.stage !== 'planning') {
-                const stageBadge = el('span');
-                stageBadge.className = `beat-stage beat-stage-${beat.stage}`;
-                stageBadge.textContent = beat.stage.replace('_', ' ');
-                beatItem.appendChild(stageBadge);
-              }
-
-              beatItem.addEventListener('click', () =>
-                selectLevel('beat', act.act_id, scene.scene_id, beat.beat_id)
-              );
-              sidebar.appendChild(beatItem);
-            }
-          }
         }
       }
     }
@@ -989,8 +879,6 @@ export function createPlayOverlay(onClose: () => void): {
         return 'Act Title';
       case 'scene':
         return 'Scene Title';
-      case 'beat':
-        return 'Beat Title';
     }
   }
 
@@ -1005,10 +893,6 @@ export function createPlayOverlay(onClose: () => void): {
       case 'scene': {
         const scene = state.scenesCache.find((s) => s.scene_id === state.selectedSceneId);
         return scene?.title ?? '';
-      }
-      case 'beat': {
-        const beat = state.beatsCache.find((b) => b.beat_id === state.selectedBeatId);
-        return beat?.title ?? '';
       }
     }
   }
@@ -1033,16 +917,6 @@ export function createPlayOverlay(onClose: () => void): {
             });
           }
           break;
-        case 'beat':
-          if (state.activeActId && state.selectedSceneId && state.selectedBeatId) {
-            await kernelRequest('play/beats/update', {
-              act_id: state.activeActId,
-              scene_id: state.selectedSceneId,
-              beat_id: state.selectedBeatId,
-              title: newTitle,
-            });
-          }
-          break;
       }
       await refreshData();
       render();
@@ -1058,26 +932,19 @@ export function createPlayOverlay(onClose: () => void): {
 
   // --- Public API ---
 
-  function openOverlay(actId?: string, sceneId?: string, beatId?: string) {
+  function openOverlay(actId?: string, sceneId?: string) {
     state.isOpen = true;
     overlay.classList.add('open');
 
     // Set initial selection if provided
-    if (beatId && sceneId && actId) {
-      state.selectedLevel = 'beat';
-      state.activeActId = actId;
-      state.selectedSceneId = sceneId;
-      state.selectedBeatId = beatId;
-    } else if (sceneId && actId) {
+    if (sceneId && actId) {
       state.selectedLevel = 'scene';
       state.activeActId = actId;
       state.selectedSceneId = sceneId;
-      state.selectedBeatId = null;
     } else if (actId) {
       state.selectedLevel = 'act';
       state.activeActId = actId;
       state.selectedSceneId = null;
-      state.selectedBeatId = null;
     } else {
       state.selectedLevel = 'play';
     }

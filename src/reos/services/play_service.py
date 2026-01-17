@@ -69,44 +69,65 @@ class ActInfo:
 
 @dataclass
 class SceneInfo:
-    """Information about a Scene."""
+    """Information about a Scene (the task/todo item in v4).
+
+    In the 2-tier architecture, Scenes are the actionable items
+    (formerly called Beats in the 3-tier architecture).
+    """
 
     scene_id: str
+    act_id: str
     title: str
-    intent: str = ""
-    status: str = ""
-    time_horizon: str = ""
+    stage: str = "planning"
     notes: str = ""
+    link: str | None = None
+    calendar_event_id: str | None = None
+    recurrence_rule: str | None = None
+    thunderbird_event_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "scene_id": self.scene_id,
+            "act_id": self.act_id,
             "title": self.title,
-            "intent": self.intent,
-            "status": self.status,
-            "time_horizon": self.time_horizon,
+            "stage": self.stage,
             "notes": self.notes,
         }
+        if self.link:
+            result["link"] = self.link
+        if self.calendar_event_id:
+            result["calendar_event_id"] = self.calendar_event_id
+        if self.recurrence_rule:
+            result["recurrence_rule"] = self.recurrence_rule
+        if self.thunderbird_event_id:
+            result["thunderbird_event_id"] = self.thunderbird_event_id
+        return result
 
     @classmethod
     def from_play_fs(cls, scene: play_fs.Scene) -> SceneInfo:
         return cls(
             scene_id=scene.scene_id,
+            act_id=scene.act_id,
             title=scene.title,
-            intent=scene.intent,
-            status=scene.status,
-            time_horizon=scene.time_horizon,
+            stage=scene.stage,
             notes=scene.notes,
+            link=scene.link,
+            calendar_event_id=scene.calendar_event_id,
+            recurrence_rule=scene.recurrence_rule,
+            thunderbird_event_id=scene.thunderbird_event_id,
         )
 
 
 @dataclass
 class BeatInfo:
-    """Information about a Beat."""
+    """Backward compatibility class for Beats.
+
+    DEPRECATED: Use SceneInfo instead. In v4, Beats have been merged into Scenes.
+    """
 
     beat_id: str
     title: str
-    status: str = ""
+    stage: str = ""  # Renamed from status
     notes: str = ""
     link: str | None = None
 
@@ -114,7 +135,7 @@ class BeatInfo:
         return {
             "beat_id": self.beat_id,
             "title": self.title,
-            "status": self.status,
+            "stage": self.stage,
             "notes": self.notes,
             "link": self.link,
         }
@@ -124,9 +145,20 @@ class BeatInfo:
         return cls(
             beat_id=beat.beat_id,
             title=beat.title,
-            status=beat.status,
+            stage=beat.stage,
             notes=beat.notes,
             link=beat.link,
+        )
+
+    @classmethod
+    def from_scene_info(cls, scene: SceneInfo) -> BeatInfo:
+        """Convert SceneInfo to BeatInfo for backward compatibility."""
+        return cls(
+            beat_id=scene.scene_id,
+            title=scene.title,
+            stage=scene.stage,
+            notes=scene.notes,
+            link=scene.link,
         )
 
 
@@ -307,35 +339,41 @@ class PlayService:
         self,
         act_id: str,
         title: str,
-        intent: str = "",
-        status: str = "",
-        time_horizon: str = "",
+        stage: str = "",
         notes: str = "",
-    ) -> list[SceneInfo]:
+        link: str | None = None,
+        calendar_event_id: str | None = None,
+        recurrence_rule: str | None = None,
+        thunderbird_event_id: str | None = None,
+    ) -> tuple[list[SceneInfo], str]:
         """Create a new scene under an act.
 
         Returns:
-            Updated list of scenes
+            Tuple of (updated list of scenes, new scene_id)
         """
-        scenes = play_fs.create_scene(
+        scenes, scene_id = play_fs.create_scene(
             act_id=act_id,
             title=title,
-            intent=intent,
-            status=status,
-            time_horizon=time_horizon,
+            stage=stage,
             notes=notes,
+            link=link,
+            calendar_event_id=calendar_event_id,
+            recurrence_rule=recurrence_rule,
+            thunderbird_event_id=thunderbird_event_id,
         )
-        return [SceneInfo.from_play_fs(s) for s in scenes]
+        return [SceneInfo.from_play_fs(s) for s in scenes], scene_id
 
     def update_scene(
         self,
         act_id: str,
         scene_id: str,
         title: str | None = None,
-        intent: str | None = None,
-        status: str | None = None,
-        time_horizon: str | None = None,
+        stage: str | None = None,
         notes: str | None = None,
+        link: str | None = None,
+        calendar_event_id: str | None = None,
+        recurrence_rule: str | None = None,
+        thunderbird_event_id: str | None = None,
     ) -> list[SceneInfo]:
         """Update a scene's fields.
 
@@ -346,69 +384,121 @@ class PlayService:
             act_id=act_id,
             scene_id=scene_id,
             title=title,
-            intent=intent,
-            status=status,
-            time_horizon=time_horizon,
+            stage=stage,
             notes=notes,
+            link=link,
+            calendar_event_id=calendar_event_id,
+            recurrence_rule=recurrence_rule,
+            thunderbird_event_id=thunderbird_event_id,
         )
         return [SceneInfo.from_play_fs(s) for s in scenes]
 
-    # --- Beats ---
+    def delete_scene(self, act_id: str, scene_id: str) -> list[SceneInfo]:
+        """Delete a scene from an act.
 
-    def list_beats(self, act_id: str, scene_id: str) -> list[BeatInfo]:
-        """List beats under a scene."""
-        beats = play_fs.list_beats(act_id=act_id, scene_id=scene_id)
-        return [BeatInfo.from_play_fs(b) for b in beats]
+        Returns:
+            Updated list of scenes
+        """
+        scenes = play_fs.delete_scene(act_id=act_id, scene_id=scene_id)
+        return [SceneInfo.from_play_fs(s) for s in scenes]
+
+    def move_scene(
+        self,
+        scene_id: str,
+        source_act_id: str,
+        target_act_id: str,
+    ) -> dict[str, Any]:
+        """Move a scene to a different act.
+
+        Returns:
+            Dict with scene_id and target_act_id
+        """
+        return play_fs.move_scene(
+            scene_id=scene_id,
+            source_act_id=source_act_id,
+            target_act_id=target_act_id,
+        )
+
+    # --- Beats (Backward Compatibility) ---
+    # In v4, Beats have been merged into Scenes. These methods wrap Scene operations.
+
+    def list_beats(self, act_id: str, scene_id: str | None = None) -> list[BeatInfo]:
+        """List beats (scenes) under an act.
+
+        DEPRECATED: Use list_scenes instead.
+        The scene_id parameter is ignored in v4.
+        """
+        scenes = self.list_scenes(act_id)
+        return [BeatInfo.from_scene_info(s) for s in scenes]
 
     def create_beat(
         self,
         act_id: str,
-        scene_id: str,
+        scene_id: str,  # Ignored in v4
         title: str,
-        status: str = "",
+        stage: str = "",
         notes: str = "",
         link: str | None = None,
     ) -> list[BeatInfo]:
-        """Create a new beat under a scene.
+        """Create a new beat (scene) under an act.
+
+        DEPRECATED: Use create_scene instead.
+        The scene_id parameter is ignored in v4.
 
         Returns:
-            Updated list of beats
+            Updated list of beats (scenes)
         """
-        beats = play_fs.create_beat(
+        scenes, _ = self.create_scene(
             act_id=act_id,
-            scene_id=scene_id,
             title=title,
-            status=status,
+            stage=stage,
             notes=notes,
             link=link,
         )
-        return [BeatInfo.from_play_fs(b) for b in beats]
+        return [BeatInfo.from_scene_info(s) for s in scenes]
 
     def update_beat(
         self,
         act_id: str,
-        scene_id: str,
+        scene_id: str,  # Ignored in v4
         beat_id: str,
         title: str | None = None,
-        status: str | None = None,
+        stage: str | None = None,
         notes: str | None = None,
         link: str | None = None,
     ) -> list[BeatInfo]:
-        """Update a beat's fields.
+        """Update a beat's (scene's) fields.
+
+        DEPRECATED: Use update_scene instead.
 
         Returns:
-            Updated list of beats
+            Updated list of beats (scenes)
         """
-        beats = play_fs.update_beat(
+        scenes = self.update_scene(
             act_id=act_id,
-            scene_id=scene_id,
-            beat_id=beat_id,
+            scene_id=beat_id,  # beat_id is now scene_id
             title=title,
-            status=status,
+            stage=stage,
             notes=notes,
             link=link,
         )
-        return [BeatInfo.from_play_fs(b) for b in beats]
+        return [BeatInfo.from_scene_info(s) for s in scenes]
+
+    def delete_beat(
+        self,
+        act_id: str,
+        scene_id: str,  # Ignored in v4
+        beat_id: str,
+    ) -> list[BeatInfo]:
+        """Delete a beat (scene).
+
+        DEPRECATED: Use delete_scene instead.
+
+        Returns:
+            Updated list of beats (scenes)
+        """
+        scenes = self.delete_scene(act_id=act_id, scene_id=beat_id)
+        return [BeatInfo.from_scene_info(s) for s in scenes]
 
     # --- Knowledge Base (KB) Files ---
 
@@ -572,7 +662,7 @@ class PlayService:
     def get_active_act_context(self) -> dict[str, Any] | None:
         """Get full context for the active act.
 
-        Returns dict with act, scenes, beats hierarchy or None if no active act.
+        Returns dict with act and scenes (v4 2-tier structure) or None if no active act.
         """
         acts, active_id = self.list_acts()
         if not active_id:
@@ -583,23 +673,16 @@ class PlayService:
             return None
 
         scenes = self.list_scenes(active_id)
-        scenes_with_beats = []
-        for scene in scenes:
-            beats = self.list_beats(active_id, scene.scene_id)
-            scenes_with_beats.append({
-                **scene.to_dict(),
-                "beats": [b.to_dict() for b in beats],
-            })
 
         return {
             "act": active_act.to_dict(),
-            "scenes": scenes_with_beats,
+            "scenes": [s.to_dict() for s in scenes],
         }
 
     def search(self, query: str) -> list[dict[str, Any]]:
         """Search across all Play content.
 
-        Searches story, act titles, scene titles/notes, beat titles/notes.
+        Searches story, act titles, scene titles/notes.
 
         Returns:
             List of matching items with type and content
@@ -642,21 +725,6 @@ class PlayService:
                             scene.title + " " + scene.notes, query_lower
                         ),
                     })
-
-                # Search beats under this scene
-                beats = self.list_beats(act.act_id, scene.scene_id)
-                for beat in beats:
-                    if query_lower in beat.title.lower() or query_lower in beat.notes.lower():
-                        results.append({
-                            "type": "beat",
-                            "act_id": act.act_id,
-                            "scene_id": scene.scene_id,
-                            "beat_id": beat.beat_id,
-                            "title": beat.title,
-                            "snippet": self._extract_snippet(
-                                beat.title + " " + beat.notes, query_lower
-                            ),
-                        })
 
         return results
 
