@@ -415,6 +415,9 @@ export type PlayPageTreeNode = PlayPage & {
 export type SceneWithAct = PlayScene & {
   act_title: string;
   act_color: string | null;
+  // Calendar data from CAIRN store for Kanban column determination
+  calendar_event_start: string | null;
+  next_occurrence: string | null;
 };
 
 export type PlayKbListResult = {

@@ -149,6 +149,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_scenes_act_id ON scenes(act_id);
         CREATE INDEX IF NOT EXISTS idx_scenes_calendar_event ON scenes(calendar_event_id);
         CREATE INDEX IF NOT EXISTS idx_scenes_thunderbird_event ON scenes(thunderbird_event_id);
+        -- Unique constraint on calendar_event_id to prevent duplicate syncs
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_scenes_calendar_event_unique
+            ON scenes(calendar_event_id) WHERE calendar_event_id IS NOT NULL;
 
         -- Attachments table
         CREATE TABLE IF NOT EXISTS attachments (
@@ -332,31 +335,39 @@ def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
     """Migrate from v4 to v5 schema.
 
     Adds the pages table for nested knowledgebase pages.
+    Also adds unique index on calendar_event_id to prevent duplicate syncs.
     """
     # Check if pages table already exists
     cursor = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='pages'"
     )
-    if cursor.fetchone():
+    if not cursor.fetchone():
+        # Create pages table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pages (
+                page_id TEXT PRIMARY KEY,
+                act_id TEXT NOT NULL REFERENCES acts(act_id) ON DELETE CASCADE,
+                parent_page_id TEXT REFERENCES pages(page_id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                icon TEXT,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pages_act_id ON pages(act_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pages_parent ON pages(parent_page_id)")
+        logger.info("Created pages table")
+    else:
         logger.info("Pages table already exists, skipping creation")
-        return
 
-    # Create pages table
+    # Add unique index on calendar_event_id to prevent duplicate syncs
+    # This is safe to run even if the index already exists (IF NOT EXISTS)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS pages (
-            page_id TEXT PRIMARY KEY,
-            act_id TEXT NOT NULL REFERENCES acts(act_id) ON DELETE CASCADE,
-            parent_page_id TEXT REFERENCES pages(page_id) ON DELETE CASCADE,
-            title TEXT NOT NULL,
-            icon TEXT,
-            position INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_scenes_calendar_event_unique
+        ON scenes(calendar_event_id) WHERE calendar_event_id IS NOT NULL
     """)
-
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pages_act_id ON pages(act_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_pages_parent ON pages(parent_page_id)")
+    logger.info("Ensured unique index on calendar_event_id")
 
     logger.info("v5 migration complete")
 

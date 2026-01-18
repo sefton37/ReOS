@@ -2193,10 +2193,60 @@ def _handle_play_scenes_list(_db: Database, *, act_id: str) -> dict[str, Any]:
     }
 
 
-def _handle_play_scenes_list_all(_db: Database) -> dict[str, Any]:
-    """List all scenes across all acts with act information for Kanban display."""
+def _handle_play_scenes_list_all(db: Database) -> dict[str, Any]:
+    """List all scenes across all acts with act information for Kanban display.
+
+    First syncs calendar events to scenes (with 5-year lookahead to capture all future events),
+    then merges data from play_db with calendar data from CAIRN store to include
+    calendar_event_start for determining Kanban column placement.
+    """
+    from pathlib import Path
+
     from . import play_db
+    from .cairn.store import CairnStore
+
+    # Sync calendar events to scenes before listing (5 years = 43800 hours)
+    # This ensures all future calendar events have corresponding scenes
+    play_path = get_current_play_path(db)
+    if play_path:
+        try:
+            cairn_db_path = Path(play_path) / ".cairn" / "cairn.db"
+            if cairn_db_path.exists():
+                store = CairnStore(cairn_db_path)
+                from .cairn.thunderbird import ThunderbirdBridge
+                thunderbird = ThunderbirdBridge.auto_detect()
+                if thunderbird and thunderbird.has_calendar():
+                    from .cairn.scene_calendar_sync import sync_calendar_to_scenes
+                    # Sync with 5-year window to capture all future events
+                    sync_calendar_to_scenes(thunderbird, store, hours=43800)
+        except Exception as e:
+            logger.debug("Failed to sync calendar for play/scenes/list_all: %s", e)
+
     scenes = play_db.list_all_scenes()
+
+    # Get calendar data from CAIRN store
+    play_path = get_current_play_path(db)
+    calendar_data: dict = {}
+    if play_path:
+        try:
+            cairn_db_path = Path(play_path) / ".cairn" / "cairn.db"
+            if cairn_db_path.exists():
+                store = CairnStore(cairn_db_path)
+                calendar_data = store.get_all_scene_calendar_data()
+        except Exception:
+            pass  # Fall back to no calendar data
+
+    # Merge calendar data into scenes (match by calendar_event_id)
+    for scene in scenes:
+        calendar_event_id = scene.get("calendar_event_id")
+        if calendar_event_id and calendar_event_id in calendar_data:
+            cal_info = calendar_data[calendar_event_id]
+            scene["calendar_event_start"] = cal_info.get("calendar_event_start")
+            scene["next_occurrence"] = cal_info.get("next_occurrence")
+        else:
+            scene["calendar_event_start"] = None
+            scene["next_occurrence"] = None
+
     return {"scenes": scenes}
 
 

@@ -111,11 +111,9 @@ export function createPlaySceneView(options: PlaySceneViewOptions): {
       const actsResult = await kernelRequest('play/acts/list', {}) as PlayActsListResult;
       state.actsCache = actsResult.acts ?? [];
 
-      // Enable all acts by default (except your-story)
+      // Enable all acts by default (including your-story)
       for (const act of state.actsCache) {
-        if (act.act_id !== 'your-story') {
-          state.enabledActs.add(act.act_id);
-        }
+        state.enabledActs.add(act.act_id);
       }
 
       // Load all scenes
@@ -133,7 +131,6 @@ export function createPlaySceneView(options: PlaySceneViewOptions): {
       // Endpoint may not exist yet - fall back to loading scenes per act
       state.scenesCache = [];
       for (const act of state.actsCache) {
-        if (act.act_id === 'your-story') continue;
         try {
           const result = await kernelRequest('play/scenes/list', { act_id: act.act_id }) as { scenes: Array<{ scene_id: string; act_id: string; title: string; stage: string; notes: string }> };
           const actScenes = (result.scenes ?? []).map(s => ({
@@ -158,8 +155,6 @@ export function createPlaySceneView(options: PlaySceneViewOptions): {
     }
 
     for (const act of state.actsCache) {
-      if (act.act_id === 'your-story') continue;
-
       const isEnabled = state.enabledActs.has(act.act_id);
       const actColor = act.color || ACT_COLOR_PALETTE[0];
 

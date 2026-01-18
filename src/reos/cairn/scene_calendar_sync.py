@@ -19,8 +19,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Placeholder date for Scenes without a specific date (Dec 31, 2099)
-PLACEHOLDER_DATE = datetime(2099, 12, 31, 12, 0, 0)
+def get_placeholder_date() -> datetime:
+    """Get the placeholder date for unscheduled scenes (Dec 31 of current year)."""
+    current_year = datetime.now().year
+    return datetime(current_year, 12, 31, 12, 0, 0)
+
+
+# For backward compatibility - use get_placeholder_date() for dynamic value
+PLACEHOLDER_DATE = get_placeholder_date()
 
 
 def get_next_occurrence(rrule_str: str, dtstart: datetime, after: datetime | None = None) -> datetime | None:
@@ -182,8 +188,20 @@ def sync_calendar_to_scenes(
     for event in base_events:
         base_event_id = _get_base_event_id(event.id)
 
-        # Check if a Scene already exists for this event
-        existing = store.get_scene_id_for_calendar_event(base_event_id)
+        # Check if a Scene already exists for this event in play_db (source of truth)
+        from reos.play_db import find_scene_by_calendar_event
+        existing_in_db = find_scene_by_calendar_event(base_event_id)
+
+        # Also check CAIRN store for backward compatibility
+        existing_in_cairn = store.get_scene_id_for_calendar_event(base_event_id)
+
+        # Use play_db as source of truth, fall back to CAIRN store
+        existing = None
+        if existing_in_db:
+            existing = {"scene_id": existing_in_db["scene_id"], "act_id": existing_in_db["act_id"]}
+        elif existing_in_cairn:
+            existing = existing_in_cairn
+
         if existing:
             # Update next occurrence for recurring events
             if event.recurrence_rule:

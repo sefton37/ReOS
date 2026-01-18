@@ -1665,7 +1665,7 @@ function buildUi() {
         await refreshActs();
       });
 
-      // Click on row opens the Play overlay with this act
+      // Click on row opens the Play window with this act
       actRow.addEventListener('click', async () => {
         // Set active act if not already
         if (!isActive) {
@@ -1676,8 +1676,8 @@ function buildUi() {
           await refreshActs();
           if (activeActId) await refreshScenes(activeActId);
         }
-        // Open the Play overlay with this act selected
-        playOverlay.open(a.act_id);
+        // Open the Play window with this act selected
+        await openPlayWindow();
       });
 
       actsList.appendChild(actRow);
@@ -3278,9 +3278,9 @@ function buildUi() {
     }
   });
 
-  // Click on Acts title to open The Play overlay (legacy compatibility)
+  // Click on Acts title to open The Play window
   actsTitle.addEventListener('click', () => {
-    playOverlay.open();
+    void openPlayWindow();
   });
 
   // Initial load

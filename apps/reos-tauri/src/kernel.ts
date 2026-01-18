@@ -4,13 +4,13 @@
  *
  * Security:
  * - All kernel requests require a valid session token
- * - Session tokens are stored in sessionStorage (cleared on window close)
+ * - Session tokens are stored in localStorage (shared across windows)
  * - Tokens are 256-bit CSPRNG, validated by Rust on every request
  */
 import { invoke } from '@tauri-apps/api/core';
 import { JsonRpcResponseSchema } from './types';
 
-// Session token storage
+// Session token storage (localStorage is shared across windows)
 const SESSION_TOKEN_KEY = 'reos_session_token';
 const SESSION_USERNAME_KEY = 'reos_session_username';
 
@@ -36,7 +36,7 @@ export class AuthenticationError extends Error {
  * @returns Session token or null if not authenticated
  */
 export function getSessionToken(): string | null {
-  return sessionStorage.getItem(SESSION_TOKEN_KEY);
+  return localStorage.getItem(SESSION_TOKEN_KEY);
 }
 
 /**
@@ -44,7 +44,7 @@ export function getSessionToken(): string | null {
  * @returns Username or null if not authenticated
  */
 export function getSessionUsername(): string | null {
-  return sessionStorage.getItem(SESSION_USERNAME_KEY);
+  return localStorage.getItem(SESSION_USERNAME_KEY);
 }
 
 /**
@@ -61,16 +61,16 @@ export function isAuthenticated(): boolean {
  * @param username - Authenticated username
  */
 export function setSession(token: string, username: string): void {
-  sessionStorage.setItem(SESSION_TOKEN_KEY, token);
-  sessionStorage.setItem(SESSION_USERNAME_KEY, username);
+  localStorage.setItem(SESSION_TOKEN_KEY, token);
+  localStorage.setItem(SESSION_USERNAME_KEY, username);
 }
 
 /**
  * Clear session credentials on logout.
  */
 export function clearSession(): void {
-  sessionStorage.removeItem(SESSION_TOKEN_KEY);
-  sessionStorage.removeItem(SESSION_USERNAME_KEY);
+  localStorage.removeItem(SESSION_TOKEN_KEY);
+  localStorage.removeItem(SESSION_USERNAME_KEY);
 }
 
 /**

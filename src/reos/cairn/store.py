@@ -1241,6 +1241,38 @@ class CairnStore:
     def get_all_recurring_beats(self) -> list[dict[str, Any]]:
         return self.get_all_recurring_scenes()
 
+    def get_all_scene_calendar_data(self) -> dict[str, dict[str, Any]]:
+        """Get calendar data for all scenes (for Kanban column determination).
+
+        Returns a mapping from calendar_event_id to calendar data including:
+        - calendar_event_start: When the event is scheduled
+        - next_occurrence: For recurring events, the next occurrence
+        - recurrence_rule: RRULE if recurring
+
+        Note: Keyed by calendar_event_id for reliable matching since scene_id
+        may change but calendar_event_id remains stable.
+
+        Returns:
+            Dict mapping calendar_event_id to calendar data dict.
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT calendar_event_id, calendar_event_start, next_occurrence, recurrence_rule
+                FROM scene_calendar_links
+                WHERE calendar_event_id IS NOT NULL
+                """,
+            ).fetchall()
+
+            return {
+                row["calendar_event_id"]: {
+                    "calendar_event_start": row["calendar_event_start"],
+                    "next_occurrence": row["next_occurrence"],
+                    "recurrence_rule": row["recurrence_rule"],
+                }
+                for row in rows
+            }
+
     def update_scene_next_occurrence(
         self,
         scene_id: str,
