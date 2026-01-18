@@ -374,6 +374,7 @@ export function createPlaySceneView(options: PlaySceneViewOptions): {
       option.value = s.value;
       option.textContent = s.label;
       option.selected = scene.stage === s.value;
+      option.style.cssText = 'background: #1a1a2e; color: #e5e7eb;';
       stageSelect.appendChild(option);
     }
 
