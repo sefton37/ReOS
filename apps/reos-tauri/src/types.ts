@@ -519,14 +519,6 @@ export type ContextToggleResult = {
 };
 
 // Archive types
-export type ArchiveSaveResult = {
-  archive_id: string;
-  title: string;
-  message_count: number;
-  archived_at: string;
-  summary: string;
-};
-
 export type ArchiveListResult = {
   archives: Array<{
     archive_id: string;
@@ -614,22 +606,6 @@ export type ArchiveLearningStats = {
   avg_user_rating: number;
   total_assessments: number;
   avg_assessment_score: number;
-};
-
-// Compact types
-export type CompactPreviewResult = {
-  entries: Array<{
-    category: 'fact' | 'lesson' | 'decision' | 'preference' | 'observation';
-    content: string;
-  }>;
-  message_count: number;
-  existing_entry_count: number;
-};
-
-export type CompactApplyResult = {
-  added_count: number;
-  archive_id: string | null;
-  total_entries: number;
 };
 
 // Learned knowledge types

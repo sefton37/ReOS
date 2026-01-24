@@ -76,7 +76,6 @@ from .play_fs import delete_scene as play_delete_scene
 from .play_fs import assign_repo_to_act as play_assign_repo_to_act
 from .context_meter import calculate_context_stats, estimate_tokens
 from .knowledge_store import KnowledgeStore
-from .compact_extractor import extract_knowledge_from_messages, generate_archive_summary
 from .play_fs import play_root
 
 _JSON = dict[str, Any]
@@ -2953,135 +2952,6 @@ def _handle_context_toggle_source(
     return {"ok": True, "disabled_sources": list(disabled_sources)}
 
 
-def _handle_archive_save(
-    db: Database,
-    *,
-    conversation_id: str,
-    act_id: str | None = None,
-    title: str | None = None,
-    generate_summary: bool = False,
-) -> dict[str, Any]:
-    """Archive a conversation."""
-    raw_messages = db.get_messages(conversation_id=conversation_id, limit=500)
-    if not raw_messages:
-        raise RpcError(code=-32602, message="No messages in conversation")
-
-    messages = [
-        {
-            "role": m["role"],
-            "content": m["content"],
-            "created_at": m.get("created_at", ""),
-        }
-        for m in raw_messages
-    ]
-
-    summary = ""
-    if generate_summary:
-        summary = generate_archive_summary(messages)
-
-    store = KnowledgeStore()
-    archive = store.save_archive(
-        messages=messages,
-        act_id=act_id,
-        title=title,
-        summary=summary,
-    )
-
-    return {
-        "archive_id": archive.archive_id,
-        "title": archive.title,
-        "message_count": archive.message_count,
-        "archived_at": archive.archived_at,
-        "summary": archive.summary,
-    }
-
-
-
-
-
-
-
-
-
-
-def _handle_compact_preview(
-    db: Database,
-    *,
-    conversation_id: str,
-    act_id: str | None = None,
-) -> dict[str, Any]:
-    """Preview knowledge extraction before compacting."""
-    raw_messages = db.get_messages(conversation_id=conversation_id, limit=500)
-    if not raw_messages:
-        raise RpcError(code=-32602, message="No messages in conversation")
-
-    messages = [
-        {"role": m["role"], "content": m["content"]}
-        for m in raw_messages
-    ]
-
-    # Get existing knowledge to help LLM avoid duplicates
-    store = KnowledgeStore()
-    existing_kb = store.get_learned_markdown(act_id)
-
-    # Extract knowledge
-    entries = extract_knowledge_from_messages(
-        messages,
-        existing_knowledge=existing_kb,
-    )
-
-    return {
-        "entries": entries,
-        "message_count": len(messages),
-        "existing_entry_count": store.get_learned_entry_count(act_id),
-    }
-
-
-def _handle_compact_apply(
-    db: Database,
-    *,
-    conversation_id: str,
-    act_id: str | None = None,
-    entries: list[dict[str, str]],
-    archive_first: bool = True,
-) -> dict[str, Any]:
-    """Apply compaction: save knowledge, optionally archive, then can clear chat."""
-    store = KnowledgeStore()
-
-    # Optionally archive first
-    archive_id = None
-    if archive_first:
-        raw_messages = db.get_messages(conversation_id=conversation_id, limit=500)
-        if raw_messages:
-            messages = [
-                {
-                    "role": m["role"],
-                    "content": m["content"],
-                    "created_at": m.get("created_at", ""),
-                }
-                for m in raw_messages
-            ]
-            archive = store.save_archive(
-                messages=messages,
-                act_id=act_id,
-                title=None,
-                summary="(compacted)",
-            )
-            archive_id = archive.archive_id
-
-    # Add learned entries
-    added = store.add_learned_entries(
-        entries=entries,
-        act_id=act_id,
-        source_archive_id=archive_id,
-        deduplicate=True,
-    )
-
-    return {
-        "added_count": len(added),
-        "archive_id": archive_id,
-        "total_entries": store.get_learned_entry_count(act_id),
-    }
 
 
 
@@ -4850,60 +4720,6 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             return _jsonrpc_result(
                 req_id=req_id,
                 result=_handle_context_toggle_source(db, source_name=source_name, enabled=enabled),
-            )
-
-        if method == "archive/save":
-            if not isinstance(params, dict):
-                raise RpcError(code=-32602, message="params must be an object")
-            conversation_id = params.get("conversation_id")
-            if not isinstance(conversation_id, str) or not conversation_id:
-                raise RpcError(code=-32602, message="conversation_id is required")
-            act_id = params.get("act_id")
-            title = params.get("title")
-            generate_summary = params.get("generate_summary", False)
-            return _jsonrpc_result(
-                req_id=req_id,
-                result=_handle_archive_save(
-                    db,
-                    conversation_id=conversation_id,
-                    act_id=act_id,
-                    title=title,
-                    generate_summary=bool(generate_summary),
-                ),
-            )
-
-        if method == "compact/preview":
-            if not isinstance(params, dict):
-                raise RpcError(code=-32602, message="params must be an object")
-            conversation_id = params.get("conversation_id")
-            if not isinstance(conversation_id, str) or not conversation_id:
-                raise RpcError(code=-32602, message="conversation_id is required")
-            act_id = params.get("act_id")
-            return _jsonrpc_result(
-                req_id=req_id,
-                result=_handle_compact_preview(db, conversation_id=conversation_id, act_id=act_id),
-            )
-
-        if method == "compact/apply":
-            if not isinstance(params, dict):
-                raise RpcError(code=-32602, message="params must be an object")
-            conversation_id = params.get("conversation_id")
-            if not isinstance(conversation_id, str) or not conversation_id:
-                raise RpcError(code=-32602, message="conversation_id is required")
-            entries = params.get("entries", [])
-            if not isinstance(entries, list):
-                raise RpcError(code=-32602, message="entries must be a list")
-            act_id = params.get("act_id")
-            archive_first = params.get("archive_first", True)
-            return _jsonrpc_result(
-                req_id=req_id,
-                result=_handle_compact_apply(
-                    db,
-                    conversation_id=conversation_id,
-                    act_id=act_id,
-                    entries=entries,
-                    archive_first=bool(archive_first),
-                ),
             )
 
         if method == "chat/clear":

@@ -54,9 +54,6 @@ import type {
   ApprovalExplainResult,
   ContextStatsResult,
   ContextToggleResult,
-  CompactPreviewResult,
-  CompactApplyResult,
-  ArchiveSaveResult,
   CodeExecutionState,
   CodeExecStartResult,
   CodeExecCancelResult,
@@ -1885,127 +1882,6 @@ function buildUi() {
     }
   }
 
-  async function archiveChat() {
-    if (!currentConversationId) {
-      append('reos', 'No active conversation to archive.');
-      return;
-    }
-
-    try {
-      const result = await kernelRequest('archive/save', {
-        conversation_id: currentConversationId,
-        act_id: activeActId,
-        generate_summary: true,
-      }) as ArchiveSaveResult;
-
-      append('reos', `Chat archived successfully (${result.message_count} messages). Archive ID: ${result.archive_id}`);
-
-      // Clear chat after archiving
-      codeModeView.clearChat();
-      currentConversationId = null;
-      updateContextMeter();
-    } catch (e) {
-      console.error('Failed to archive chat:', e);
-      append('reos', 'Failed to archive chat. Please try again.');
-    }
-  }
-
-  async function compactChat() {
-    if (!currentConversationId) {
-      append('reos', 'No active conversation to compact.');
-      return;
-    }
-
-    try {
-      // First, preview what will be extracted
-      const preview = await kernelRequest('compact/preview', {
-        conversation_id: currentConversationId,
-        act_id: activeActId,
-      }) as CompactPreviewResult;
-
-      if (preview.entries.length === 0) {
-        append('reos', 'No knowledge to extract from this conversation.');
-        return;
-      }
-
-      // Show preview in chat
-      const previewText = preview.entries.map(e =>
-        `• [${e.category}] ${e.content}`
-      ).join('\n');
-
-      append('reos', `Extracting ${preview.entries.length} items:\n\n${previewText}\n\nType "confirm compact" to save these to memory, or "cancel" to keep chatting.`);
-
-      // Store pending compact for confirmation
-      (window as unknown as Record<string, unknown>)._pendingCompact = {
-        conversationId: currentConversationId,
-        actId: activeActId,
-        entries: preview.entries,
-      };
-    } catch (e) {
-      console.error('Failed to preview compact:', e);
-      append('reos', 'Failed to analyze conversation. Please try again.');
-    }
-  }
-
-  async function confirmCompact() {
-    const pending = (window as unknown as Record<string, unknown>)._pendingCompact as {
-      conversationId: string;
-      actId: string | null;
-      entries: Array<{ category: string; content: string }>;
-    } | undefined;
-
-    if (!pending) {
-      append('reos', 'No pending compact to confirm.');
-      return;
-    }
-
-    try {
-      const result = await kernelRequest('compact/apply', {
-        conversation_id: pending.conversationId,
-        act_id: pending.actId,
-        entries: pending.entries,
-        archive_first: true,
-      }) as CompactApplyResult;
-
-      append('reos', `Learned ${result.added_count} new items. Total knowledge: ${result.total_entries} entries. Chat archived and cleared.`);
-
-      // Clear chat
-      codeModeView.clearChat();
-      currentConversationId = null;
-      delete (window as unknown as Record<string, unknown>)._pendingCompact;
-      updateContextMeter();
-    } catch (e) {
-      console.error('Failed to apply compact:', e);
-      append('reos', 'Failed to save knowledge. Please try again.');
-    }
-  }
-
-  async function deleteChat() {
-    if (!currentConversationId) {
-      append('reos', 'No active conversation to delete.');
-      return;
-    }
-
-    // Confirm deletion
-    if (!confirm('Delete this chat? This cannot be undone.')) {
-      return;
-    }
-
-    try {
-      await kernelRequest('chat/clear', {
-        conversation_id: currentConversationId,
-      });
-
-      codeModeView.clearChat();
-      currentConversationId = null;
-      append('reos', 'Chat deleted.');
-      updateContextMeter();
-    } catch (e) {
-      console.error('Failed to delete chat:', e);
-      append('reos', 'Failed to delete chat. Please try again.');
-    }
-  }
-
   // Update context meter periodically and after messages
   setInterval(() => void updateContextMeter(), 30000);
 
@@ -2855,32 +2731,6 @@ function buildUi() {
 
   // Main handler for chat messages - called by the code mode view
   async function handleChatMessage(text: string): Promise<ChatRespondResult> {
-    // Handle compact confirmation commands
-    if (text.toLowerCase() === 'confirm compact') {
-      await confirmCompact();
-      return {
-        answer: 'Compact confirmed.',
-        conversation_id: currentConversationId || '',
-        message_id: '',
-        message_type: 'system',
-        tool_calls: [],
-        thinking_steps: [],
-        pending_approval_id: null,
-      };
-    }
-    if (text.toLowerCase() === 'cancel' && (window as unknown as Record<string, unknown>)._pendingCompact) {
-      delete (window as unknown as Record<string, unknown>)._pendingCompact;
-      return {
-        answer: 'Compact cancelled. Conversation continues.',
-        conversation_id: currentConversationId || '',
-        message_id: '',
-        message_type: 'system',
-        tool_calls: [],
-        thinking_steps: [],
-        pending_approval_id: null,
-      };
-    }
-
     // Check if we're in Code Mode (active act with repo_path AND viewing RIVA)
     // CAIRN view should NOT trigger code mode - it's for conversational chat
     const activeAct = actsCache.find((a) => a.act_id === activeActId);
