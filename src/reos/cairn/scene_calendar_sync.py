@@ -184,45 +184,19 @@ def _deduplicate_annual_events(events: list) -> list:
 
 
 def refresh_all_recurring_scenes(store: "CairnStore") -> int:
-    """Refresh next_occurrence for ALL recurring scenes in the database.
+    """Refresh next_occurrence for ALL recurring scenes.
 
-    This ensures that even if the calendar query misses an event,
-    the next_occurrence values stay current.
+    DEPRECATED: This function is kept for backward compatibility.
+    Use _refresh_all_recurring_scenes_in_db() instead, which writes to play.db.
 
     Args:
-        store: CairnStore instance.
+        store: CairnStore instance (no longer used).
 
     Returns:
-        Number of scenes updated.
+        Number of scenes updated (always 0 - use _refresh_all_recurring_scenes_in_db).
     """
-    updated = 0
-    recurring_scenes = store.get_all_recurring_scenes()
-
-    for scene_info in recurring_scenes:
-        rrule = scene_info.get("recurrence_rule")
-        start_str = scene_info.get("calendar_event_start")
-
-        if not rrule or not start_str:
-            continue
-
-        try:
-            if isinstance(start_str, str):
-                start = datetime.fromisoformat(start_str)
-            else:
-                start = start_str
-
-            next_occ = get_next_occurrence(rrule, start)
-            if next_occ:
-                store.update_scene_next_occurrence(
-                    scene_id=scene_info["scene_id"],
-                    next_occurrence=next_occ,
-                )
-                updated += 1
-        except Exception as e:
-            logger.debug("Failed to refresh next_occurrence for scene %s: %s",
-                        scene_info.get("scene_id"), e)
-
-    return updated
+    # Delegate to the new function that writes to play.db
+    return _refresh_all_recurring_scenes_in_db()
 
 
 def sync_calendar_to_scenes(
@@ -235,7 +209,7 @@ def sync_calendar_to_scenes(
     For each calendar event (NOT expanded recurring events):
     1. Check if a Scene already exists for this event
     2. If not, create a Scene in "Your Story" Act
-    3. Link the Scene to the calendar event
+    3. Store calendar metadata in play.db (single source of truth)
     4. For recurring events, compute and store next occurrence
 
     Also refreshes next_occurrence for ALL recurring scenes to ensure
@@ -243,7 +217,7 @@ def sync_calendar_to_scenes(
 
     Args:
         thunderbird: ThunderbirdBridge instance.
-        store: CairnStore instance.
+        store: CairnStore instance (kept for backward compatibility during transition).
         hours: Hours to look ahead for events (default: 168 = 1 week).
 
     Returns:
@@ -255,10 +229,10 @@ def sync_calendar_to_scenes(
         ensure_your_story_act,
         find_scene_location,
     )
+    from reos import play_db
 
-    # First, refresh next_occurrence for ALL recurring scenes
-    # This ensures stale values get updated even if calendar query misses them
-    refreshed = refresh_all_recurring_scenes(store)
+    # First, refresh next_occurrence for ALL recurring scenes in play.db
+    refreshed = _refresh_all_recurring_scenes_in_db()
     if refreshed > 0:
         logger.debug("Refreshed next_occurrence for %d recurring scenes", refreshed)
 
@@ -274,34 +248,23 @@ def sync_calendar_to_scenes(
         base_event_id = _get_base_event_id(event.id)
 
         # Check if a Scene already exists for this event in play_db (source of truth)
-        from reos.play_db import find_scene_by_calendar_event
-        existing_in_db = find_scene_by_calendar_event(base_event_id)
+        existing_in_db = play_db.find_scene_by_calendar_event(base_event_id)
 
-        # Also check CAIRN store for backward compatibility
-        existing_in_cairn = store.get_scene_id_for_calendar_event(base_event_id)
-
-        # Use play_db as source of truth, fall back to CAIRN store
-        existing = None
         if existing_in_db:
-            existing = {"scene_id": existing_in_db["scene_id"], "act_id": existing_in_db["act_id"]}
-        elif existing_in_cairn:
-            existing = existing_in_cairn
-
-        if existing:
-            # Update next occurrence for recurring events
+            # Update calendar metadata in play.db
+            next_occ = None
             if event.recurrence_rule:
                 next_occ = get_next_occurrence(event.recurrence_rule, event.start)
-                if next_occ:
-                    # Get canonical location from play_fs (source of truth) instead of stale cache
-                    scene_location = find_scene_location(existing["scene_id"])
-                    canonical_act_id = scene_location["act_id"] if scene_location else YOUR_STORY_ACT_ID
-                    store.update_scene_calendar_link(
-                        scene_id=existing["scene_id"],
-                        calendar_event_id=base_event_id,
-                        recurrence_rule=event.recurrence_rule,
-                        next_occurrence=next_occ,
-                        act_id=canonical_act_id,
-                    )
+
+            play_db.update_scene_calendar_data(
+                existing_in_db["scene_id"],
+                calendar_event_start=event.start.isoformat() if event.start else None,
+                calendar_event_end=event.end.isoformat() if event.end else None,
+                calendar_event_title=event.title,
+                next_occurrence=next_occ.isoformat() if next_occ else None,
+                calendar_name=getattr(event, 'calendar_name', None),
+                category=getattr(event, 'category', None),
+            )
             continue
 
         # Create a new Scene for this event
@@ -324,16 +287,15 @@ def sync_calendar_to_scenes(
                 if event.recurrence_rule:
                     next_occ = get_next_occurrence(event.recurrence_rule, event.start)
 
-                # Link the scene to the calendar event with full metadata
-                store.link_scene_to_calendar_event_full(
-                    scene_id=scene_id,
-                    calendar_event_id=base_event_id,
+                # Store calendar metadata in play.db (single source of truth)
+                play_db.update_scene_calendar_data(
+                    scene_id,
+                    calendar_event_start=event.start.isoformat() if event.start else None,
+                    calendar_event_end=event.end.isoformat() if event.end else None,
                     calendar_event_title=event.title,
-                    calendar_event_start=event.start,
-                    calendar_event_end=event.end,
-                    recurrence_rule=event.recurrence_rule,
-                    next_occurrence=next_occ,
-                    act_id=YOUR_STORY_ACT_ID,
+                    next_occurrence=next_occ.isoformat() if next_occ else None,
+                    calendar_name=getattr(event, 'calendar_name', None),
+                    category=getattr(event, 'category', None),
                 )
 
                 logger.debug(
@@ -346,6 +308,50 @@ def sync_calendar_to_scenes(
             logger.warning("Failed to create Scene for event '%s': %s", event.title, e)
 
     return new_scene_ids
+
+
+def _refresh_all_recurring_scenes_in_db() -> int:
+    """Refresh next_occurrence for ALL recurring scenes directly in play.db.
+
+    This ensures that recurring scene dates stay current.
+
+    Returns:
+        Number of scenes updated.
+    """
+    from reos import play_db
+
+    updated = 0
+
+    # Get all scenes with recurrence rules from play.db
+    scenes = play_db.list_all_scenes()
+
+    for scene in scenes:
+        rrule = scene.get("recurrence_rule")
+        start_str = scene.get("calendar_event_start")
+
+        if not rrule or not start_str:
+            continue
+
+        try:
+            if isinstance(start_str, str):
+                start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                if start.tzinfo is not None:
+                    start = start.replace(tzinfo=None)
+            else:
+                start = start_str
+
+            next_occ = get_next_occurrence(rrule, start)
+            if next_occ:
+                play_db.update_scene_calendar_data(
+                    scene["scene_id"],
+                    next_occurrence=next_occ.isoformat(),
+                )
+                updated += 1
+        except Exception as e:
+            logger.debug("Failed to refresh next_occurrence for scene %s: %s",
+                        scene.get("scene_id"), e)
+
+    return updated
 
 
 def get_base_calendar_events(
@@ -375,6 +381,9 @@ def get_base_calendar_events(
     start_us = int(now.timestamp() * 1_000_000)
     end_us = int(end.timestamp() * 1_000_000)
 
+    # Get calendar names for classification
+    calendar_names = thunderbird.get_calendar_names()
+
     try:
         conn = thunderbird._open_calendar_db()
         if conn is None:
@@ -386,7 +395,7 @@ def get_base_calendar_events(
         # 1. Get non-recurring events in the time window
         rows = conn.execute(
             """
-            SELECT e.id, e.title, e.event_start, e.event_end, e.event_stamp, e.flags
+            SELECT e.id, e.title, e.event_start, e.event_end, e.event_stamp, e.flags, e.cal_id
             FROM cal_events e
             LEFT JOIN cal_recurrence r ON e.id = r.item_id AND e.cal_id = r.cal_id
             WHERE e.event_start <= ? AND e.event_end >= ?
@@ -397,7 +406,7 @@ def get_base_calendar_events(
         ).fetchall()
 
         for row in rows:
-            event = thunderbird._parse_event(row)
+            event = thunderbird._parse_event(row, calendar_names)
             if event and event.id not in seen_ids:
                 events.append(event)
                 seen_ids.add(event.id)
@@ -407,7 +416,7 @@ def get_base_calendar_events(
         recurring_rows = conn.execute(
             """
             SELECT DISTINCT e.id, e.title, e.event_start, e.event_end,
-                   e.event_stamp, e.flags, r.icalString as rrule
+                   e.event_stamp, e.flags, e.cal_id, r.icalString as rrule
             FROM cal_events e
             JOIN cal_recurrence r ON e.id = r.item_id AND e.cal_id = r.cal_id
             WHERE r.icalString LIKE 'RRULE:%'
@@ -421,7 +430,7 @@ def get_base_calendar_events(
             if base_id in seen_ids:
                 continue
 
-            base_event = thunderbird._parse_event(row)
+            base_event = thunderbird._parse_event(row, calendar_names)
             if base_event:
                 # Only include if there's an occurrence within our window
                 rrule_str = row["rrule"]
@@ -437,6 +446,9 @@ def get_base_calendar_events(
                     is_recurring=True,
                     recurrence_rule=rrule_str,
                     recurrence_frequency=base_event.recurrence_frequency,
+                    calendar_id=base_event.calendar_id,
+                    calendar_name=base_event.calendar_name,
+                    category=base_event.category,
                 )
 
                 # Check if there's an occurrence within our time window

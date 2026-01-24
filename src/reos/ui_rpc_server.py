@@ -2196,14 +2196,18 @@ def _handle_play_scenes_list(_db: Database, *, act_id: str) -> dict[str, Any]:
 def _handle_play_scenes_list_all(db: Database) -> dict[str, Any]:
     """List all scenes across all acts with act information for Kanban display.
 
-    First syncs calendar events to scenes (with 5-year lookahead to capture all future events),
-    then merges data from play_db with calendar data from CAIRN store to include
-    calendar_event_start for determining Kanban column placement.
+    Calendar metadata is now stored directly in play.db (single source of truth).
+    This function:
+    1. Syncs calendar events to scenes (with 5-year lookahead)
+    2. Refreshes next_occurrence for recurring events
+    3. Classifies scenes without a category
+    4. Enriches with computed fields (effective_stage, etc.)
     """
     from pathlib import Path
+    from datetime import datetime, timedelta
 
     from . import play_db
-    from .cairn.store import CairnStore
+    from .cairn.scene_calendar_sync import get_next_occurrence
 
     # Sync calendar events to scenes before listing (5 years = 43800 hours)
     # This ensures all future calendar events have corresponding scenes
@@ -2212,6 +2216,7 @@ def _handle_play_scenes_list_all(db: Database) -> dict[str, Any]:
         try:
             cairn_db_path = Path(play_path) / ".cairn" / "cairn.db"
             if cairn_db_path.exists():
+                from .cairn.store import CairnStore
                 store = CairnStore(cairn_db_path)
                 from .cairn.thunderbird import ThunderbirdBridge
                 thunderbird = ThunderbirdBridge.auto_detect()
@@ -2222,32 +2227,65 @@ def _handle_play_scenes_list_all(db: Database) -> dict[str, Any]:
         except Exception as e:
             logger.debug("Failed to sync calendar for play/scenes/list_all: %s", e)
 
+    # Get scenes from play.db (calendar metadata is now included)
     scenes = play_db.list_all_scenes()
 
-    # Get calendar data from CAIRN store
-    play_path = get_current_play_path(db)
-    calendar_data: dict = {}
-    if play_path:
-        try:
-            cairn_db_path = Path(play_path) / ".cairn" / "cairn.db"
-            if cairn_db_path.exists():
-                store = CairnStore(cairn_db_path)
-                calendar_data = store.get_all_scene_calendar_data()
-        except Exception:
-            pass  # Fall back to no calendar data
-
-    # Merge calendar data into scenes (match by calendar_event_id)
+    # Refresh next_occurrence for recurring events (time-dependent computation)
+    now = datetime.now()
     for scene in scenes:
-        calendar_event_id = scene.get("calendar_event_id")
-        if calendar_event_id and calendar_event_id in calendar_data:
-            cal_info = calendar_data[calendar_event_id]
-            scene["calendar_event_start"] = cal_info.get("calendar_event_start")
-            scene["next_occurrence"] = cal_info.get("next_occurrence")
-        else:
-            scene["calendar_event_start"] = None
-            scene["next_occurrence"] = None
+        recurrence_rule = scene.get("recurrence_rule")
+        if recurrence_rule:
+            start_str = scene.get("calendar_event_start")
+            if start_str:
+                try:
+                    if isinstance(start_str, str):
+                        start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                        if start_dt.tzinfo is not None:
+                            start_dt = start_dt.replace(tzinfo=None)
+                    else:
+                        start_dt = start_str
+                    # Compute next occurrence from NOW
+                    next_occ = get_next_occurrence(recurrence_rule, start_dt, after=now - timedelta(hours=1))
+                    scene["next_occurrence"] = next_occ.isoformat() if next_occ else None
+                except Exception:
+                    pass  # Keep existing next_occurrence
 
-    return {"scenes": scenes}
+    # Classify scenes without a category
+    def classify_scene(scene: dict) -> str:
+        """Classify a scene as 'event', 'holiday', or 'birthday'."""
+        # If category is already set (from calendar sync), use it
+        existing = scene.get("category")
+        if existing:
+            return existing
+
+        title = (scene.get("title") or "").lower()
+
+        # Title-based classification
+        # Holidays: common holiday patterns
+        holiday_keywords = [
+            "day", "eve", "christmas", "thanksgiving", "easter", "independence",
+            "memorial", "labor", "veterans", "mlk", "president", "columbus",
+            "new year", "valentine", "st. patrick", "mother's day", "father's day",
+            "halloween", "juneteenth", "indigenous"
+        ]
+        if any(kw in title for kw in holiday_keywords) and "'s birthday" not in title:
+            if not any(title.endswith(f"'s {kw}") for kw in ["meeting", "call", "appointment"]):
+                return "holiday"
+
+        # Birthdays and anniversaries
+        if "birthday" in title or "anniversary" in title:
+            return "birthday"
+
+        return "event"
+
+    for scene in scenes:
+        scene["category"] = classify_scene(scene)
+
+    # Enrich scenes with computed fields (effective_stage, is_unscheduled, is_overdue)
+    from .play_computed import enrich_scene_for_display
+    enriched_scenes = [enrich_scene_for_display(scene) for scene in scenes]
+
+    return {"scenes": enriched_scenes}
 
 
 def _handle_play_beats_list(_db: Database, *, act_id: str, scene_id: str) -> dict[str, Any]:
@@ -3512,6 +3550,203 @@ def _handle_handoff_validate_all(_db: Database) -> dict[str, Any]:
     return validate_all_manifests()
 
 
+# -------------------------------------------------------------------------
+# Consciousness Streaming - Real-time visibility into CAIRN's thinking
+# -------------------------------------------------------------------------
+
+
+def _handle_consciousness_start(_db: Database) -> dict[str, Any]:
+    """Start a consciousness streaming session.
+
+    Clears previous events and activates event collection.
+    Called when user sends a message.
+    """
+    from .cairn.consciousness_stream import ConsciousnessObserver
+
+    observer = ConsciousnessObserver.get_instance()
+    observer.start_session()
+    return {"status": "started"}
+
+
+# -------------------------------------------------------------------------
+# Async CAIRN Chat - Background processing for real-time consciousness streaming
+# -------------------------------------------------------------------------
+
+import uuid as _uuid
+from dataclasses import dataclass as _dataclass
+from dataclasses import field as _field
+
+@_dataclass
+class _CairnChatContext:
+    """Context for an async CAIRN chat request."""
+    chat_id: str
+    text: str
+    conversation_id: str | None
+    extended_thinking: bool
+    is_complete: bool = False
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    thread: threading.Thread | None = None
+
+_cairn_chat_lock = threading.Lock()
+_active_cairn_chats: dict[str, _CairnChatContext] = {}
+
+
+def _handle_cairn_chat_async(
+    db: Database,
+    *,
+    text: str,
+    conversation_id: str | None = None,
+    extended_thinking: bool = False,
+) -> dict[str, Any]:
+    """Start CAIRN chat processing in background thread.
+
+    This allows the RPC server to handle consciousness/poll requests
+    while chat is processing, enabling real-time event streaming.
+
+    Returns immediately with a chat_id that can be used to poll for status.
+    """
+    from .cairn.consciousness_stream import ConsciousnessObserver
+
+    chat_id = _uuid.uuid4().hex[:12]
+
+    # Start consciousness session
+    observer = ConsciousnessObserver.get_instance()
+    observer.start_session()
+    # Debug logging to file
+    with open("/tmp/consciousness_debug.log", "a") as f:
+        f.write(f"[ASYNC CHAT] Started consciousness session for chat_id={chat_id}\n")
+
+    context = _CairnChatContext(
+        chat_id=chat_id,
+        text=text,
+        conversation_id=conversation_id,
+        extended_thinking=extended_thinking,
+    )
+
+    def run_chat() -> None:
+        """Run the chat in background thread."""
+        try:
+            result = _handle_chat_respond(
+                db,
+                text=text,
+                conversation_id=conversation_id,
+                agent_type="cairn",  # Use CAIRN's IntentEngine for consciousness events
+                extended_thinking=extended_thinking,
+            )
+            context.result = result
+            context.is_complete = True
+        except Exception as e:
+            context.error = str(e)
+            context.is_complete = True
+        finally:
+            # End consciousness session
+            observer.end_session()
+
+    # Start background thread
+    thread = threading.Thread(target=run_chat, daemon=True)
+    context.thread = thread
+
+    # Track the chat
+    with _cairn_chat_lock:
+        _active_cairn_chats[chat_id] = context
+
+    thread.start()
+
+    return {
+        "chat_id": chat_id,
+        "status": "started",
+    }
+
+
+def _handle_cairn_chat_status(
+    _db: Database,
+    *,
+    chat_id: str,
+) -> dict[str, Any]:
+    """Get the status of an async CAIRN chat request.
+
+    Returns the result when complete, or status "processing" if still running.
+    """
+    with _cairn_chat_lock:
+        context = _active_cairn_chats.get(chat_id)
+
+    if not context:
+        return {"error": f"Chat {chat_id} not found", "status": "not_found"}
+
+    if not context.is_complete:
+        return {"chat_id": chat_id, "status": "processing"}
+
+    if context.error:
+        return {"chat_id": chat_id, "status": "error", "error": context.error}
+
+    # Clean up completed chat
+    with _cairn_chat_lock:
+        _active_cairn_chats.pop(chat_id, None)
+
+    return {
+        "chat_id": chat_id,
+        "status": "complete",
+        "result": context.result,
+    }
+
+
+def _handle_consciousness_poll(_db: Database, *, since_index: int = 0) -> dict[str, Any]:
+    """Poll for new consciousness events.
+
+    Args:
+        since_index: Return events starting from this index
+
+    Returns:
+        Dict with events list and next_index for pagination
+    """
+    from .cairn.consciousness_stream import ConsciousnessObserver
+
+    observer = ConsciousnessObserver.get_instance()
+    events = observer.poll(since_index)
+
+    # Debug logging to file
+    with open("/tmp/consciousness_debug.log", "a") as f:
+        f.write(f"[POLL] since_index={since_index}, active={observer.is_active()}, events={len(events)}\n")
+
+    return {
+        "events": [
+            {
+                "type": e.event_type.name,
+                "timestamp": e.timestamp.isoformat(),
+                "title": e.title,
+                "content": e.content,
+                "metadata": e.metadata,
+            }
+            for e in events
+        ],
+        "next_index": since_index + len(events),
+    }
+
+
+def _handle_consciousness_snapshot(_db: Database) -> dict[str, Any]:
+    """Get all events from the current session.
+
+    Returns all events without pagination.
+    """
+    from .cairn.consciousness_stream import ConsciousnessObserver
+
+    observer = ConsciousnessObserver.get_instance()
+    events = observer.get_all()
+
+    return {
+        "events": [
+            {
+                "type": e.event_type.name,
+                "timestamp": e.timestamp.isoformat(),
+                "title": e.title,
+                "content": e.content,
+                "metadata": e.metadata,
+            }
+            for e in events
+        ],
+    }
+
 
 # -------------------------------------------------------------------------
 # RPC Handler Registry - Simple handlers dispatched via lookup
@@ -3535,6 +3770,8 @@ _SIMPLE_HANDLERS: dict[str, Callable[[Database], Any]] = {
     "thunderbird/check": _handle_thunderbird_check,
     "thunderbird/reset": _handle_thunderbird_reset,
     "autostart/get": _handle_autostart_get,
+    "consciousness/start": _handle_consciousness_start,
+    "consciousness/snapshot": _handle_consciousness_snapshot,
 }
 
 # Handlers with single required string param: (handler, param_name)
@@ -3561,6 +3798,7 @@ _INT_PARAM_HANDLERS: dict[str, tuple[Callable, str]] = {
     "safety/set_command_length": (_handle_safety_set_command_length, "max_length"),
     "safety/set_max_iterations": (_handle_safety_set_max_iterations, "max_iterations"),
     "safety/set_wall_clock_timeout": (_handle_safety_set_wall_clock_timeout, "timeout_seconds"),
+    "consciousness/poll": (_handle_consciousness_poll, "since_index"),
 }
 
 def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any] | None:
@@ -3707,6 +3945,32 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                 agent_type=agent_type,
                 extended_thinking=extended_thinking,
             )
+            return _jsonrpc_result(req_id=req_id, result=result)
+
+        # Async CAIRN chat for real-time consciousness streaming
+        if method == "cairn/chat_async":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            text = params.get("text")
+            conversation_id = params.get("conversation_id")
+            extended_thinking = params.get("extended_thinking", False)
+            if not isinstance(text, str) or not text.strip():
+                raise RpcError(code=-32602, message="text is required")
+            result = _handle_cairn_chat_async(
+                db,
+                text=text,
+                conversation_id=conversation_id,
+                extended_thinking=extended_thinking,
+            )
+            return _jsonrpc_result(req_id=req_id, result=result)
+
+        if method == "cairn/chat_status":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            chat_id = params.get("chat_id")
+            if not isinstance(chat_id, str) or not chat_id:
+                raise RpcError(code=-32602, message="chat_id is required")
+            result = _handle_cairn_chat_status(db, chat_id=chat_id)
             return _jsonrpc_result(req_id=req_id, result=result)
 
         if method == "approval/pending":

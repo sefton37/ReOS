@@ -58,11 +58,16 @@ export type ExtendedThinkingTrace = {
   assumptions: ThinkingNode[];
   facets_to_check: string[];
 
-  // Phase 3: Coherence
+  // Phase 3: Reasoning (iterative thinking)
+  reasoning_iterations: ThinkingNode[];
+  explored_angles: string[];
+  generated_ideas: string[];
+
+  // Phase 4: Coherence
   identity_facets_checked: FacetCheck[];
   tensions: Tension[];
 
-  // Phase 4: Result
+  // Phase 5: Result
   final_response: string;
   final_confidence: number;
   decision: 'respond' | 'ask' | 'defer';
@@ -352,6 +357,9 @@ export type PlayActsListResult = {
 // Scene stage types (formerly BeatStage)
 export type SceneStage = 'planning' | 'in_progress' | 'awaiting_data' | 'complete';
 
+// Display stage includes 'need_attention' virtual column (computed in backend)
+export type DisplayStage = SceneStage | 'need_attention';
+
 // PlayScene is the todo/calendar item level (formerly PlayBeat)
 export type PlayScene = {
   scene_id: string;
@@ -415,9 +423,15 @@ export type PlayPageTreeNode = PlayPage & {
 export type SceneWithAct = PlayScene & {
   act_title: string;
   act_color: string | null;
-  // Calendar data from CAIRN store for Kanban column determination
+  // Calendar data from play.db for Kanban column determination
   calendar_event_start: string | null;
   next_occurrence: string | null;
+  // Category for filtering (event, holiday, birthday)
+  category: 'event' | 'holiday' | 'birthday' | null;
+  // Computed fields from backend (single source of truth)
+  effective_stage: DisplayStage;
+  is_unscheduled: boolean;
+  is_overdue: boolean;
 };
 
 export type PlayKbListResult = {
@@ -759,4 +773,22 @@ export type CairnAttentionItem = {
 export type CairnAttentionResult = {
   count: number;
   items: CairnAttentionItem[];
+};
+
+// Consciousness Streaming types - Real-time visibility into CAIRN's thinking
+export type ConsciousnessEvent = {
+  type: string;  // Event type name (e.g., "PHASE_START", "INTENT_EXTRACTED")
+  timestamp: string;  // ISO timestamp
+  title: string;  // Human-readable title
+  content: string;  // Full content (not truncated)
+  metadata: Record<string, unknown>;  // Extra structured data
+};
+
+export type ConsciousnessPollResponse = {
+  events: ConsciousnessEvent[];
+  next_index: number;
+};
+
+export type ConsciousnessSnapshotResponse = {
+  events: ConsciousnessEvent[];
 };

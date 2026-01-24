@@ -39,7 +39,8 @@ _local = threading.local()
 # v3: Added thunderbird_event_id column to beats table
 # v4: Flatten hierarchy - remove old scenes tier, beats become scenes
 # v5: Add pages table for nested knowledgebase pages
-SCHEMA_VERSION = 5
+# v6: Add calendar metadata columns to scenes (consolidate from cairn_metadata)
+SCHEMA_VERSION = 6
 
 
 def _play_db_path() -> Path:
@@ -131,6 +132,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         );
 
         -- Scenes table (v4: the todo/task items, formerly called Beats)
+        -- v6: Added calendar metadata columns (calendar_event_start, etc.)
         CREATE TABLE IF NOT EXISTS scenes (
             scene_id TEXT PRIMARY KEY,
             act_id TEXT NOT NULL REFERENCES acts(act_id) ON DELETE CASCADE,
@@ -141,6 +143,13 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             calendar_event_id TEXT,
             recurrence_rule TEXT,
             thunderbird_event_id TEXT,
+            -- v6: Calendar metadata columns (consolidated from cairn_metadata)
+            calendar_event_start TEXT,
+            calendar_event_end TEXT,
+            calendar_event_title TEXT,
+            next_occurrence TEXT,
+            calendar_name TEXT,
+            category TEXT,
             position INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -149,6 +158,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_scenes_act_id ON scenes(act_id);
         CREATE INDEX IF NOT EXISTS idx_scenes_calendar_event ON scenes(calendar_event_id);
         CREATE INDEX IF NOT EXISTS idx_scenes_thunderbird_event ON scenes(thunderbird_event_id);
+        CREATE INDEX IF NOT EXISTS idx_scenes_next_occurrence ON scenes(next_occurrence);
         -- Unique constraint on calendar_event_id to prevent duplicate syncs
         CREATE UNIQUE INDEX IF NOT EXISTS idx_scenes_calendar_event_unique
             ON scenes(calendar_event_id) WHERE calendar_event_id IS NOT NULL;
@@ -218,6 +228,11 @@ def _run_schema_migrations(conn: sqlite3.Connection, current_version: int) -> No
     if current_version < 5:
         logger.info("Running v5 migration: Add pages table")
         _migrate_v4_to_v5(conn)
+
+    # Migration v5 -> v6: Add calendar metadata columns to scenes table
+    if current_version < 6:
+        logger.info("Running v6 migration: Add calendar metadata columns to scenes")
+        _migrate_v5_to_v6(conn)
 
     # Update schema version
     conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
@@ -370,6 +385,130 @@ def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
     logger.info("Ensured unique index on calendar_event_id")
 
     logger.info("v5 migration complete")
+
+
+def _migrate_v5_to_v6(conn: sqlite3.Connection) -> None:
+    """Migrate from v5 to v6 schema.
+
+    Adds calendar metadata columns to scenes table to consolidate calendar data
+    from cairn_metadata into play.db (single source of truth).
+
+    New columns:
+    - calendar_event_start: When the event is scheduled
+    - calendar_event_end: End time of the event
+    - calendar_event_title: Cached title from calendar
+    - next_occurrence: For recurring events, the next occurrence
+    - calendar_name: Human-readable calendar name
+    - category: Classification (event, holiday, birthday)
+    """
+    # Get current columns
+    cursor = conn.execute("PRAGMA table_info(scenes)")
+    columns = [row[1] for row in cursor.fetchall()]
+
+    # Add new columns if they don't exist
+    new_columns = [
+        ("calendar_event_start", "TEXT"),
+        ("calendar_event_end", "TEXT"),
+        ("calendar_event_title", "TEXT"),
+        ("next_occurrence", "TEXT"),
+        ("calendar_name", "TEXT"),
+        ("category", "TEXT"),
+    ]
+
+    for col_name, col_type in new_columns:
+        if col_name not in columns:
+            logger.info(f"Adding {col_name} column to scenes table")
+            conn.execute(f"ALTER TABLE scenes ADD COLUMN {col_name} {col_type}")
+
+    # Create index on next_occurrence for efficient querying
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_scenes_next_occurrence
+        ON scenes(next_occurrence)
+    """)
+
+    # Migrate calendar data from cairn_metadata if available
+    _migrate_calendar_data_from_cairn(conn)
+
+    logger.info("v6 migration complete")
+
+
+def _migrate_calendar_data_from_cairn(conn: sqlite3.Connection) -> None:
+    """Migrate calendar data from cairn_metadata.scene_calendar_links to scenes table.
+
+    This is a one-time migration that copies existing calendar metadata from the
+    CAIRN store into play.db for consolidation.
+    """
+    import os
+    from pathlib import Path
+
+    from .settings import settings
+
+    # Find cairn.db path
+    base = Path(os.environ.get("REOS_DATA_DIR", settings.data_dir))
+    cairn_db_path = base / "play" / ".cairn" / "cairn.db"
+
+    if not cairn_db_path.exists():
+        logger.info("No cairn.db found, skipping calendar data migration")
+        return
+
+    try:
+        # Open cairn.db read-only
+        cairn_conn = sqlite3.connect(str(cairn_db_path))
+        cairn_conn.row_factory = sqlite3.Row
+
+        # Check if scene_calendar_links table exists
+        cursor = cairn_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='scene_calendar_links'"
+        )
+        if not cursor.fetchone():
+            logger.info("No scene_calendar_links table in cairn.db, skipping migration")
+            cairn_conn.close()
+            return
+
+        # Read all calendar links from cairn
+        rows = cairn_conn.execute("""
+            SELECT scene_id, calendar_event_id, calendar_event_title,
+                   calendar_event_start, calendar_event_end,
+                   recurrence_rule, next_occurrence, calendar_name, category
+            FROM scene_calendar_links
+        """).fetchall()
+
+        cairn_conn.close()
+
+        # Update scenes in play.db with calendar data
+        migrated = 0
+        for row in rows:
+            scene_id = row["scene_id"]
+            # Check if scene exists in play.db
+            exists = conn.execute(
+                "SELECT 1 FROM scenes WHERE scene_id = ?", (scene_id,)
+            ).fetchone()
+
+            if exists:
+                conn.execute("""
+                    UPDATE scenes SET
+                        calendar_event_start = COALESCE(calendar_event_start, ?),
+                        calendar_event_end = COALESCE(calendar_event_end, ?),
+                        calendar_event_title = COALESCE(calendar_event_title, ?),
+                        next_occurrence = COALESCE(next_occurrence, ?),
+                        calendar_name = COALESCE(calendar_name, ?),
+                        category = COALESCE(category, ?)
+                    WHERE scene_id = ?
+                """, (
+                    row["calendar_event_start"],
+                    row["calendar_event_end"],
+                    row["calendar_event_title"],
+                    row["next_occurrence"],
+                    row["calendar_name"] if "calendar_name" in row.keys() else None,
+                    row["category"] if "category" in row.keys() else None,
+                    scene_id,
+                ))
+                migrated += 1
+
+        logger.info(f"Migrated calendar data for {migrated} scenes from cairn.db")
+
+    except Exception as e:
+        logger.warning(f"Failed to migrate calendar data from cairn.db: {e}")
 
 
 def _now_iso() -> str:
@@ -698,17 +837,77 @@ def delete_act(act_id: str) -> tuple[list[dict[str, Any]], str | None]:
     return list_acts()
 
 
-def assign_repo_to_act(*, act_id: str, repo_path: str | None, artifact_type: str | None = None) -> dict[str, Any] | None:
-    """Assign a repository path to an act."""
+def assign_repo_to_act(
+    *,
+    act_id: str,
+    repo_path: str | None,
+    artifact_type: str | None = None,
+    code_config: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Assign a repository path to an act, enabling Code Mode.
+
+    Args:
+        act_id: The Act to modify.
+        repo_path: Absolute path to git repository, or None to disable Code Mode.
+        artifact_type: Language/type hint (e.g., "python", "typescript").
+        code_config: Per-Act code configuration.
+
+    Returns:
+        Updated acts list and active_id.
+    """
+    now = _now_iso()
+
+    with _transaction() as conn:
+        updates = ["repo_path = ?", "updated_at = ?"]
+        params: list[Any] = [repo_path, now]
+
+        if artifact_type is not None:
+            updates.append("artifact_type = ?")
+            params.append(artifact_type)
+
+        if code_config is not None:
+            updates.append("code_config = ?")
+            params.append(json.dumps(code_config))
+
+        params.append(act_id)
+        conn.execute(f"""
+            UPDATE acts SET {', '.join(updates)} WHERE act_id = ?
+        """, params)
+
+    return list_acts()
+
+
+def configure_code_mode(
+    *,
+    act_id: str,
+    code_config: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Update Code Mode configuration for an Act.
+
+    Args:
+        act_id: The Act to modify.
+        code_config: Code configuration dict (test_command, build_command, etc.).
+
+    Returns:
+        Updated acts list and active_id.
+
+    Raises:
+        ValueError: If the act has no repo_path assigned.
+    """
+    # Check if act has repo_path
+    act = get_act(act_id)
+    if not act or not act.get("repo_path"):
+        raise ValueError("Cannot configure Code Mode: no repo_path assigned to this Act")
+
     now = _now_iso()
 
     with _transaction() as conn:
         conn.execute("""
-            UPDATE acts SET repo_path = ?, artifact_type = ?, updated_at = ?
+            UPDATE acts SET code_config = ?, updated_at = ?
             WHERE act_id = ?
-        """, (repo_path, artifact_type, now, act_id))
+        """, (json.dumps(code_config), now, act_id))
 
-    return get_act(act_id)
+    return list_acts()
 
 
 # =============================================================================
@@ -721,7 +920,9 @@ def list_scenes(act_id: str) -> list[dict[str, Any]]:
 
     cursor = conn.execute("""
         SELECT scene_id, act_id, title, stage, notes, link, calendar_event_id,
-               recurrence_rule, thunderbird_event_id
+               recurrence_rule, thunderbird_event_id,
+               calendar_event_start, calendar_event_end, calendar_event_title,
+               next_occurrence, calendar_name, category
         FROM scenes
         WHERE act_id = ?
         ORDER BY position ASC
@@ -738,6 +939,12 @@ def list_scenes(act_id: str) -> list[dict[str, Any]]:
             "calendar_event_id": row["calendar_event_id"],
             "recurrence_rule": row["recurrence_rule"],
             "thunderbird_event_id": row["thunderbird_event_id"],
+            "calendar_event_start": row["calendar_event_start"],
+            "calendar_event_end": row["calendar_event_end"],
+            "calendar_event_title": row["calendar_event_title"],
+            "next_occurrence": row["next_occurrence"],
+            "calendar_name": row["calendar_name"],
+            "category": row["category"],
         }
         for row in cursor
     ]
@@ -746,13 +953,15 @@ def list_scenes(act_id: str) -> list[dict[str, Any]]:
 def list_all_scenes() -> list[dict[str, Any]]:
     """List all scenes across all acts with act information.
 
-    Returns scenes with act_title and act_color for Kanban board display.
+    Returns scenes with act_title, act_color, and calendar metadata for Kanban board display.
     """
     conn = _get_connection()
 
     cursor = conn.execute("""
         SELECT s.scene_id, s.act_id, s.title, s.stage, s.notes, s.link,
                s.calendar_event_id, s.recurrence_rule, s.thunderbird_event_id,
+               s.calendar_event_start, s.calendar_event_end, s.calendar_event_title,
+               s.next_occurrence, s.calendar_name, s.category,
                a.title as act_title, a.color as act_color
         FROM scenes s
         JOIN acts a ON s.act_id = a.act_id
@@ -770,6 +979,12 @@ def list_all_scenes() -> list[dict[str, Any]]:
             "calendar_event_id": row["calendar_event_id"],
             "recurrence_rule": row["recurrence_rule"],
             "thunderbird_event_id": row["thunderbird_event_id"],
+            "calendar_event_start": row["calendar_event_start"],
+            "calendar_event_end": row["calendar_event_end"],
+            "calendar_event_title": row["calendar_event_title"],
+            "next_occurrence": row["next_occurrence"],
+            "calendar_name": row["calendar_name"],
+            "category": row["category"],
             "act_title": row["act_title"],
             "act_color": row["act_color"],
         }
@@ -782,7 +997,9 @@ def get_scene(scene_id: str) -> dict[str, Any] | None:
     conn = _get_connection()
     cursor = conn.execute("""
         SELECT scene_id, act_id, title, stage, notes, link, calendar_event_id,
-               recurrence_rule, thunderbird_event_id
+               recurrence_rule, thunderbird_event_id,
+               calendar_event_start, calendar_event_end, calendar_event_title,
+               next_occurrence, calendar_name, category
         FROM scenes WHERE scene_id = ?
     """, (scene_id,))
 
@@ -800,6 +1017,12 @@ def get_scene(scene_id: str) -> dict[str, Any] | None:
         "calendar_event_id": row["calendar_event_id"],
         "recurrence_rule": row["recurrence_rule"],
         "thunderbird_event_id": row["thunderbird_event_id"],
+        "calendar_event_start": row["calendar_event_start"],
+        "calendar_event_end": row["calendar_event_end"],
+        "calendar_event_title": row["calendar_event_title"],
+        "next_occurrence": row["next_occurrence"],
+        "calendar_name": row["calendar_name"],
+        "category": row["category"],
     }
 
 
@@ -878,6 +1101,67 @@ def delete_scene(act_id: str, scene_id: str) -> list[dict[str, Any]]:
         conn.execute("DELETE FROM scenes WHERE scene_id = ?", (scene_id,))
 
     return list_scenes(act_id)
+
+
+def update_scene_calendar_data(
+    scene_id: str,
+    *,
+    calendar_event_start: str | None = None,
+    calendar_event_end: str | None = None,
+    calendar_event_title: str | None = None,
+    next_occurrence: str | None = None,
+    calendar_name: str | None = None,
+    category: str | None = None,
+) -> bool:
+    """Update calendar metadata for a scene.
+
+    This is the single write target for calendar sync operations.
+    Only updates fields that are explicitly passed (not None).
+
+    Args:
+        scene_id: The scene to update.
+        calendar_event_start: Event start time (ISO format).
+        calendar_event_end: Event end time (ISO format).
+        calendar_event_title: Cached event title.
+        next_occurrence: Next occurrence for recurring events (ISO format).
+        calendar_name: Human-readable calendar name.
+        category: Classification (event, holiday, birthday).
+
+    Returns:
+        True if updated, False if scene not found.
+    """
+    now = _now_iso()
+
+    with _transaction() as conn:
+        updates = ["updated_at = ?"]
+        params: list[Any] = [now]
+
+        if calendar_event_start is not None:
+            updates.append("calendar_event_start = ?")
+            params.append(calendar_event_start if calendar_event_start else None)
+        if calendar_event_end is not None:
+            updates.append("calendar_event_end = ?")
+            params.append(calendar_event_end if calendar_event_end else None)
+        if calendar_event_title is not None:
+            updates.append("calendar_event_title = ?")
+            params.append(calendar_event_title if calendar_event_title else None)
+        if next_occurrence is not None:
+            updates.append("next_occurrence = ?")
+            params.append(next_occurrence if next_occurrence else None)
+        if calendar_name is not None:
+            updates.append("calendar_name = ?")
+            params.append(calendar_name if calendar_name else None)
+        if category is not None:
+            updates.append("category = ?")
+            params.append(category if category else None)
+
+        params.append(scene_id)
+
+        cursor = conn.execute(f"""
+            UPDATE scenes SET {', '.join(updates)} WHERE scene_id = ?
+        """, params)
+
+        return cursor.rowcount > 0
 
 
 def move_scene(*, scene_id: str, source_act_id: str,

@@ -1,10 +1,11 @@
 /**
  * Play Kanban Board - Drag-and-drop Kanban component for Scenes
  *
- * Four columns representing scene stages:
+ * Five columns representing scene stages:
  * - Planning (holding pen for unscheduled items)
  * - In Progress
  * - Awaiting Data
+ * - Need Attention (overdue items that haven't been completed)
  * - Complete
  *
  * Card style matches the "What Needs Attention" pane in CAIRN.
@@ -13,86 +14,32 @@
  * - Scenes with NO calendar event go to Planning
  * - Scenes scheduled for placeholder date (2099-12-31) go to Planning
  * - All other scenes use their actual stage
+ *
+ * Need Attention column logic:
+ * - Scenes whose calendar date has passed but are not marked complete
+ * - These require manual action to move to Complete
  */
 
 import { el } from './dom';
-import type { SceneWithAct, SceneStage } from './types';
+import type { SceneWithAct, SceneStage, DisplayStage } from './types';
 
 // Column definitions
-const COLUMNS: { stage: SceneStage; label: string; color: string; description: string }[] = [
+const COLUMNS: { stage: DisplayStage; label: string; color: string; description: string }[] = [
   { stage: 'planning', label: 'Planning', color: '#9ca3af', description: 'Unscheduled items' },
   { stage: 'in_progress', label: 'In Progress', color: '#3b82f6', description: 'Active work' },
   { stage: 'awaiting_data', label: 'Awaiting Data', color: '#f59e0b', description: 'Blocked on info' },
+  { stage: 'need_attention', label: 'Need Attention', color: '#ef4444', description: 'Overdue items' },
   { stage: 'complete', label: 'Complete', color: '#22c55e', description: 'Done' },
 ];
 
 /**
- * Check if a date is the placeholder date (December 31 of current year).
- * The placeholder is used for manually created scenes that haven't been scheduled.
- */
-function isPlaceholderDate(date: Date): boolean {
-  const currentYear = new Date().getFullYear();
-  return date.getMonth() === 11 && date.getDate() === 31 && date.getFullYear() === currentYear;
-}
-
-/**
- * Determine if a scene is "unscheduled" (belongs in Planning column).
- *
- * A scene is unscheduled if:
- * 1. It has no calendar_event_start AND no thunderbird_event_id, OR
- * 2. Its calendar_event_start is the placeholder date (Dec 31 of current year)
- */
-function isUnscheduled(scene: SceneWithAct): boolean {
-  // Use next_occurrence for recurring events, otherwise calendar_event_start
-  const eventDate = scene.next_occurrence || scene.calendar_event_start;
-
-  // No calendar event at all
-  if (!eventDate && !scene.thunderbird_event_id) {
-    return true;
-  }
-
-  // Check if scheduled for placeholder date (Dec 31 of current year)
-  if (eventDate) {
-    try {
-      const date = new Date(eventDate);
-      if (isPlaceholderDate(date)) {
-        return true;
-      }
-    } catch {
-      // Invalid date, treat as unscheduled
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
  * Get the effective Kanban column for a scene.
  *
- * Unscheduled items always go to Planning.
- * Scheduled items use their actual stage, but 'planning' becomes 'in_progress'
- * since having a date means the work is scheduled/active.
+ * This is computed in the backend (play_computed.py) and returned as a field.
+ * The frontend simply uses the pre-computed value.
  */
-function getEffectiveStage(scene: SceneWithAct): SceneStage {
-  // Unscheduled items always go to Planning
-  if (isUnscheduled(scene)) {
-    return 'planning';
-  }
-
-  // Completed items stay in Complete regardless of scheduling
-  if (scene.stage === 'complete') {
-    return 'complete';
-  }
-
-  // For scheduled items, 'planning' stage becomes 'in_progress' since they have a date
-  // (Planning column is only for unscheduled items)
-  if (scene.stage === 'planning') {
-    return 'in_progress';
-  }
-
-  // For other scheduled items, use actual stage
-  return (scene.stage as SceneStage) || 'in_progress';
+function getEffectiveStage(scene: SceneWithAct): DisplayStage {
+  return scene.effective_stage;
 }
 
 // Sort options
@@ -260,10 +207,11 @@ export function createPlayKanbanBoard(options: PlayKanbanBoardOptions): {
     });
 
     // Group scenes by effective stage (using calendar date for Planning determination)
-    const scenesByStage: Record<SceneStage, SceneWithAct[]> = {
+    const scenesByStage: Record<DisplayStage, SceneWithAct[]> = {
       planning: [],
       in_progress: [],
       awaiting_data: [],
+      need_attention: [],
       complete: [],
     };
 
@@ -273,7 +221,7 @@ export function createPlayKanbanBoard(options: PlayKanbanBoardOptions): {
     }
 
     // Sort scenes in each column
-    for (const stage of Object.keys(scenesByStage) as SceneStage[]) {
+    for (const stage of Object.keys(scenesByStage) as DisplayStage[]) {
       scenesByStage[stage] = sortScenes(scenesByStage[stage], currentSort);
     }
 
@@ -298,7 +246,7 @@ export function createPlayKanbanBoard(options: PlayKanbanBoardOptions): {
 }
 
 function createColumn(
-  column: { stage: SceneStage; label: string; color: string; description: string },
+  column: { stage: DisplayStage; label: string; color: string; description: string },
   scenes: SceneWithAct[],
   onStageChange: (sceneId: string, newStage: SceneStage, actId: string) => Promise<void>,
   onSceneClick: (sceneId: string, actId: string) => void
@@ -401,12 +349,18 @@ function createColumn(
     cardsContainer.style.background = 'transparent';
     cardsContainer.style.outline = 'none';
 
+    // Don't allow dropping onto 'need_attention' - it's a computed column
+    // Items appear there automatically when overdue
+    if (column.stage === 'need_attention') {
+      return;
+    }
+
     const sceneId = e.dataTransfer?.getData('scene_id');
     const actId = e.dataTransfer?.getData('act_id');
     const sourceStage = e.dataTransfer?.getData('source_stage');
 
     if (sceneId && actId && sourceStage !== column.stage) {
-      await onStageChange(sceneId, column.stage, actId);
+      await onStageChange(sceneId, column.stage as SceneStage, actId);
     }
   });
 
