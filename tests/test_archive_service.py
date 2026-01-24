@@ -250,10 +250,10 @@ class TestArchiveServiceArchiveWithReview:
                 additional_notes="User's additional note",
             )
 
-            # Should have been called twice: once for entries (empty), once for notes
-            assert mock_knowledge_store.add_learned_entries.call_count == 2
+            # Empty knowledge_entries means only notes call happens
+            assert mock_knowledge_store.add_learned_entries.call_count == 1
             # Check the notes call
-            notes_call = mock_knowledge_store.add_learned_entries.call_args_list[1]
+            notes_call = mock_knowledge_store.add_learned_entries.call_args
             assert notes_call[1]["entries"][0]["category"] == "observation"
             assert notes_call[1]["entries"][0]["content"] == "User's additional note"
 
@@ -316,6 +316,8 @@ class TestArchiveServiceMetadata:
         from reos.services.archive_service import ArchiveService
 
         mock_db = MagicMock()
+        mock_conn = MagicMock()
+        mock_db.connect.return_value = mock_conn
 
         with patch("reos.services.archive_service.KnowledgeStore"):
             service = ArchiveService(mock_db)
@@ -328,7 +330,7 @@ class TestArchiveServiceMetadata:
                 sentiment="positive",
             )
 
-            mock_db.execute.assert_called_once()
+            mock_conn.execute.assert_called_once()
 
 
 class TestArchiveServiceFeedback:
@@ -339,22 +341,29 @@ class TestArchiveServiceFeedback:
         from reos.services.archive_service import ArchiveService
 
         mock_db = MagicMock()
+        mock_conn = MagicMock()
+        mock_db.connect.return_value = mock_conn
 
         with patch("reos.services.archive_service.KnowledgeStore"):
             service = ArchiveService(mock_db)
             service.submit_user_feedback("arc123", 5, "Great job!")
 
-            mock_db.execute.assert_called_once()
+            mock_conn.execute.assert_called_once()
 
     def test_get_learning_stats(self) -> None:
         """Should return learning statistics."""
         from reos.services.archive_service import ArchiveService
 
         mock_db = MagicMock()
-        mock_db.query_one.side_effect = [
-            {"total": 10, "avg": 4.2},  # feedback stats
-            {"total": 5, "avg": 3.8},   # assessment stats
+        mock_conn = MagicMock()
+        mock_db.connect.return_value = mock_conn
+        # Mock the execute calls to return cursor with fetchone
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.side_effect = [
+            {"total_feedback": 10, "avg_rating": 4.2, "min_rating": 2, "max_rating": 5},
+            {"total_assessments": 5, "avg_score": 3.8, "min_score": 2, "max_score": 5},
         ]
+        mock_conn.execute.return_value = mock_cursor
 
         with patch("reos.services.archive_service.KnowledgeStore"):
             service = ArchiveService(mock_db)
@@ -386,8 +395,20 @@ class TestArchiveServiceList:
         from reos.services.archive_service import ArchiveService
 
         mock_db = MagicMock()
+        mock_conn = MagicMock()
+        mock_db.connect.return_value = mock_conn
+        # Mock metadata query - returns None (no metadata)
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = None
+        mock_conn.execute.return_value = mock_cursor
+
         mock_archive = MagicMock()
         mock_archive.archive_id = "arc123"
+        mock_archive.title = "Test"
+        mock_archive.summary = "Test summary"
+        mock_archive.message_count = 5
+        mock_archive.archived_at = "2024-01-15T10:00:00Z"
+        mock_archive.messages = []
         mock_knowledge_store = MagicMock()
         mock_knowledge_store.get_archive.return_value = mock_archive
 
@@ -395,4 +416,6 @@ class TestArchiveServiceList:
             service = ArchiveService(mock_db)
             archive = service.get_archive("arc123")
 
-            assert archive.archive_id == "arc123"
+            # get_archive returns a dict
+            assert archive is not None
+            assert archive["archive_id"] == "arc123"
