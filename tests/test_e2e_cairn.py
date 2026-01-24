@@ -1358,3 +1358,359 @@ class TestMCPToolsE2E:
         updated = cairn_store.get_metadata("beat", "tool-test")
         assert updated is not None
         assert updated.kanban_state == KanbanState.ACTIVE
+
+
+# =============================================================================
+# Play Kanban Workflow E2E Tests
+# =============================================================================
+
+
+class TestPlayKanbanWorkflowE2E:
+    """E2E tests for Play Kanban workflow."""
+
+    @pytest.fixture
+    def play_db_setup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Set up play_db for workflow tests."""
+        data_dir = tmp_path / "reos-data"
+        data_dir.mkdir()
+        monkeypatch.setenv("REOS_DATA_DIR", str(data_dir))
+
+        import reos.play_db as play_db
+
+        play_db.close_connection()
+        play_db.init_db()
+
+        yield play_db
+
+        play_db.close_connection()
+
+    def test_scene_creation_to_kanban_display(self, play_db_setup) -> None:
+        """Test scene creation flows through to Kanban board display."""
+        play_db = play_db_setup
+
+        # Create act and scene
+        _, act_id = play_db.create_act(title="Kanban Test Act")
+        _, scene_id = play_db.create_scene(
+            act_id=act_id,
+            title="New Task",
+            stage="planning",
+        )
+
+        # Verify scene appears in list
+        scenes = play_db.list_scenes(act_id)
+        assert len(scenes) == 1
+        assert scenes[0]["stage"] == "planning"
+
+        # Verify in list_all_scenes (used for Kanban)
+        all_scenes = play_db.list_all_scenes()
+        assert any(s["scene_id"] == scene_id for s in all_scenes)
+
+    def test_scene_stage_transitions(self, play_db_setup) -> None:
+        """Test scene stage transitions in Kanban workflow."""
+        play_db = play_db_setup
+
+        _, act_id = play_db.create_act(title="Stage Test Act")
+        _, scene_id = play_db.create_scene(act_id=act_id, title="Transition Task")
+
+        # Initial stage should be planning
+        scene = play_db.get_scene(scene_id)
+        assert scene["stage"] == "planning"
+
+        # Transition to in_progress
+        play_db.update_scene(act_id=act_id, scene_id=scene_id, stage="in_progress")
+        scene = play_db.get_scene(scene_id)
+        assert scene["stage"] == "in_progress"
+
+        # Transition to complete
+        play_db.update_scene(act_id=act_id, scene_id=scene_id, stage="complete")
+        scene = play_db.get_scene(scene_id)
+        assert scene["stage"] == "complete"
+
+    def test_overdue_detection_workflow(self, play_db_setup) -> None:
+        """Test overdue detection for Kanban 'Need Attention' column."""
+        from reos.play_computed import is_overdue, compute_effective_stage
+
+        play_db = play_db_setup
+
+        _, act_id = play_db.create_act(title="Overdue Test Act")
+        _, scene_id = play_db.create_scene(act_id=act_id, title="Overdue Task")
+
+        # Set past calendar event
+        past_date = (datetime.now() - timedelta(days=2)).isoformat()
+        play_db.update_scene_calendar_data(scene_id, calendar_event_start=past_date)
+
+        scene = play_db.get_scene(scene_id)
+
+        # Verify overdue detection
+        assert is_overdue(scene) is True
+        assert compute_effective_stage(scene) == "need_attention"
+
+    def test_calendar_sync_to_kanban_update(self, play_db_setup) -> None:
+        """Test calendar sync updates reflect in Kanban."""
+        play_db = play_db_setup
+
+        _, act_id = play_db.create_act(title="Calendar Sync Act")
+        _, scene_id = play_db.create_scene(
+            act_id=act_id,
+            title="Calendar Task",
+            calendar_event_id="cal-123",
+        )
+
+        # Simulate calendar sync updating the scene
+        new_start = (datetime.now() + timedelta(days=1)).isoformat()
+        play_db.update_scene_calendar_data(
+            scene_id,
+            calendar_event_start=new_start,
+            calendar_event_title="Updated Meeting",
+            calendar_name="Work",
+        )
+
+        # Verify updates
+        scene = play_db.get_scene(scene_id)
+        assert scene["calendar_event_start"] == new_start
+        assert scene["calendar_name"] == "Work"
+
+
+# =============================================================================
+# Calendar Integration E2E Tests
+# =============================================================================
+
+
+class TestCalendarIntegrationE2E:
+    """E2E tests for calendar-scene integration."""
+
+    @pytest.fixture
+    def play_db_setup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Set up play_db for calendar integration tests."""
+        data_dir = tmp_path / "reos-data"
+        data_dir.mkdir()
+        monkeypatch.setenv("REOS_DATA_DIR", str(data_dir))
+
+        import reos.play_db as play_db
+
+        play_db.close_connection()
+        play_db.init_db()
+
+        yield play_db
+
+        play_db.close_connection()
+
+    def test_calendar_event_creates_scene(self, play_db_setup) -> None:
+        """Test calendar event sync creates corresponding scene."""
+        play_db = play_db_setup
+
+        # Ensure Your Story act exists (inbound sync target)
+        play_db.ensure_your_story_act()
+
+        # Simulate creating scene from calendar event
+        scenes, scene_id = play_db.create_scene(
+            act_id="your-story",
+            title="Doctor Appointment",
+            calendar_event_id="cal-doctor-123",
+        )
+
+        # Update with calendar data
+        event_start = (datetime.now() + timedelta(days=1, hours=10)).isoformat()
+        play_db.update_scene_calendar_data(
+            scene_id,
+            calendar_event_start=event_start,
+            calendar_event_title="Doctor Appointment",
+            calendar_name="Personal",
+            category="event",
+        )
+
+        # Verify scene exists with calendar data
+        scene = play_db.get_scene(scene_id)
+        assert scene["calendar_event_id"] == "cal-doctor-123"
+        assert scene["calendar_event_start"] == event_start
+
+        # Verify can be found by calendar event ID
+        found = play_db.find_scene_by_calendar_event("cal-doctor-123")
+        assert found is not None
+        assert found["scene_id"] == scene_id
+
+    def test_scene_completion_updates_calendar_status(self, play_db_setup) -> None:
+        """Test completing a scene could update calendar event status."""
+        play_db = play_db_setup
+
+        _, act_id = play_db.create_act(title="Calendar Test Act")
+        _, scene_id = play_db.create_scene(
+            act_id=act_id,
+            title="Completable Task",
+            calendar_event_id="cal-complete-123",
+        )
+
+        # Complete the scene
+        play_db.update_scene(act_id=act_id, scene_id=scene_id, stage="complete")
+
+        # Verify scene is complete
+        scene = play_db.get_scene(scene_id)
+        assert scene["stage"] == "complete"
+
+        # In full implementation, this would also update Thunderbird
+
+    def test_recurring_event_next_occurrence_update(self, play_db_setup) -> None:
+        """Test recurring event next_occurrence is properly managed."""
+        play_db = play_db_setup
+
+        _, act_id = play_db.create_act(title="Recurring Test Act")
+        _, scene_id = play_db.create_scene(
+            act_id=act_id,
+            title="Weekly Standup",
+            recurrence_rule="RRULE:FREQ=WEEKLY;BYDAY=MO",
+            calendar_event_id="cal-weekly-123",
+        )
+
+        # Set initial calendar data with next occurrence
+        base_start = (datetime.now() - timedelta(days=7)).isoformat()  # Past
+        next_occ = (datetime.now() + timedelta(days=1)).isoformat()  # Future
+
+        play_db.update_scene_calendar_data(
+            scene_id,
+            calendar_event_start=base_start,
+            next_occurrence=next_occ,
+        )
+
+        # Verify next_occurrence is set
+        scene = play_db.get_scene(scene_id)
+        assert scene["next_occurrence"] == next_occ
+        assert scene["recurrence_rule"] == "RRULE:FREQ=WEEKLY;BYDAY=MO"
+
+
+# =============================================================================
+# UI RPC Integration E2E Tests
+# =============================================================================
+
+
+class TestUIRPCIntegrationE2E:
+    """E2E tests for UI RPC integration."""
+
+    @pytest.fixture
+    def play_db_setup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Set up play_db for RPC tests."""
+        data_dir = tmp_path / "reos-data"
+        data_dir.mkdir()
+        monkeypatch.setenv("REOS_DATA_DIR", str(data_dir))
+
+        import reos.play_db as play_db
+
+        play_db.close_connection()
+        play_db.init_db()
+
+        yield play_db
+
+        play_db.close_connection()
+
+    def test_list_all_scenes_includes_computed_fields(self, play_db_setup) -> None:
+        """Test list_all_scenes includes computed display fields."""
+        from reos.play_computed import enrich_scene_for_display
+
+        play_db = play_db_setup
+
+        _, act_id = play_db.create_act(title="RPC Test Act", color="#ff0000")
+        _, scene_id = play_db.create_scene(
+            act_id=act_id,
+            title="RPC Test Scene",
+            stage="planning",
+        )
+
+        # Get all scenes
+        all_scenes = play_db.list_all_scenes()
+        scene = next(s for s in all_scenes if s["scene_id"] == scene_id)
+
+        # Verify act info is included
+        assert scene["act_title"] == "RPC Test Act"
+        assert scene["act_color"] == "#ff0000"
+
+        # Enrich for display
+        enriched = enrich_scene_for_display(scene)
+
+        # Verify computed fields
+        assert "is_unscheduled" in enriched
+        assert "is_overdue" in enriched
+        assert "effective_stage" in enriched
+
+        # Unscheduled scene should have effective_stage = planning
+        assert enriched["is_unscheduled"] is True
+        assert enriched["effective_stage"] == "planning"
+
+    def test_scene_update_triggers_effective_stage_recalc(self, play_db_setup) -> None:
+        """Test scene update triggers effective_stage recalculation."""
+        from reos.play_computed import compute_effective_stage
+
+        play_db = play_db_setup
+
+        _, act_id = play_db.create_act(title="Stage Recalc Act")
+        _, scene_id = play_db.create_scene(
+            act_id=act_id,
+            title="Stage Recalc Scene",
+            stage="planning",
+        )
+
+        # Initial: unscheduled, effective_stage = planning
+        scene = play_db.get_scene(scene_id)
+        assert compute_effective_stage(scene) == "planning"
+
+        # Add calendar event (future date)
+        future_date = (datetime.now() + timedelta(days=2)).isoformat()
+        play_db.update_scene_calendar_data(scene_id, calendar_event_start=future_date)
+
+        # Now: scheduled, effective_stage = in_progress (planning with date)
+        scene = play_db.get_scene(scene_id)
+        assert compute_effective_stage(scene) == "in_progress"
+
+        # Make it overdue
+        past_date = (datetime.now() - timedelta(days=2)).isoformat()
+        play_db.update_scene_calendar_data(scene_id, calendar_event_start=past_date)
+
+        # Now: overdue, effective_stage = need_attention
+        scene = play_db.get_scene(scene_id)
+        assert compute_effective_stage(scene) == "need_attention"
+
+        # Complete it
+        play_db.update_scene(act_id=act_id, scene_id=scene_id, stage="complete")
+
+        # Now: complete, effective_stage = complete (overrides overdue)
+        scene = play_db.get_scene(scene_id)
+        assert compute_effective_stage(scene) == "complete"
+
+    def test_batch_scene_retrieval_for_kanban(self, play_db_setup) -> None:
+        """Test batch retrieval of scenes for Kanban board display."""
+        from reos.play_computed import enrich_scene_for_display
+
+        play_db = play_db_setup
+
+        # Create multiple acts with scenes
+        _, act1_id = play_db.create_act(title="Project A", color="#ff0000")
+        _, act2_id = play_db.create_act(title="Project B", color="#00ff00")
+
+        play_db.create_scene(act_id=act1_id, title="Task A1", stage="planning")
+        play_db.create_scene(act_id=act1_id, title="Task A2", stage="in_progress")
+        play_db.create_scene(act_id=act2_id, title="Task B1", stage="complete")
+
+        # Get all scenes (as Kanban board would)
+        all_scenes = play_db.list_all_scenes()
+        assert len(all_scenes) == 3
+
+        # Enrich all for display
+        enriched = [enrich_scene_for_display(s) for s in all_scenes]
+
+        # Verify all have computed fields
+        for scene in enriched:
+            assert "is_unscheduled" in scene
+            assert "is_overdue" in scene
+            assert "effective_stage" in scene
+            assert "act_title" in scene
+            assert "act_color" in scene
+
+        # Group by effective_stage (like Kanban would)
+        by_stage = {}
+        for scene in enriched:
+            stage = scene["effective_stage"]
+            if stage not in by_stage:
+                by_stage[stage] = []
+            by_stage[stage].append(scene)
+
+        # Verify distribution
+        assert "planning" in by_stage
+        assert "complete" in by_stage

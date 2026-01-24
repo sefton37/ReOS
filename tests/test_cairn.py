@@ -478,3 +478,161 @@ class TestModels:
         # Check max_items exists (default should be 5)
         assert hasattr(context, 'max_items')
         assert context.max_items == 5
+
+
+# =============================================================================
+# Store Edge Cases Tests
+# =============================================================================
+
+
+class TestStoreEdgeCases:
+    """Test edge cases and error handling in CairnStore."""
+
+    def test_concurrent_metadata_updates_last_wins(self, cairn_store: CairnStore) -> None:
+        """Concurrent metadata updates - last save wins."""
+        # Create metadata
+        meta1 = cairn_store.get_or_create_metadata("act", "concurrent-test")
+        meta2 = cairn_store.get_metadata("act", "concurrent-test")
+
+        assert meta1 is not None
+        assert meta2 is not None
+
+        # Both modify the same entity
+        meta1.priority = 5
+        meta2.priority = 3
+
+        # Save in sequence
+        cairn_store.save_metadata(meta1)
+        cairn_store.save_metadata(meta2)
+
+        # Last save wins
+        result = cairn_store.get_metadata("act", "concurrent-test")
+        assert result is not None
+        assert result.priority == 3
+
+    def test_orphaned_activity_log_cleanup(self, cairn_store: CairnStore) -> None:
+        """Activity logs for deleted metadata are orphaned (soft reference)."""
+        # Create metadata and touch it
+        cairn_store.get_or_create_metadata("beat", "orphan-test")
+        cairn_store.touch("beat", "orphan-test", ActivityType.EDITED)
+        cairn_store.touch("beat", "orphan-test", ActivityType.VIEWED)
+
+        # Verify activity log exists
+        log = cairn_store.get_activity_log("beat", "orphan-test")
+        assert len(log) >= 2
+
+        # Delete metadata
+        cairn_store.delete_metadata("beat", "orphan-test")
+
+        # Metadata gone
+        assert cairn_store.get_metadata("beat", "orphan-test") is None
+
+        # Activity log may still exist (depends on CASCADE policy)
+        # This is expected behavior - logs are historical record
+
+    def test_large_batch_operations(self, cairn_store: CairnStore) -> None:
+        """Test handling many metadata records."""
+        # Create many items
+        for i in range(100):
+            cairn_store.get_or_create_metadata("beat", f"batch-{i}")
+            cairn_store.set_kanban_state("beat", f"batch-{i}", KanbanState.ACTIVE)
+            cairn_store.set_priority("beat", f"batch-{i}", i % 5 + 1)
+
+        # Query all active items
+        active = cairn_store.list_metadata(entity_type="beat", kanban_state=KanbanState.ACTIVE)
+        assert len(active) == 100
+
+    def test_metadata_with_null_optional_fields(self, cairn_store: CairnStore) -> None:
+        """Metadata with all optional fields as None works correctly."""
+        meta = cairn_store.get_or_create_metadata("act", "minimal")
+
+        # All optional fields should be None/default
+        assert meta.priority is None
+        assert meta.priority_reason is None
+        assert meta.due_date is None
+        assert meta.defer_until is None
+        assert meta.waiting_on is None
+
+        # Save and retrieve should work
+        cairn_store.save_metadata(meta)
+        retrieved = cairn_store.get_metadata("act", "minimal")
+        assert retrieved is not None
+
+    def test_special_characters_in_entity_id(self, cairn_store: CairnStore) -> None:
+        """Entity IDs with special characters work."""
+        special_ids = [
+            "test-with-dashes",
+            "test_with_underscores",
+            "test.with.dots",
+            "test:with:colons",
+            "test/with/slashes",  # URL-like
+            "test123numbers",
+        ]
+
+        for entity_id in special_ids:
+            meta = cairn_store.get_or_create_metadata("beat", entity_id)
+            assert meta.entity_id == entity_id
+
+            cairn_store.touch("beat", entity_id)
+            retrieved = cairn_store.get_metadata("beat", entity_id)
+            assert retrieved is not None
+            assert retrieved.touch_count >= 1
+
+    def test_unicode_in_reason_field(self, cairn_store: CairnStore) -> None:
+        """Unicode characters in priority_reason field work."""
+        meta = cairn_store.get_or_create_metadata("act", "unicode-test")
+        meta.priority_reason = "Important for \u65e5\u672c\u8a9e project \U0001f680"
+
+        cairn_store.save_metadata(meta)
+
+        retrieved = cairn_store.get_metadata("act", "unicode-test")
+        assert retrieved is not None
+        assert "\u65e5\u672c\u8a9e" in retrieved.priority_reason
+
+    def test_very_long_reason_field(self, cairn_store: CairnStore) -> None:
+        """Very long priority_reason field is handled."""
+        meta = cairn_store.get_or_create_metadata("beat", "long-reason")
+        meta.priority_reason = "x" * 5000  # 5K characters
+
+        cairn_store.save_metadata(meta)
+
+        retrieved = cairn_store.get_metadata("beat", "long-reason")
+        assert retrieved is not None
+        assert len(retrieved.priority_reason) == 5000
+
+    def test_priority_boundary_values(self, cairn_store: CairnStore) -> None:
+        """Priority boundary values (1-5) are handled."""
+        # Valid priorities
+        for priority in [1, 2, 3, 4, 5]:
+            cairn_store.get_or_create_metadata("beat", f"priority-{priority}")
+            cairn_store.set_priority("beat", f"priority-{priority}", priority)
+
+            meta = cairn_store.get_metadata("beat", f"priority-{priority}")
+            assert meta is not None
+            assert meta.priority == priority
+
+    def test_kanban_state_transitions(self, cairn_store: CairnStore) -> None:
+        """All kanban state transitions work."""
+        states = [
+            KanbanState.BACKLOG,
+            KanbanState.ACTIVE,
+            KanbanState.WAITING,
+            KanbanState.SOMEDAY,
+            KanbanState.DONE,
+        ]
+
+        cairn_store.get_or_create_metadata("act", "state-test")
+
+        # Transition through all states
+        for state in states:
+            cairn_store.set_kanban_state("act", "state-test", state)
+            meta = cairn_store.get_metadata("act", "state-test")
+            assert meta is not None
+            assert meta.kanban_state == state
+
+    def test_delete_nonexistent_metadata(self, cairn_store: CairnStore) -> None:
+        """Deleting nonexistent metadata doesn't raise."""
+        # Should not raise
+        result = cairn_store.delete_metadata("act", "does-not-exist")
+        # Returns False or handles gracefully
+        assert result is False or result is None

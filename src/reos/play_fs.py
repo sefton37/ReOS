@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import json
 import logging
 import os
 from dataclasses import dataclass

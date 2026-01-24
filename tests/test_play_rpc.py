@@ -180,3 +180,239 @@ def test_play_rpc_kb_apply_conflict_is_error(tmp_path, monkeypatch, isolated_db_
     )
     assert "error" in conflict
     assert conflict["error"]["code"] == -32009
+
+
+# =============================================================================
+# RPC Error Handling Tests
+# =============================================================================
+
+
+def test_rpc_invalid_scene_id_returns_error(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+    """Getting a scene with invalid ID returns error or null."""
+    monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
+
+    from reos.db import get_db
+
+    db = get_db()
+
+    # Try to get nonexistent scene
+    resp = _rpc(
+        db,
+        req_id=1,
+        method="play/scenes/get",
+        params={"scene_id": "nonexistent-scene-id"},
+    )
+
+    # Should return error or null result
+    if "result" in resp:
+        assert resp["result"] is None or resp["result"].get("scene") is None
+    else:
+        assert "error" in resp
+
+
+def test_rpc_invalid_stage_value_accepted(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+    """Invalid stage value is accepted (free-form field for flexibility)."""
+    monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
+
+    from reos.db import get_db
+
+    db = get_db()
+
+    # Create act and scene
+    act_resp = _rpc(db, req_id=1, method="play/acts/create", params={"title": "Test Act"})
+    act_id = act_resp["result"]["created_act_id"]
+
+    scene_resp = _rpc(
+        db,
+        req_id=2,
+        method="play/scenes/create",
+        params={"act_id": act_id, "title": "Test Scene"},
+    )
+    scene_id = scene_resp["result"]["scenes"][0]["scene_id"]
+
+    # Update with custom stage value (should be accepted)
+    update_resp = _rpc(
+        db,
+        req_id=3,
+        method="play/scenes/update",
+        params={
+            "act_id": act_id,
+            "scene_id": scene_id,
+            "stage": "custom_stage",
+        },
+    )
+
+    # Should succeed (stage is free-form)
+    assert "result" in update_resp
+    scenes = update_resp["result"]["scenes"]
+    updated_scene = next((s for s in scenes if s["scene_id"] == scene_id), None)
+    assert updated_scene is not None
+    assert updated_scene["stage"] == "custom_stage"
+
+
+def test_rpc_missing_required_params_returns_error(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+    """Missing required parameters return appropriate error."""
+    monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
+
+    from reos.db import get_db
+
+    db = get_db()
+
+    # Try to create scene without act_id
+    resp = _rpc(
+        db,
+        req_id=1,
+        method="play/scenes/create",
+        params={"title": "Orphan Scene"},  # Missing act_id
+    )
+
+    # Should return error for missing required param
+    assert "error" in resp
+
+
+def test_rpc_minimal_title_accepted(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+    """Minimal title is accepted."""
+    monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
+
+    from reos.db import get_db
+
+    db = get_db()
+
+    # Create act with single character title
+    resp = _rpc(db, req_id=1, method="play/acts/create", params={"title": "X"})
+
+    # Should succeed
+    assert "result" in resp
+    assert "created_act_id" in resp["result"]
+
+
+def test_rpc_unicode_in_title_and_notes(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+    """Unicode characters in title and notes work correctly."""
+    monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
+
+    from reos.db import get_db
+
+    db = get_db()
+
+    # Create act with unicode
+    unicode_title = "Project \u65e5\u672c\u8a9e \U0001f680"
+    unicode_notes = "Notes with \u00e9\u00e0\u00fc\u00f1 and more"
+
+    resp = _rpc(
+        db,
+        req_id=1,
+        method="play/acts/create",
+        params={"title": unicode_title, "notes": unicode_notes},
+    )
+
+    assert "result" in resp
+    act_id = resp["result"]["created_act_id"]
+
+    # Retrieve and verify
+    list_resp = _rpc(db, req_id=2, method="play/acts/list")
+    acts = list_resp["result"]["acts"]
+    created_act = next((a for a in acts if a["act_id"] == act_id), None)
+
+    assert created_act is not None
+    assert created_act["title"] == unicode_title
+    assert created_act["notes"] == unicode_notes
+
+
+def test_rpc_create_multiple_scenes(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+    """Creating multiple scenes in an act works correctly."""
+    monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
+
+    from reos.db import get_db
+
+    db = get_db()
+
+    # Create act
+    act_resp = _rpc(db, req_id=1, method="play/acts/create", params={"title": "Multi Scene Act"})
+    act_id = act_resp["result"]["created_act_id"]
+
+    # Create multiple scenes
+    _rpc(db, req_id=2, method="play/scenes/create", params={"act_id": act_id, "title": "Scene 1"})
+    _rpc(db, req_id=3, method="play/scenes/create", params={"act_id": act_id, "title": "Scene 2"})
+    scene_resp = _rpc(db, req_id=4, method="play/scenes/create", params={"act_id": act_id, "title": "Scene 3"})
+
+    # Should have 3 scenes
+    scenes = scene_resp["result"]["scenes"]
+    assert len(scenes) == 3
+    titles = {s["title"] for s in scenes}
+    assert titles == {"Scene 1", "Scene 2", "Scene 3"}
+
+
+def test_rpc_update_scene_partial_params(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+    """Partial update only changes specified fields."""
+    monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
+
+    from reos.db import get_db
+
+    db = get_db()
+
+    # Create act and scene with all fields
+    act_resp = _rpc(db, req_id=1, method="play/acts/create", params={"title": "Test Act"})
+    act_id = act_resp["result"]["created_act_id"]
+
+    scene_resp = _rpc(
+        db,
+        req_id=2,
+        method="play/scenes/create",
+        params={
+            "act_id": act_id,
+            "title": "Original Title",
+        },
+    )
+    scene_id = scene_resp["result"]["scenes"][0]["scene_id"]
+
+    # Update notes with specific text
+    _rpc(
+        db,
+        req_id=3,
+        method="play/scenes/update",
+        params={"act_id": act_id, "scene_id": scene_id, "notes": "Original notes"},
+    )
+
+    # Partial update - only change title
+    update_resp = _rpc(
+        db,
+        req_id=4,
+        method="play/scenes/update",
+        params={
+            "act_id": act_id,
+            "scene_id": scene_id,
+            "title": "New Title",
+            # Not specifying notes - should remain unchanged
+        },
+    )
+
+    scenes = update_resp["result"]["scenes"]
+    updated = next((s for s in scenes if s["scene_id"] == scene_id), None)
+
+    assert updated is not None
+    assert updated["title"] == "New Title"
+    assert updated["notes"] == "Original notes"  # Unchanged
+
+
+def test_rpc_list_all_scenes_returns_list(tmp_path, monkeypatch, isolated_db_singleton: object) -> None:
+    """List all scenes returns a list."""
+    monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
+
+    from reos.db import get_db
+
+    db = get_db()
+
+    # Create act and scene
+    act_resp = _rpc(db, req_id=1, method="play/acts/create", params={"title": "List Test Act"})
+    act_id = act_resp["result"]["created_act_id"]
+
+    _rpc(db, req_id=2, method="play/scenes/create", params={"act_id": act_id, "title": "Test Scene"})
+
+    # List all scenes
+    resp = _rpc(db, req_id=3, method="play/scenes/list_all")
+
+    assert "result" in resp
+    scenes = resp["result"]["scenes"]
+    assert isinstance(scenes, list)
+    # Should have at least our test scene
+    assert any(s["title"] == "Test Scene" for s in scenes)
