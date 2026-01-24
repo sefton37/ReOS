@@ -4,7 +4,7 @@
  * Main entry point for the Tauri-based desktop UI.
  * Communicates with the Python kernel via JSON-RPC over stdio.
  */
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { WebviewWindow, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
 import './style.css';
@@ -28,6 +28,7 @@ import { renderCollapsedDiffPreview } from './diffPreview';
 import { createDiffPreviewOverlay } from './diffPreviewOverlay';
 import { createCodeModeView } from './codeModeView';
 import { createCairnView } from './cairnView';
+import { createArchiveReviewOverlay, ArchivePreview, ArchiveReviewResult } from './archiveReviewOverlay';
 import { buildPlayWindow } from './playWindow';
 import type {
   ChatRespondResult,
@@ -53,9 +54,6 @@ import type {
   ApprovalExplainResult,
   ContextStatsResult,
   ContextToggleResult,
-  CompactPreviewResult,
-  CompactApplyResult,
-  ArchiveSaveResult,
   CodeExecutionState,
   CodeExecStartResult,
   CodeExecCancelResult,
@@ -435,12 +433,73 @@ function buildUi() {
     kernelRequest,
   });
 
+  // ============ Archive Review Overlay ============
+  let currentArchivePreview: ArchivePreview | null = null;
+
+  const archiveReviewOverlay = createArchiveReviewOverlay({
+    onConfirm: async (result: ArchiveReviewResult) => {
+      if (!currentConversationId || !currentArchivePreview) return;
+
+      try {
+        const archiveResult = await kernelRequest('conversation/archive/confirm', {
+          conversation_id: currentConversationId,
+          title: result.editedTitle,
+          summary: result.editedSummary,
+          act_id: currentArchivePreview.linked_act_id,
+          knowledge_entries: result.approvedEntries,
+          additional_notes: result.additionalNotes,
+          rating: result.rating,
+        }) as { archive_id: string; title: string; message_count: number; knowledge_entries_added: number };
+
+        // Show success message in CAIRN view
+        let successMsg = `Archived "${archiveResult.title}" (${archiveResult.message_count} messages)`;
+        if (archiveResult.knowledge_entries_added > 0) {
+          successMsg += `. Saved ${archiveResult.knowledge_entries_added} knowledge entries`;
+        }
+        successMsg += '.';
+        cairnView.addChatMessage('assistant', successMsg);
+
+        // Clear the chat
+        cairnView.clearChat();
+        currentConversationId = null;
+        currentArchivePreview = null;
+
+      } catch (e) {
+        cairnView.addChatMessage('assistant', `Archive failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+      }
+    },
+    onCancel: () => {
+      currentArchivePreview = null;
+      cairnView.addChatMessage('assistant', 'Archive cancelled.');
+    },
+    getActTitle: async (actId: string) => {
+      try {
+        const result = await kernelRequest('play/acts/list', {}) as { acts: Array<{ act_id: string; title: string }> };
+        const act = result.acts.find(a => a.act_id === actId);
+        return act?.title || null;
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  // Add overlay to document
+  document.body.appendChild(archiveReviewOverlay.container);
+
   // ============ CAIRN View (Conversational) ============
   const cairnView = createCairnView({
     onSendMessage: async (message: string, options?: { extendedThinking?: boolean }) => {
       return handleCairnMessage(message, options);
     },
     kernelRequest,
+    getConversationId: () => currentConversationId,
+    onConversationCleared: () => {
+      currentConversationId = null;
+    },
+    showArchiveReview: (preview: ArchivePreview) => {
+      currentArchivePreview = preview;
+      archiveReviewOverlay.show(preview);
+    },
   });
 
   // Load attention items at startup for "What Needs My Attention" section (next 7 days)
@@ -527,6 +586,41 @@ function buildUi() {
       console.log('Could not refresh attention items:', e);
     }
   }
+
+  // Auto-archive conversation on window close
+  const autoArchiveOnClose = async (): Promise<void> => {
+    if (!currentConversationId) return;
+
+    try {
+      // Archive the current conversation silently
+      await kernelRequest('conversation/archive', {
+        conversation_id: currentConversationId,
+        auto_link: true,
+        extract_knowledge: true,
+      });
+      console.log('Auto-archived conversation on close');
+    } catch (e) {
+      console.error('Failed to auto-archive on close:', e);
+    }
+  };
+
+  // Register window close handler
+  const appWindow = getCurrentWebviewWindow();
+  void appWindow.onCloseRequested(async (_event: unknown) => {
+    // Archive before closing
+    await autoArchiveOnClose();
+    // Allow the window to close (don't prevent default)
+  });
+
+  // Also handle browser unload as a fallback
+  window.addEventListener('beforeunload', () => {
+    // Note: async operations may not complete in beforeunload
+    // The Tauri onCloseRequested handler above is the primary mechanism
+    if (currentConversationId) {
+      // Fire and forget - this is a best-effort fallback
+      void autoArchiveOnClose();
+    }
+  });
 
   // Adaptive polling for attention items: 10s when user active, 60s when idle
   let lastActivityTime = Date.now();
@@ -1788,127 +1882,6 @@ function buildUi() {
     }
   }
 
-  async function archiveChat() {
-    if (!currentConversationId) {
-      append('reos', 'No active conversation to archive.');
-      return;
-    }
-
-    try {
-      const result = await kernelRequest('archive/save', {
-        conversation_id: currentConversationId,
-        act_id: activeActId,
-        generate_summary: true,
-      }) as ArchiveSaveResult;
-
-      append('reos', `Chat archived successfully (${result.message_count} messages). Archive ID: ${result.archive_id}`);
-
-      // Clear chat after archiving
-      codeModeView.clearChat();
-      currentConversationId = null;
-      updateContextMeter();
-    } catch (e) {
-      console.error('Failed to archive chat:', e);
-      append('reos', 'Failed to archive chat. Please try again.');
-    }
-  }
-
-  async function compactChat() {
-    if (!currentConversationId) {
-      append('reos', 'No active conversation to compact.');
-      return;
-    }
-
-    try {
-      // First, preview what will be extracted
-      const preview = await kernelRequest('compact/preview', {
-        conversation_id: currentConversationId,
-        act_id: activeActId,
-      }) as CompactPreviewResult;
-
-      if (preview.entries.length === 0) {
-        append('reos', 'No knowledge to extract from this conversation.');
-        return;
-      }
-
-      // Show preview in chat
-      const previewText = preview.entries.map(e =>
-        `• [${e.category}] ${e.content}`
-      ).join('\n');
-
-      append('reos', `Extracting ${preview.entries.length} items:\n\n${previewText}\n\nType "confirm compact" to save these to memory, or "cancel" to keep chatting.`);
-
-      // Store pending compact for confirmation
-      (window as unknown as Record<string, unknown>)._pendingCompact = {
-        conversationId: currentConversationId,
-        actId: activeActId,
-        entries: preview.entries,
-      };
-    } catch (e) {
-      console.error('Failed to preview compact:', e);
-      append('reos', 'Failed to analyze conversation. Please try again.');
-    }
-  }
-
-  async function confirmCompact() {
-    const pending = (window as unknown as Record<string, unknown>)._pendingCompact as {
-      conversationId: string;
-      actId: string | null;
-      entries: Array<{ category: string; content: string }>;
-    } | undefined;
-
-    if (!pending) {
-      append('reos', 'No pending compact to confirm.');
-      return;
-    }
-
-    try {
-      const result = await kernelRequest('compact/apply', {
-        conversation_id: pending.conversationId,
-        act_id: pending.actId,
-        entries: pending.entries,
-        archive_first: true,
-      }) as CompactApplyResult;
-
-      append('reos', `Learned ${result.added_count} new items. Total knowledge: ${result.total_entries} entries. Chat archived and cleared.`);
-
-      // Clear chat
-      codeModeView.clearChat();
-      currentConversationId = null;
-      delete (window as unknown as Record<string, unknown>)._pendingCompact;
-      updateContextMeter();
-    } catch (e) {
-      console.error('Failed to apply compact:', e);
-      append('reos', 'Failed to save knowledge. Please try again.');
-    }
-  }
-
-  async function deleteChat() {
-    if (!currentConversationId) {
-      append('reos', 'No active conversation to delete.');
-      return;
-    }
-
-    // Confirm deletion
-    if (!confirm('Delete this chat? This cannot be undone.')) {
-      return;
-    }
-
-    try {
-      await kernelRequest('chat/clear', {
-        conversation_id: currentConversationId,
-      });
-
-      codeModeView.clearChat();
-      currentConversationId = null;
-      append('reos', 'Chat deleted.');
-      updateContextMeter();
-    } catch (e) {
-      console.error('Failed to delete chat:', e);
-      append('reos', 'Failed to delete chat. Please try again.');
-    }
-  }
-
   // Update context meter periodically and after messages
   setInterval(() => void updateContextMeter(), 30000);
 
@@ -2758,32 +2731,6 @@ function buildUi() {
 
   // Main handler for chat messages - called by the code mode view
   async function handleChatMessage(text: string): Promise<ChatRespondResult> {
-    // Handle compact confirmation commands
-    if (text.toLowerCase() === 'confirm compact') {
-      await confirmCompact();
-      return {
-        answer: 'Compact confirmed.',
-        conversation_id: currentConversationId || '',
-        message_id: '',
-        message_type: 'system',
-        tool_calls: [],
-        thinking_steps: [],
-        pending_approval_id: null,
-      };
-    }
-    if (text.toLowerCase() === 'cancel' && (window as unknown as Record<string, unknown>)._pendingCompact) {
-      delete (window as unknown as Record<string, unknown>)._pendingCompact;
-      return {
-        answer: 'Compact cancelled. Conversation continues.',
-        conversation_id: currentConversationId || '',
-        message_id: '',
-        message_type: 'system',
-        tool_calls: [],
-        thinking_steps: [],
-        pending_approval_id: null,
-      };
-    }
-
     // Check if we're in Code Mode (active act with repo_path AND viewing RIVA)
     // CAIRN view should NOT trigger code mode - it's for conversational chat
     const activeAct = actsCache.find((a) => a.act_id === activeActId);

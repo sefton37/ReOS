@@ -12,9 +12,22 @@ import { el } from './dom';
 import type { ChatRespondResult, ExtendedThinkingTrace, ThinkingNode, FacetCheck, Tension } from './types';
 import { highlight, injectSyntaxHighlightStyles } from './syntaxHighlight';
 
+interface ArchivePreviewData {
+  title: string;
+  summary: string;
+  linked_act_id: string | null;
+  linking_reason: string | null;
+  knowledge_entries: Array<{ category: string; content: string }>;
+  topics: string[];
+  message_count: number;
+}
+
 interface CairnViewCallbacks {
   onSendMessage: (message: string, options?: { extendedThinking?: boolean }) => Promise<void>;
   kernelRequest: (method: string, params: unknown) => Promise<unknown>;
+  getConversationId: () => string | null;
+  onConversationCleared: () => void;
+  showArchiveReview: (preview: ArchivePreviewData) => void;
 }
 
 /** Full message data including LLM context for expandable details */
@@ -150,7 +163,12 @@ export function createCairnView(
     padding: 16px 20px;
     border-bottom: 1px solid rgba(255,255,255,0.1);
     background: rgba(0,0,0,0.2);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
   `;
+
+  const chatTitleArea = el('div');
 
   const chatTitle = el('div');
   chatTitle.style.cssText = `
@@ -168,8 +186,126 @@ export function createCairnView(
   `;
   chatSubtitle.textContent = 'Your attention minder';
 
-  chatHeader.appendChild(chatTitle);
-  chatHeader.appendChild(chatSubtitle);
+  chatTitleArea.appendChild(chatTitle);
+  chatTitleArea.appendChild(chatSubtitle);
+
+  // Archive/Delete buttons
+  const chatActions = el('div');
+  chatActions.style.cssText = `
+    display: flex;
+    gap: 8px;
+  `;
+
+  const archiveBtn = el('button');
+  archiveBtn.title = 'Archive conversation';
+  archiveBtn.style.cssText = `
+    padding: 6px 12px;
+    background: rgba(34, 197, 94, 0.15);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    border-radius: 6px;
+    color: #22c55e;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s;
+  `;
+  archiveBtn.innerHTML = `<span>📦</span><span>Archive</span>`;
+  archiveBtn.addEventListener('mouseenter', () => {
+    archiveBtn.style.background = 'rgba(34, 197, 94, 0.25)';
+  });
+  archiveBtn.addEventListener('mouseleave', () => {
+    archiveBtn.style.background = 'rgba(34, 197, 94, 0.15)';
+  });
+
+  const deleteBtn = el('button');
+  deleteBtn.title = 'Delete conversation';
+  deleteBtn.style.cssText = `
+    padding: 6px 12px;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 6px;
+    color: #ef4444;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s;
+  `;
+  deleteBtn.innerHTML = `<span>🗑️</span><span>Delete</span>`;
+  deleteBtn.addEventListener('mouseenter', () => {
+    deleteBtn.style.background = 'rgba(239, 68, 68, 0.25)';
+  });
+  deleteBtn.addEventListener('mouseleave', () => {
+    deleteBtn.style.background = 'rgba(239, 68, 68, 0.15)';
+  });
+
+  // Archive button handler - shows preview first
+  archiveBtn.addEventListener('click', async () => {
+    const conversationId = callbacks.getConversationId();
+    if (!conversationId) {
+      addChatMessage('assistant', 'No active conversation to archive.');
+      return;
+    }
+
+    // Show analyzing indicator
+    const originalText = archiveBtn.innerHTML;
+    archiveBtn.innerHTML = `<span>⏳</span><span>Analyzing...</span>`;
+    archiveBtn.style.pointerEvents = 'none';
+
+    try {
+      // Get preview from LLM analysis
+      const preview = await callbacks.kernelRequest('conversation/archive/preview', {
+        conversation_id: conversationId,
+        auto_link: true,
+      }) as ArchivePreviewData;
+
+      // Show the review overlay
+      callbacks.showArchiveReview(preview);
+
+    } catch (e) {
+      addChatMessage('assistant', `Analysis failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      archiveBtn.innerHTML = originalText;
+      archiveBtn.style.pointerEvents = 'auto';
+    }
+  });
+
+  // Delete button handler
+  deleteBtn.addEventListener('click', async () => {
+    const conversationId = callbacks.getConversationId();
+    if (!conversationId) {
+      addChatMessage('assistant', 'No active conversation to delete.');
+      return;
+    }
+
+    // Confirm deletion
+    if (!window.confirm('Delete this conversation? This cannot be undone.')) {
+      return;
+    }
+
+    try {
+      await callbacks.kernelRequest('conversation/delete', {
+        conversation_id: conversationId,
+        archive_first: false,
+      });
+
+      // Clear the chat
+      clearChat();
+      callbacks.onConversationCleared();
+
+    } catch (e) {
+      addChatMessage('assistant', `Delete failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  });
+
+  chatActions.appendChild(archiveBtn);
+  chatActions.appendChild(deleteBtn);
+
+  chatHeader.appendChild(chatTitleArea);
+  chatHeader.appendChild(chatActions);
 
   // Chat messages area
   const chatMessages = el('div');

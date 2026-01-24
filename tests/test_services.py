@@ -239,22 +239,6 @@ class TestContextService:
         limit = context_service.get_context_limit()
         assert limit > 0
 
-    def test_compaction_result_dataclass(self) -> None:
-        """CompactionResult should serialize to dict."""
-        from reos.services.context_service import CompactionResult
-
-        result = CompactionResult(
-            success=True,
-            archive_id="arc123",
-            tokens_before=5000,
-            tokens_after=500,
-            tokens_saved=4500,
-            learned_entries_added=3,
-        )
-        d = result.to_dict()
-        assert d["success"] is True
-        assert d["tokens_saved"] == 4500
-
     def test_list_archives_empty(self, context_service) -> None:
         """Should return empty list when no archives."""
         archives = context_service.list_archives()

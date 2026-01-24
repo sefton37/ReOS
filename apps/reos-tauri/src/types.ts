@@ -519,14 +519,6 @@ export type ContextToggleResult = {
 };
 
 // Archive types
-export type ArchiveSaveResult = {
-  archive_id: string;
-  title: string;
-  message_count: number;
-  archived_at: string;
-  summary: string;
-};
-
 export type ArchiveListResult = {
   archives: Array<{
     archive_id: string;
@@ -554,20 +546,66 @@ export type ArchiveGetResult = {
   summary: string;
 };
 
-// Compact types
-export type CompactPreviewResult = {
-  entries: Array<{
-    category: 'fact' | 'lesson' | 'decision' | 'preference' | 'observation';
+// Conversation Archive types (LLM-driven memory system)
+export type ConversationArchivePreview = {
+  title: string;
+  summary: string;
+  linked_act_id: string | null;
+  linking_reason: string | null;
+  knowledge_entries: Array<{
+    category: string;
     content: string;
   }>;
+  topics: string[];
   message_count: number;
-  existing_entry_count: number;
 };
 
-export type CompactApplyResult = {
-  added_count: number;
+export type ConversationArchiveResult = {
+  archive_id: string;
+  title: string;
+  summary: string;
+  message_count: number;
+  linked_act_id: string | null;
+  linking_reason: string | null;
+  knowledge_entries_added: number;
+  topics: string[];
+  archived_at: string;
+};
+
+export type ConversationDeleteResult = {
+  deleted: boolean;
+  conversation_id: string;
   archive_id: string | null;
-  total_entries: number;
+};
+
+export type ArchiveQualityAssessment = {
+  assessment_id: string;
+  archive_id: string;
+  title_quality: number;
+  summary_quality: number;
+  act_linking: number;
+  knowledge_relevance: number;
+  knowledge_coverage: number;
+  deduplication: number;
+  overall_score: number;
+  suggestions: string[];
+  user_feedback: string | null;
+  user_rating: number | null;
+  assessed_at: string;
+};
+
+export type ArchiveFeedbackResult = {
+  feedback_id: string;
+  archive_id: string;
+  rating: number;
+  submitted_at: string;
+};
+
+export type ArchiveLearningStats = {
+  total_user_feedback: number;
+  avg_user_rating: number;
+  total_assessments: number;
+  avg_assessment_score: number;
 };
 
 // Learned knowledge types

@@ -479,6 +479,162 @@ class TestModels:
         assert hasattr(context, 'max_items')
         assert context.max_items == 5
 
+    def test_activity_type_values(self) -> None:
+        """ActivityType enum has expected values."""
+        assert ActivityType.VIEWED.value == "viewed"
+        assert ActivityType.EDITED.value == "edited"
+        assert ActivityType.COMPLETED.value == "completed"
+        assert ActivityType.CREATED.value == "created"
+        assert ActivityType.TOOL_EXECUTED.value == "tool_executed"
+
+    def test_contact_relationship_values(self) -> None:
+        """ContactRelationship enum has expected values."""
+        assert ContactRelationship.OWNER.value == "owner"
+        assert ContactRelationship.COLLABORATOR.value == "collaborator"
+        assert ContactRelationship.STAKEHOLDER.value == "stakeholder"
+        assert ContactRelationship.WAITING_ON.value == "waiting_on"
+
+    def test_cairn_metadata_to_dict(self) -> None:
+        """CairnMetadata serializes to dict correctly."""
+        meta = CairnMetadata(
+            entity_type="act",
+            entity_id="a1",
+            kanban_state=KanbanState.ACTIVE,
+            priority=3,
+            priority_reason="Important",
+        )
+        d = meta.to_dict()
+        assert d["entity_type"] == "act"
+        assert d["entity_id"] == "a1"
+        assert d["kanban_state"] == "active"
+        assert d["priority"] == 3
+
+    def test_cairn_metadata_from_dict(self) -> None:
+        """CairnMetadata deserializes from dict correctly."""
+        data = {
+            "entity_type": "scene",
+            "entity_id": "s1",
+            "kanban_state": "waiting",
+            "touch_count": 5,
+            "last_touched": "2024-01-15T10:00:00",
+        }
+        meta = CairnMetadata.from_dict(data)
+        assert meta.entity_type == "scene"
+        assert meta.kanban_state == KanbanState.WAITING
+        assert meta.touch_count == 5
+
+    def test_activity_log_entry_to_dict(self) -> None:
+        """ActivityLogEntry serializes correctly."""
+        from reos.cairn.models import ActivityLogEntry
+        entry = ActivityLogEntry(
+            log_id="log1",
+            entity_type="act",
+            entity_id="a1",
+            activity_type=ActivityType.EDITED,
+            timestamp=datetime.now(),
+            details={"field": "title"},
+        )
+        d = entry.to_dict()
+        assert d["log_id"] == "log1"
+        assert d["activity_type"] == "edited"
+        assert d["details"]["field"] == "title"
+
+    def test_contact_link_to_dict_and_from_dict(self) -> None:
+        """ContactLink round-trips through dict."""
+        from reos.cairn.models import ContactLink
+        link = ContactLink(
+            link_id="link1",
+            contact_id="contact1",
+            entity_type="act",
+            entity_id="a1",
+            relationship=ContactRelationship.COLLABORATOR,
+            created_at=datetime.now(),
+            notes="Working together",
+        )
+        d = link.to_dict()
+        restored = ContactLink.from_dict(d)
+        assert restored.link_id == link.link_id
+        assert restored.relationship == ContactRelationship.COLLABORATOR
+
+    def test_undo_context_to_dict_and_from_dict(self) -> None:
+        """UndoContext round-trips through dict."""
+        from reos.cairn.models import UndoContext
+        ctx = UndoContext(
+            tool_name="cairn_set_priority",
+            reverse_tool="cairn_clear_priority",
+            reverse_args={"entity_type": "act", "entity_id": "a1"},
+            before_state={"priority": None},
+            after_state={"priority": 5},
+            description="Set priority to 5",
+            reversible=True,
+        )
+        d = ctx.to_dict()
+        restored = UndoContext.from_dict(d)
+        assert restored.tool_name == "cairn_set_priority"
+        assert restored.reversible is True
+
+    def test_pending_confirmation_properties(self) -> None:
+        """PendingConfirmation properties work correctly."""
+        from reos.cairn.models import PendingConfirmation
+        conf = PendingConfirmation(
+            confirmation_id="conf1",
+            tool_name="cairn_delete_act",
+            tool_args={"act_id": "a1"},
+            description="Delete Act 'Test'",
+            warning="This cannot be undone",
+            created_at=datetime.now(),
+            expires_at=datetime.now() + timedelta(minutes=5),
+        )
+        assert conf.is_expired is False
+        assert conf.is_actionable is True
+
+        # After expiry
+        conf.expires_at = datetime.now() - timedelta(minutes=1)
+        assert conf.is_expired is True
+        assert conf.is_actionable is False
+
+    def test_pending_confirmation_to_dict_from_dict(self) -> None:
+        """PendingConfirmation round-trips through dict."""
+        from reos.cairn.models import PendingConfirmation
+        conf = PendingConfirmation(
+            confirmation_id="conf1",
+            tool_name="cairn_delete_act",
+            tool_args={"act_id": "a1"},
+            description="Delete Act",
+            warning="Cannot undo",
+            created_at=datetime.now(),
+            expires_at=datetime.now() + timedelta(minutes=5),
+            confirmed=True,
+        )
+        d = conf.to_dict()
+        restored = PendingConfirmation.from_dict(d)
+        assert restored.confirmation_id == "conf1"
+        assert restored.confirmed is True
+
+    def test_surfaced_item_fields(self) -> None:
+        """SurfacedItem has expected fields."""
+        from reos.cairn.models import SurfacedItem
+        item = SurfacedItem(
+            entity_type="act",
+            entity_id="a1",
+            title="Test Act",
+            reason="Due soon",
+            urgency="high",
+            due_in_days=2,
+            act_id="a1",
+            act_title="Test Act",
+        )
+        assert item.entity_type == "act"
+        assert item.urgency == "high"
+        assert item.due_in_days == 2
+
+    def test_tools_requiring_confirmation(self) -> None:
+        """TOOLS_REQUIRING_CONFIRMATION has expected tools."""
+        from reos.cairn.models import TOOLS_REQUIRING_CONFIRMATION
+        assert "cairn_delete_act" in TOOLS_REQUIRING_CONFIRMATION
+        assert "cairn_delete_scene" in TOOLS_REQUIRING_CONFIRMATION
+        assert "cairn_delete_beat" in TOOLS_REQUIRING_CONFIRMATION
+
 
 # =============================================================================
 # Store Edge Cases Tests

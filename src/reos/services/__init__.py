@@ -1,24 +1,19 @@
-"""Services Layer - Unified business logic for CLI and RPC interfaces.
+"""Services Layer - Unified business logic for RPC interfaces.
 
-This module provides shared services that ensure feature parity between
-the CLI (shell_cli.py) and Tauri RPC (ui_rpc_server.py) interfaces.
+This module provides shared services for the Tauri RPC (ui_rpc_server.py) interface.
 
 Architecture:
     services/           <- This package: shared business logic
         chat_service    <- Chat, streaming, model management
         play_service    <- The Play file management
-        context_service <- Context management, compaction
+        context_service <- Context management
         knowledge_service <- Knowledge base, archives
-
-    handlers/           <- Interface adapters (created separately)
-        cli_handler     <- CLI-specific I/O
-        rpc_handler     <- RPC-specific serialization
+        archive_service <- LLM-driven conversation archival
 
 Design Principles:
     - Services are stateless (accept db/dependencies via constructor)
-    - All business logic lives here, not in handlers
-    - Handlers only translate between service interface and I/O format
-    - New features are added to services, automatically available to both interfaces
+    - All business logic lives here
+    - RPC handlers translate between service interface and I/O format
 """
 
 from .chat_service import ChatService

@@ -1,7 +1,6 @@
-"""Context Service - Context management, compaction, and source toggling.
+"""Context Service - Context management and source toggling.
 
-Provides unified interface for context budget management and
-conversation compaction across CLI and RPC interfaces.
+Provides unified interface for context budget management.
 """
 
 from __future__ import annotations
@@ -63,30 +62,6 @@ class ContextStatsResult:
             warning_level=stats.warning_level,
             sources=[s.to_dict() for s in stats.sources] if stats.sources else None,
         )
-
-
-@dataclass
-class CompactionResult:
-    """Result from a compaction operation."""
-
-    success: bool
-    archive_id: str | None = None
-    tokens_before: int = 0
-    tokens_after: int = 0
-    tokens_saved: int = 0
-    learned_entries_added: int = 0
-    error: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "success": self.success,
-            "archive_id": self.archive_id,
-            "tokens_before": self.tokens_before,
-            "tokens_after": self.tokens_after,
-            "tokens_saved": self.tokens_saved,
-            "learned_entries_added": self.learned_entries_added,
-            "error": self.error,
-        }
 
 
 class ContextService:
@@ -192,99 +167,6 @@ class ContextService:
     def get_disabled_sources(self) -> list[str]:
         """Get list of currently disabled sources."""
         return list(self._get_disabled_sources())
-
-    def compact(
-        self,
-        conversation_id: str,
-        archive: bool = True,
-        extract_knowledge: bool = True,
-    ) -> CompactionResult:
-        """Compact a conversation to reduce context usage.
-
-        This:
-        1. Archives the conversation (if archive=True)
-        2. Extracts knowledge entries (if extract_knowledge=True)
-        3. Clears the conversation messages
-
-        Args:
-            conversation_id: The conversation to compact
-            archive: Whether to save messages to archive
-            extract_knowledge: Whether to extract learned knowledge
-
-        Returns:
-            CompactionResult with details of the operation
-        """
-        try:
-            from ..knowledge_store import KnowledgeStore
-            from ..compact_extractor import extract_knowledge_from_messages, generate_archive_summary
-            from ..play_fs import list_acts as play_list_acts
-
-            # Get current stats
-            stats_before = self.get_stats(conversation_id)
-            tokens_before = stats_before.estimated_tokens
-
-            # Get messages
-            messages = self._db.get_messages(conversation_id=conversation_id, limit=10000)
-            if not messages:
-                return CompactionResult(
-                    success=False,
-                    error="No messages to compact",
-                )
-
-            # Get active act for knowledge storage
-            _, active_act_id = play_list_acts()
-
-            archive_id = None
-            learned_count = 0
-
-            if archive or extract_knowledge:
-                store = KnowledgeStore()
-
-                if archive:
-                    # Generate summary
-                    summary = generate_archive_summary(messages)
-
-                    # Save archive
-                    archive_obj = store.save_archive(
-                        messages=messages,
-                        act_id=active_act_id,
-                        summary=summary,
-                    )
-                    archive_id = archive_obj.archive_id
-
-                if extract_knowledge:
-                    # Extract knowledge entries
-                    entries = extract_knowledge_from_messages(messages)
-                    if entries:
-                        added = store.add_learned_entries(
-                            entries=entries,
-                            act_id=active_act_id,
-                            source_archive_id=archive_id,
-                        )
-                        learned_count = len(added)
-
-            # Clear the conversation
-            self._db.clear_messages(conversation_id=conversation_id)
-
-            # Get stats after
-            stats_after = self.get_stats(conversation_id)
-            tokens_after = stats_after.estimated_tokens
-
-            return CompactionResult(
-                success=True,
-                archive_id=archive_id,
-                tokens_before=tokens_before,
-                tokens_after=tokens_after,
-                tokens_saved=tokens_before - tokens_after,
-                learned_entries_added=learned_count,
-            )
-
-        except Exception as e:
-            logger.error("Compaction failed: %s", e)
-            return CompactionResult(
-                success=False,
-                error=str(e),
-            )
 
     def estimate_tokens(self, text: str) -> int:
         """Estimate token count for text."""
