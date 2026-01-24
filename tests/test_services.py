@@ -295,7 +295,9 @@ class TestPlayService:
         if active_id:
             scenes = play_service.list_scenes(act_id=active_id)
             if scenes:
-                beats = play_service.list_beats(act_id=active_id, scene_id=scenes[0].get("id", ""))
+                # SceneInfo is a dataclass, use .scene_id attribute
+                scene_id = getattr(scenes[0], "scene_id", None) or getattr(scenes[0], "id", "")
+                beats = play_service.list_beats(act_id=active_id, scene_id=scene_id)
                 assert isinstance(beats, list)
 
     def test_read_me_markdown(self, play_service) -> None:
