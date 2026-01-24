@@ -1,18 +1,16 @@
 /**
- * Play Act View - Notion-lite knowledgebase with nested markdown pages
+ * Play Act View - Notion-style block editor with nested pages
  *
- * Left sidebar shows Acts with nested pages (future: collapsible page tree).
- * Right content area shows markdown editor for selected Act/Page.
+ * Left sidebar shows Acts with nested pages (collapsible page tree).
+ * Right content area shows TipTap block editor for selected Act/Page.
  */
 
 import { el } from './dom';
 import type {
   PlayActsListResult,
-  PlayKbReadResult,
-  PlayKbWritePreviewResult,
-  PlayPage,
   PlayPageTreeNode,
 } from './types';
+import { mountBlockEditor } from './react';
 
 // Color palette for Acts (matches Python ACT_COLOR_PALETTE)
 const ACT_COLOR_PALETTE = [
@@ -37,8 +35,8 @@ interface PlayActViewState {
   selectedPageId: string | null;
   expandedActs: Set<string>;
   expandedPages: Set<string>;
-  kbText: string;
-  kbPath: string;
+  editorCleanup: (() => void) | null;
+  editorContainer: HTMLElement | null;
 }
 
 interface PlayActViewOptions {
@@ -59,8 +57,8 @@ export function createPlayActView(options: PlayActViewOptions): {
     selectedPageId: null,
     expandedActs: new Set(),
     expandedPages: new Set(),
-    kbText: '',
-    kbPath: 'kb.md',
+    editorCleanup: null,
+    editorContainer: null,
   };
 
   // Main container
@@ -122,60 +120,6 @@ export function createPlayActView(options: PlayActViewOptions): {
     } catch {
       // Pages endpoint may not exist yet, use empty array
       state.pagesCache.set(actId, []);
-    }
-  }
-
-  async function loadKbContent(actId: string, pageId?: string | null) {
-    try {
-      if (pageId) {
-        // Load page content
-        const result = await kernelRequest('play/pages/content/read', {
-          act_id: actId,
-          page_id: pageId,
-        }) as { text: string };
-        state.kbText = result.text ?? '';
-      } else {
-        // Load act-level KB
-        const result = await kernelRequest('play/kb/read', {
-          act_id: actId,
-          path: state.kbPath,
-        }) as PlayKbReadResult;
-        state.kbText = result.text ?? '';
-      }
-    } catch {
-      state.kbText = '';
-    }
-  }
-
-  async function saveKbContent(text: string) {
-    if (!state.activeActId) return;
-
-    try {
-      if (state.selectedPageId) {
-        // Save to page
-        await kernelRequest('play/pages/content/write', {
-          act_id: state.activeActId,
-          page_id: state.selectedPageId,
-          text,
-        });
-      } else {
-        // Save to act-level KB
-        const preview = await kernelRequest('play/kb/write_preview', {
-          act_id: state.activeActId,
-          path: state.kbPath,
-          text,
-        }) as PlayKbWritePreviewResult;
-
-        await kernelRequest('play/kb/write_apply', {
-          act_id: state.activeActId,
-          path: state.kbPath,
-          text,
-          expected_sha256_current: preview.expected_sha256_current,
-        });
-      }
-      state.kbText = text;
-    } catch (e) {
-      console.error('Failed to save content:', e);
     }
   }
 
@@ -428,6 +372,12 @@ export function createPlayActView(options: PlayActViewOptions): {
   }
 
   function renderContent() {
+    // Clean up previous React editor if exists
+    if (state.editorCleanup) {
+      state.editorCleanup();
+      state.editorCleanup = null;
+    }
+
     content.innerHTML = '';
 
     // Title
@@ -449,7 +399,7 @@ export function createPlayActView(options: PlayActViewOptions): {
     `;
     content.appendChild(titleInput);
 
-    // Editor
+    // Editor container for React mount
     const editorWrap = el('div');
     editorWrap.style.cssText = `
       flex: 1;
@@ -457,42 +407,15 @@ export function createPlayActView(options: PlayActViewOptions): {
       flex-direction: column;
       min-height: 200px;
     `;
-
-    const editor = el('textarea') as HTMLTextAreaElement;
-    editor.placeholder = getPlaceholder();
-    editor.value = state.kbText;
-    editor.style.cssText = `
-      flex: 1;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 12px;
-      padding: 16px;
-      color: #e5e7eb;
-      font-family: 'Inter', system-ui, sans-serif;
-      font-size: 14px;
-      line-height: 1.7;
-      resize: none;
-      outline: none;
-      overflow-y: auto;
-    `;
-    editor.addEventListener('focus', () => {
-      editor.style.borderColor = 'rgba(34, 197, 94, 0.4)';
-    });
-    editor.addEventListener('blur', () => {
-      editor.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-    });
-
-    // Auto-save on input
-    let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-    editor.addEventListener('input', () => {
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => {
-        void saveKbContent(editor.value);
-      }, 1500);
-    });
-
-    editorWrap.appendChild(editor);
     content.appendChild(editorWrap);
+
+    // Mount React BlockEditor
+    state.editorContainer = editorWrap;
+    state.editorCleanup = mountBlockEditor(editorWrap, {
+      actId: state.activeActId ?? '',
+      pageId: state.selectedPageId,
+      kernelRequest,
+    });
   }
 
   function getContentTitle(): string {
@@ -516,36 +439,12 @@ export function createPlayActView(options: PlayActViewOptions): {
     return act?.title || 'Act';
   }
 
-  function getPlaceholder(): string {
-    if (!state.activeActId) {
-      return `This is The Play - your high-level narrative and vision.
-
-Write your overarching story, goals, and long-term vision here.
-This is the root of your journey - everything flows from here.`;
-    }
-    if (state.selectedPageId) {
-      return `Write your page content here...
-
-Use markdown for formatting. This page is part of your Act's knowledge base.`;
-    }
-    return `This is the Act's script - a major chapter in your journey.
-
-Write your story, notes, brainstorm, and narrative of this Act.
-Acts represent significant phases or themes in your work.`;
-  }
-
   // --- Actions ---
 
   async function selectPlay() {
     state.activeActId = null;
     state.selectedPageId = null;
     await kernelRequest('play/acts/set_active', { act_id: null });
-    try {
-      const result = await kernelRequest('play/me/read', {}) as { markdown: string };
-      state.kbText = result.markdown ?? '';
-    } catch {
-      state.kbText = '';
-    }
     render();
   }
 
@@ -556,14 +455,12 @@ Acts represent significant phases or themes in your work.`;
 
     await kernelRequest('play/acts/set_active', { act_id: actId });
     await loadPages(actId);
-    await loadKbContent(actId);
     render();
   }
 
   async function selectPage(actId: string, pageId: string) {
     state.activeActId = actId;
     state.selectedPageId = pageId;
-    await loadKbContent(actId, pageId);
     render();
   }
 
@@ -626,7 +523,6 @@ Acts represent significant phases or themes in your work.`;
     await loadActs();
     if (state.activeActId) {
       await loadPages(state.activeActId);
-      await loadKbContent(state.activeActId, state.selectedPageId);
     }
     render();
   }
