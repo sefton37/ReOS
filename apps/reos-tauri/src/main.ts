@@ -208,77 +208,12 @@ function buildUi() {
   dashboardBtn.style.marginTop = '12px';
   navBtnStyle(dashboardBtn);
 
-  // The Play Section - Your Story (always in context)
-  const playSection = el('div');
-  playSection.style.marginTop = '16px';
-
-  const playHeader = el('div');
-  playHeader.style.display = 'flex';
-  playHeader.style.alignItems = 'center';
-  playHeader.style.justifyContent = 'space-between';
-  playHeader.style.marginBottom = '8px';
-
-  const playTitle = el('div');
-  playTitle.textContent = 'The Play';
-  playTitle.style.fontWeight = '600';
-  playTitle.style.fontSize = '13px';
-  playTitle.style.color = 'rgba(255, 255, 255, 0.9)';
-
-  const playContextBadge = el('span');
-  playContextBadge.textContent = 'always in context';
-  playContextBadge.style.fontSize = '9px';
-  playContextBadge.style.padding = '2px 6px';
-  playContextBadge.style.borderRadius = '4px';
-  playContextBadge.style.background = 'rgba(34, 197, 94, 0.2)';
-  playContextBadge.style.color = '#22c55e';
-  playContextBadge.style.fontWeight = '500';
-
-  playHeader.appendChild(playTitle);
-  playHeader.appendChild(playContextBadge);
-
-  // The Play button - opens your story notebook
+  // The Play Button - opens the Play window
   const playBtn = el('button');
-  playBtn.textContent = 'Your Story';
-  playBtn.title = 'Open your narrative and identity documents (always available to Talking Rock)';
+  playBtn.textContent = 'The Play';
+  playBtn.title = 'Open The Play - your story, acts, and scenes';
   navBtnStyle(playBtn);
-  playBtn.style.borderColor = 'rgba(34, 197, 94, 0.3)';
-
-  playSection.appendChild(playHeader);
-  playSection.appendChild(playBtn);
-
-  // Acts Section - Selectable focus areas
-  const actsSection = el('div');
-  actsSection.style.marginTop = '12px';
-
-  const actsHeader = el('div');
-  actsHeader.style.display = 'flex';
-  actsHeader.style.alignItems = 'center';
-  actsHeader.style.justifyContent = 'space-between';
-  actsHeader.style.marginBottom = '6px';
-
-  const actsTitle = el('div');
-  actsTitle.textContent = 'Acts';
-  actsTitle.style.fontWeight = '600';
-  actsTitle.style.fontSize = '12px';
-  actsTitle.style.color = 'rgba(255, 255, 255, 0.7)';
-  actsTitle.style.cursor = 'pointer';
-  actsTitle.title = 'Click to manage all Acts';
-
-  const actsHint = el('span');
-  actsHint.textContent = 'includes scenes';
-  actsHint.style.fontSize = '9px';
-  actsHint.style.color = 'rgba(255, 255, 255, 0.4)';
-
-  actsHeader.appendChild(actsTitle);
-  actsHeader.appendChild(actsHint);
-
-  const actsList = el('div');
-  actsList.style.display = 'flex';
-  actsList.style.flexDirection = 'column';
-  actsList.style.gap = '4px';
-
-  actsSection.appendChild(actsHeader);
-  actsSection.appendChild(actsList);
+  playBtn.style.marginTop = '12px';
 
   // Nav content container (top section)
   const navContent = el('div');
@@ -385,8 +320,7 @@ function buildUi() {
   navContent.appendChild(navContextMeter);
   navContent.appendChild(systemSection);
   navContent.appendChild(dashboardBtn);
-  navContent.appendChild(playSection);
-  navContent.appendChild(actsSection);
+  navContent.appendChild(playBtn);
 
   // Settings button (bottom of nav)
   const settingsBtn = el('button');
@@ -604,20 +538,9 @@ function buildUi() {
     }
   };
 
-  // Register window close handler
-  const appWindow = getCurrentWebviewWindow();
-  void appWindow.onCloseRequested(async (_event: unknown) => {
-    // Archive before closing
-    await autoArchiveOnClose();
-    // Allow the window to close (don't prevent default)
-  });
-
-  // Also handle browser unload as a fallback
+  // Auto-archive on close using beforeunload (best-effort, may not complete)
   window.addEventListener('beforeunload', () => {
-    // Note: async operations may not complete in beforeunload
-    // The Tauri onCloseRequested handler above is the primary mechanism
     if (currentConversationId) {
-      // Fire and forget - this is a best-effort fallback
       void autoArchiveOnClose();
     }
   });
@@ -1658,166 +1581,6 @@ function buildUi() {
     const res = (await kernelRequest('play/acts/list', {})) as PlayActsListResult;
     activeActId = res.active_act_id ?? null;
     actsCache = res.acts ?? [];
-
-    actsList.innerHTML = '';
-    for (const a of actsCache) {
-      // Skip "Your Story" - it's shown separately under The Play section
-      if (a.act_id === 'your-story') continue;
-
-      const isActive = a.act_id === activeActId;
-
-      const actRow = el('div');
-      actRow.style.display = 'flex';
-      actRow.style.alignItems = 'center';
-      actRow.style.gap = '8px';
-      actRow.style.padding = '8px 10px';
-      actRow.style.borderRadius = '8px';
-      actRow.style.cursor = 'pointer';
-      actRow.style.transition = 'all 0.15s ease';
-      actRow.style.background = isActive ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)';
-      actRow.style.border = isActive ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)';
-
-      // Context indicator (checkbox-like)
-      const contextIndicator = el('div');
-      contextIndicator.style.width = '16px';
-      contextIndicator.style.height = '16px';
-      contextIndicator.style.borderRadius = '4px';
-      contextIndicator.style.border = isActive ? '2px solid #22c55e' : '2px solid rgba(255, 255, 255, 0.3)';
-      contextIndicator.style.background = isActive ? '#22c55e' : 'transparent';
-      contextIndicator.style.display = 'flex';
-      contextIndicator.style.alignItems = 'center';
-      contextIndicator.style.justifyContent = 'center';
-      contextIndicator.style.flexShrink = '0';
-      if (isActive) {
-        contextIndicator.innerHTML = '<span style="color: white; font-size: 10px; font-weight: bold;">✓</span>';
-      }
-      contextIndicator.title = isActive
-        ? 'In Context - click to remove from context'
-        : 'Click to add to context';
-
-      // Act title
-      const actTitle = el('span');
-      actTitle.textContent = a.title;
-      actTitle.style.flex = '1';
-      actTitle.style.fontSize = '12px';
-      actTitle.style.fontWeight = '500';
-      actTitle.style.color = isActive ? '#22c55e' : '#e5e7eb';
-      actTitle.style.overflow = 'hidden';
-      actTitle.style.textOverflow = 'ellipsis';
-      actTitle.style.whiteSpace = 'nowrap';
-
-      // Open button (arrow)
-      const openBtn = el('span');
-      openBtn.textContent = '→';
-      openBtn.style.fontSize = '12px';
-      openBtn.style.opacity = '0.5';
-      openBtn.style.transition = 'opacity 0.15s';
-      openBtn.title = 'Open Act details';
-
-      actRow.appendChild(contextIndicator);
-      actRow.appendChild(actTitle);
-
-      // Add "In Context" label when active
-      if (isActive) {
-        const inContextLabel = el('span');
-        inContextLabel.textContent = 'In Context';
-        inContextLabel.style.fontSize = '9px';
-        inContextLabel.style.padding = '2px 5px';
-        inContextLabel.style.borderRadius = '3px';
-        inContextLabel.style.background = 'rgba(34, 197, 94, 0.2)';
-        inContextLabel.style.color = '#22c55e';
-        inContextLabel.style.marginRight = '4px';
-        actRow.appendChild(inContextLabel);
-      }
-
-      actRow.appendChild(openBtn);
-
-      // Hover effects
-      actRow.addEventListener('mouseenter', () => {
-        actRow.style.background = isActive ? 'rgba(34, 197, 94, 0.25)' : 'rgba(255, 255, 255, 0.1)';
-        openBtn.style.opacity = '1';
-      });
-      actRow.addEventListener('mouseleave', () => {
-        actRow.style.background = isActive ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)';
-        openBtn.style.opacity = '0.5';
-      });
-
-      // Click on context indicator toggles selection
-      contextIndicator.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (isActive) {
-          // Deselect - clear active act
-          await kernelRequest('play/acts/set_active', { act_id: null });
-          activeActId = null;
-        } else {
-          // Select - set as active
-          const setRes = (await kernelRequest('play/acts/set_active', { act_id: a.act_id })) as PlayActsListResult;
-          activeActId = setRes.active_act_id ?? null;
-        }
-        selectedSceneId = null;
-        selectedBeatId = null;
-        await refreshActs();
-      });
-
-      // Click on row opens the Play window with this act
-      actRow.addEventListener('click', async () => {
-        // Set active act if not already
-        if (!isActive) {
-          const setRes = (await kernelRequest('play/acts/set_active', { act_id: a.act_id })) as PlayActsListResult;
-          activeActId = setRes.active_act_id ?? null;
-          selectedSceneId = null;
-          selectedBeatId = null;
-          await refreshActs();
-          if (activeActId) await refreshScenes(activeActId);
-        }
-        // Open the Play window with this act selected
-        await openPlayWindow();
-      });
-
-      actsList.appendChild(actRow);
-    }
-
-    // Add "New Act" button
-    const newActBtn = el('button');
-    newActBtn.textContent = '+ New Act';
-    newActBtn.style.width = '100%';
-    newActBtn.style.padding = '8px';
-    newActBtn.style.marginTop = '6px';
-    newActBtn.style.fontSize = '11px';
-    newActBtn.style.border = '1px dashed rgba(255, 255, 255, 0.2)';
-    newActBtn.style.borderRadius = '8px';
-    newActBtn.style.background = 'transparent';
-    newActBtn.style.color = 'rgba(255, 255, 255, 0.5)';
-    newActBtn.style.cursor = 'pointer';
-    newActBtn.style.transition = 'all 0.15s';
-    newActBtn.addEventListener('mouseenter', () => {
-      newActBtn.style.borderColor = 'rgba(34, 197, 94, 0.4)';
-      newActBtn.style.color = '#22c55e';
-      newActBtn.style.background = 'rgba(34, 197, 94, 0.1)';
-    });
-    newActBtn.addEventListener('mouseleave', () => {
-      newActBtn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-      newActBtn.style.color = 'rgba(255, 255, 255, 0.5)';
-      newActBtn.style.background = 'transparent';
-    });
-    newActBtn.addEventListener('click', async () => {
-      const title = prompt('Enter Act title:');
-      if (title?.trim()) {
-        await kernelRequest('play/acts/create', { title: title.trim() });
-        await refreshActs();
-      }
-    });
-    actsList.appendChild(newActBtn);
-
-    if (actsCache.length === 0) {
-      const empty = el('div');
-      empty.textContent = 'No acts yet. Create one to focus Talking Rock on a specific chapter of your story.';
-      empty.style.opacity = '0.5';
-      empty.style.fontSize = '11px';
-      empty.style.padding = '8px 0';
-      empty.style.lineHeight = '1.4';
-      actsList.insertBefore(empty, newActBtn);
-    }
 
     // Only render The Play inspector if the user has activated it
     if (playInspectorActive) {
@@ -3225,11 +2988,6 @@ function buildUi() {
     }
   });
 
-  // Click on Acts title to open The Play window
-  actsTitle.addEventListener('click', () => {
-    void openPlayWindow();
-  });
-
   // Initial load
   void (async () => {
     try {
@@ -3754,6 +3512,33 @@ async function buildDashboardWindow() {
 async function initializeApp(): Promise<void> {
   const root = document.getElementById('app');
   if (!root) return;
+
+  // Skip authentication in development mode for faster iteration
+  // @ts-ignore - Vite provides import.meta.env
+  const skipAuth = import.meta.env.DEV;
+
+  if (skipAuth) {
+    console.log('[DEV] Creating dev session...');
+    try {
+      // Create a dev session on the Rust side
+      const { invoke } = await import('@tauri-apps/api/core');
+      const result = await invoke('dev_create_session') as { success: boolean; session_token?: string; username?: string; error?: string };
+
+      if (result.success && result.session_token && result.username) {
+        // Store the session in localStorage so kernelRequest can use it
+        const { setSession } = await import('./kernel');
+        setSession(result.session_token, result.username);
+        console.log(`[DEV] Session created for user: ${result.username}`);
+        buildUi();
+        return;
+      } else {
+        console.error('[DEV] Failed to create dev session:', result.error);
+      }
+    } catch (e) {
+      console.error('[DEV] Failed to create dev session:', e);
+    }
+    // Fall through to normal auth if dev session fails
+  }
 
   // Check authentication and show login if needed
   const isValid = await checkSessionOrLogin(root, (_username) => {
