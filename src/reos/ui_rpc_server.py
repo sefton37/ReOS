@@ -3108,6 +3108,113 @@ def _handle_chat_clear(
 
 
 # -------------------------------------------------------------------------
+# Conversation Archive Service (LLM-driven memory system)
+# -------------------------------------------------------------------------
+
+def _handle_conversation_archive(
+    db: Database,
+    *,
+    conversation_id: str,
+    act_id: str | None = None,
+    auto_link: bool = True,
+    extract_knowledge: bool = True,
+) -> dict[str, Any]:
+    """Archive a conversation with LLM-driven knowledge extraction."""
+    from .services.archive_service import ArchiveService
+
+    service = ArchiveService(db)
+    result = service.archive_conversation(
+        conversation_id,
+        act_id=act_id,
+        auto_link=auto_link,
+        extract_knowledge=extract_knowledge,
+    )
+    return result.to_dict()
+
+
+def _handle_conversation_delete(
+    db: Database,
+    *,
+    conversation_id: str,
+    archive_first: bool = False,
+) -> dict[str, Any]:
+    """Delete a conversation, optionally archiving first."""
+    from .services.archive_service import ArchiveService
+
+    service = ArchiveService(db)
+    return service.delete_conversation(
+        conversation_id,
+        archive_first=archive_first,
+    )
+
+
+def _handle_archive_list(
+    db: Database,
+    *,
+    act_id: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List conversation archives."""
+    from .services.archive_service import ArchiveService
+
+    service = ArchiveService(db)
+    archives = service.list_archives(act_id=act_id, limit=limit)
+    return {"archives": archives}
+
+
+def _handle_archive_get(
+    db: Database,
+    *,
+    archive_id: str,
+    act_id: str | None = None,
+) -> dict[str, Any]:
+    """Get a specific archive with full messages."""
+    from .services.archive_service import ArchiveService
+
+    service = ArchiveService(db)
+    archive = service.get_archive(archive_id, act_id=act_id)
+    if not archive:
+        raise RpcError(code=-32602, message=f"Archive not found: {archive_id}")
+    return archive
+
+
+def _handle_archive_assess(
+    db: Database,
+    *,
+    archive_id: str,
+    act_id: str | None = None,
+) -> dict[str, Any]:
+    """Assess the quality of an archive using LLM."""
+    from .services.archive_service import ArchiveService
+
+    service = ArchiveService(db)
+    assessment = service.assess_archive_quality(archive_id, act_id=act_id)
+    return assessment.to_dict()
+
+
+def _handle_archive_feedback(
+    db: Database,
+    *,
+    archive_id: str,
+    rating: int,
+    feedback: str | None = None,
+) -> dict[str, Any]:
+    """Submit user feedback on archive quality."""
+    from .services.archive_service import ArchiveService
+
+    service = ArchiveService(db)
+    return service.submit_user_feedback(archive_id, rating, feedback)
+
+
+def _handle_archive_learning_stats(db: Database) -> dict[str, Any]:
+    """Get learning statistics for archive quality."""
+    from .services.archive_service import ArchiveService
+
+    service = ArchiveService(db)
+    return service.get_learning_stats()
+
+
+# -------------------------------------------------------------------------
 # CAIRN (Attention Minder)
 # -------------------------------------------------------------------------
 
@@ -4764,6 +4871,107 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             return _jsonrpc_result(
                 req_id=req_id,
                 result=_handle_chat_clear(db, conversation_id=conversation_id),
+            )
+
+        # --- Conversation Archive (LLM-driven memory system) ---
+
+        if method == "conversation/archive":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            conversation_id = params.get("conversation_id")
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise RpcError(code=-32602, message="conversation_id is required")
+            act_id = params.get("act_id")
+            auto_link = params.get("auto_link", True)
+            extract_knowledge = params.get("extract_knowledge", True)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_conversation_archive(
+                    db,
+                    conversation_id=conversation_id,
+                    act_id=act_id,
+                    auto_link=bool(auto_link),
+                    extract_knowledge=bool(extract_knowledge),
+                ),
+            )
+
+        if method == "conversation/delete":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            conversation_id = params.get("conversation_id")
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise RpcError(code=-32602, message="conversation_id is required")
+            archive_first = params.get("archive_first", False)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_conversation_delete(
+                    db,
+                    conversation_id=conversation_id,
+                    archive_first=bool(archive_first),
+                ),
+            )
+
+        if method == "archive/list":
+            if not isinstance(params, dict):
+                params = {}
+            act_id = params.get("act_id")
+            limit = params.get("limit", 50)
+            if act_id is not None and not isinstance(act_id, str):
+                raise RpcError(code=-32602, message="act_id must be a string or null")
+            if not isinstance(limit, int):
+                limit = 50
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_archive_list(db, act_id=act_id, limit=limit),
+            )
+
+        if method == "archive/get":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            archive_id = params.get("archive_id")
+            if not isinstance(archive_id, str) or not archive_id:
+                raise RpcError(code=-32602, message="archive_id is required")
+            act_id = params.get("act_id")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_archive_get(db, archive_id=archive_id, act_id=act_id),
+            )
+
+        if method == "archive/assess":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            archive_id = params.get("archive_id")
+            if not isinstance(archive_id, str) or not archive_id:
+                raise RpcError(code=-32602, message="archive_id is required")
+            act_id = params.get("act_id")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_archive_assess(db, archive_id=archive_id, act_id=act_id),
+            )
+
+        if method == "archive/feedback":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            archive_id = params.get("archive_id")
+            rating = params.get("rating")
+            feedback = params.get("feedback")
+            if not isinstance(archive_id, str) or not archive_id:
+                raise RpcError(code=-32602, message="archive_id is required")
+            if not isinstance(rating, int) or rating < 1 or rating > 5:
+                raise RpcError(code=-32602, message="rating must be an integer 1-5")
+            if feedback is not None and not isinstance(feedback, str):
+                raise RpcError(code=-32602, message="feedback must be a string or null")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_archive_feedback(
+                    db, archive_id=archive_id, rating=rating, feedback=feedback
+                ),
+            )
+
+        if method == "archive/learning_stats":
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_archive_learning_stats(db),
             )
 
         # --- Code Mode Diff Preview ---

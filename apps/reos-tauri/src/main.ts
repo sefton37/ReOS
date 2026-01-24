@@ -4,7 +4,7 @@
  * Main entry point for the Tauri-based desktop UI.
  * Communicates with the Python kernel via JSON-RPC over stdio.
  */
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { WebviewWindow, getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
 import './style.css';
@@ -441,6 +441,10 @@ function buildUi() {
       return handleCairnMessage(message, options);
     },
     kernelRequest,
+    getConversationId: () => currentConversationId,
+    onConversationCleared: () => {
+      currentConversationId = null;
+    },
   });
 
   // Load attention items at startup for "What Needs My Attention" section (next 7 days)
@@ -527,6 +531,41 @@ function buildUi() {
       console.log('Could not refresh attention items:', e);
     }
   }
+
+  // Auto-archive conversation on window close
+  const autoArchiveOnClose = async (): Promise<void> => {
+    if (!currentConversationId) return;
+
+    try {
+      // Archive the current conversation silently
+      await kernelRequest('conversation/archive', {
+        conversation_id: currentConversationId,
+        auto_link: true,
+        extract_knowledge: true,
+      });
+      console.log('Auto-archived conversation on close');
+    } catch (e) {
+      console.error('Failed to auto-archive on close:', e);
+    }
+  };
+
+  // Register window close handler
+  const appWindow = getCurrentWebviewWindow();
+  void appWindow.onCloseRequested(async (_event: unknown) => {
+    // Archive before closing
+    await autoArchiveOnClose();
+    // Allow the window to close (don't prevent default)
+  });
+
+  // Also handle browser unload as a fallback
+  window.addEventListener('beforeunload', () => {
+    // Note: async operations may not complete in beforeunload
+    // The Tauri onCloseRequested handler above is the primary mechanism
+    if (currentConversationId) {
+      // Fire and forget - this is a best-effort fallback
+      void autoArchiveOnClose();
+    }
+  });
 
   // Adaptive polling for attention items: 10s when user active, 60s when idle
   let lastActivityTime = Date.now();
