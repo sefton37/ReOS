@@ -31,6 +31,7 @@ from .quality import (
 from .cairn.extended_thinking import CAIRNExtendedThinking, ExtendedThinkingTrace
 from .cairn.identity import build_identity_model
 from .cairn.store import CairnStore
+from .memory import MemoryRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,7 @@ class ConversationContext:
     learned_context: str = ""
     system_context: str = ""
     codebase_context: str = ""
+    memory_context: str = ""  # Relevant memory from graph/embeddings
     conversation_history: str = ""
 
     # Computed full prompt prefix
@@ -127,6 +129,8 @@ class ConversationContext:
             parts.append(self.play_context)
         if self.learned_context:
             parts.append(self.learned_context)
+        if self.memory_context:
+            parts.append(self.memory_context)
         if self.system_context:
             parts.append(self.system_context)
         if self.codebase_context:
@@ -220,6 +224,10 @@ class ChatAgent:
         self._code_router = CodeModeRouter(llm=llm)
         self._code_planner: CodePlanner | None = None
         self._pending_code_plan: CodeTaskPlan | None = None
+
+        # Initialize memory retriever for semantic context
+        # This provides relevant memory from the block graph/embeddings
+        self._memory_retriever = MemoryRetriever()
 
     def _execute_tool_for_reasoning(self, tool_name: str, args: dict) -> Any:
         """Callback for reasoning engine to execute tools."""
@@ -1726,6 +1734,49 @@ class ChatAgent:
                 pass
             return ""
 
+    def _get_memory_context(self, user_text: str, act_id: str | None = None) -> str:
+        """Get relevant memory context via semantic search and graph expansion.
+
+        Uses the hybrid vector-graph memory system to retrieve:
+        1. Semantically similar blocks (via embeddings)
+        2. Related blocks (via relationship graph)
+        3. Past reasoning chains that may be relevant
+
+        This enables CAIRN to recall relevant past interactions, knowledge,
+        and reasoning patterns when responding to the user.
+
+        Args:
+            user_text: The user's message to find relevant memory for.
+            act_id: Optional act ID to scope the search.
+
+        Returns:
+            Formatted memory context as markdown, or empty string.
+        """
+        try:
+            # Only retrieve if we have meaningful input
+            if not user_text or len(user_text.strip()) < 10:
+                return ""
+
+            # Retrieve relevant memory
+            memory_result = self._memory_retriever.retrieve(
+                query=user_text,
+                act_id=act_id,
+                max_results=10,
+                semantic_threshold=0.5,
+                graph_depth=1,
+                include_graph_expansion=True,
+            )
+
+            # Convert to markdown for the prompt
+            memory_md = memory_result.to_markdown()
+            if memory_md.strip():
+                return memory_md
+
+            return ""
+        except Exception as e:
+            logger.debug("Could not retrieve memory context: %s", e)
+            return ""
+
     def _build_full_context(
         self,
         user_text: str,
@@ -1776,6 +1827,12 @@ class ChatAgent:
         system_context = "" if "system_state" in disabled_sources else self._get_system_context()
         codebase_context = "" if "codebase" in disabled_sources else self._get_codebase_context()
 
+        # Get memory context (semantic search + graph expansion)
+        # This retrieves relevant past interactions, knowledge, and reasoning chains
+        memory_context = "" if "memory" in disabled_sources else self._get_memory_context(
+            user_text, play_data.get("active_act_id")
+        )
+
         # Conversation history ("messages") - always loaded, cannot be disabled
         conversation_history = self._build_conversation_context(conversation_id)
 
@@ -1790,6 +1847,7 @@ class ChatAgent:
             learned_context=learned_context,
             system_context=system_context,
             codebase_context=codebase_context,
+            memory_context=memory_context,
             conversation_history=conversation_history,
         )
 

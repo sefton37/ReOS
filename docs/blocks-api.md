@@ -820,7 +820,77 @@ CREATE TABLE block_properties (
 );
 ```
 
+## Block Relationships (Memory Graph)
+
+Blocks can be connected via typed relationships, enabling semantic navigation and memory retrieval. This extends the vertical parent-child hierarchy with horizontal connections.
+
+### Relationship Types
+
+| Category | Types | Description |
+|----------|-------|-------------|
+| **Logical** | `references`, `follows_from`, `contradicts`, `supports` | Reasoning connections |
+| **Semantic** | `similar_to`, `related_to`, `elaborates` | Content similarity |
+| **Causal** | `caused_by`, `causes` | Event chains |
+| **Feedback** | `corrects`, `supersedes`, `derived_from` | Learning signals |
+| **Temporal** | `preceded_by`, `responds_to` | Conversation flow |
+
+### Relationship Schema
+
+```sql
+CREATE TABLE block_relationships (
+    id TEXT PRIMARY KEY,
+    source_block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+    target_block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+    relationship_type TEXT NOT NULL,
+    confidence REAL DEFAULT 1.0,        -- 0.0-1.0
+    weight REAL DEFAULT 1.0,            -- For graph algorithms
+    source TEXT NOT NULL,               -- 'user', 'cairn', 'inferred', 'feedback', 'embedding'
+    created_at TEXT NOT NULL,
+    UNIQUE(source_block_id, target_block_id, relationship_type)
+);
+```
+
+### RPC Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `memory/relationships/create` | Create a relationship |
+| `memory/relationships/list` | List relationships for a block |
+| `memory/relationships/delete` | Delete a relationship |
+| `memory/related` | Graph traversal from a block |
+
+See [Memory System](./memory-system.md) for full documentation.
+
+---
+
+## Block Embeddings (Semantic Search)
+
+Blocks can have vector embeddings for semantic similarity search:
+
+```sql
+CREATE TABLE block_embeddings (
+    block_id TEXT PRIMARY KEY REFERENCES blocks(id) ON DELETE CASCADE,
+    embedding BLOB NOT NULL,            -- 384-dim float32
+    embedding_model TEXT DEFAULT 'all-MiniLM-L6-v2',
+    content_hash TEXT NOT NULL,         -- For staleness detection
+    created_at TEXT NOT NULL
+);
+```
+
+### RPC Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `memory/search` | Semantic search with optional graph expansion |
+| `memory/index/block` | Generate embedding for a block |
+| `memory/index/batch` | Batch index multiple blocks |
+
+See [Memory System](./memory-system.md) for full documentation.
+
+---
+
 ## Related Documentation
 
 - [The Play](./the-play.md) - Overview of the Play system
 - [CAIRN Architecture](./cairn_architecture.md) - AI assistant integration
+- [Memory System](./memory-system.md) - Relationship graph and semantic search

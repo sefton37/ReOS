@@ -204,8 +204,9 @@ class CairnSurfacer:
             except Exception as e:
                 logger.warning("Failed to sync calendar to scenes: %s", e)
 
-        # 2. Get Scenes with upcoming calendar events
-        scenes_with_events = self.store.get_scenes_with_upcoming_events(hours=hours)
+        # 2. Get Scenes with upcoming calendar events from play_db (canonical source)
+        from reos.play_db import get_scenes_with_upcoming_events
+        scenes_with_events = get_scenes_with_upcoming_events(hours=hours)
 
         for scene_info in scenes_with_events:
             # Determine the effective time (next occurrence for recurring, else start)

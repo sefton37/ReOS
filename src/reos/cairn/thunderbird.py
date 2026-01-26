@@ -424,6 +424,11 @@ class CalendarEvent:
     recurrence_rule: str | None = None  # Raw RRULE if present (e.g., "FREQ=WEEKLY;BYDAY=MO,WE,FR")
     recurrence_frequency: str | None = None  # "DAILY", "WEEKLY", "MONTHLY", "YEARLY"
 
+    # Calendar info
+    calendar_id: str | None = None  # Thunderbird calendar ID
+    calendar_name: str | None = None  # Human-readable calendar name
+    category: str | None = None  # Event category (event, holiday, birthday, etc.)
+
     # Raw icalendar data if needed
     ical_data: str | None = None
 
@@ -677,6 +682,35 @@ class ThunderbirdBridge:
     # Calendar Events
     # =========================================================================
 
+    def get_calendar_names(self) -> dict[str, str]:
+        """Get a mapping of calendar IDs to their display names.
+
+        Returns:
+            Dictionary mapping cal_id to calendar name.
+        """
+        if not self.has_calendar():
+            return {}
+
+        try:
+            conn = self._open_calendar_db()
+            if conn is None:
+                return {}
+
+            # Query cal_calendars table for id -> name mapping
+            names = {}
+            try:
+                cursor = conn.execute("SELECT id, name FROM cal_calendars")
+                for row in cursor:
+                    names[row["id"]] = row["name"]
+            except sqlite3.Error as e:
+                logger.debug("Could not query calendar names: %s", e)
+
+            conn.close()
+            return names
+        except Exception as e:
+            logger.debug("Failed to get calendar names: %s", e)
+            return {}
+
     def _open_calendar_db(self) -> sqlite3.Connection | None:
         """Open calendar database with WAL support.
 
@@ -899,11 +933,14 @@ class ThunderbirdBridge:
         end = start + timedelta(days=1)
         return self.list_events(start=start, end=end)
 
-    def _parse_event(self, row: sqlite3.Row) -> CalendarEvent | None:
+    def _parse_event(
+        self, row: sqlite3.Row, calendar_names: dict[str, str] | None = None
+    ) -> CalendarEvent | None:
         """Parse a database row into CalendarEvent.
 
         Args:
             row: Database row.
+            calendar_names: Optional mapping of cal_id to calendar name.
 
         Returns:
             CalendarEvent or None if invalid.
@@ -918,6 +955,16 @@ class ThunderbirdBridge:
 
             # Check if all-day (duration is exactly days)
             all_day = (end - start).total_seconds() % 86400 == 0
+
+            # Get calendar info
+            calendar_id = None
+            calendar_name = None
+            try:
+                calendar_id = str(row["cal_id"])
+                if calendar_names and calendar_id in calendar_names:
+                    calendar_name = calendar_names[calendar_id]
+            except (KeyError, IndexError):
+                pass
 
             # Parse iCal string for additional data (if available)
             location = None
@@ -957,6 +1004,8 @@ class ThunderbirdBridge:
                 is_recurring=is_recurring,
                 recurrence_rule=recurrence_rule,
                 recurrence_frequency=recurrence_frequency,
+                calendar_id=calendar_id,
+                calendar_name=calendar_name,
                 ical_data=ical,
             )
         except Exception as e:

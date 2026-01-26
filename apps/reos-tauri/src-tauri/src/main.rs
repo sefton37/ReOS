@@ -214,6 +214,55 @@ async fn kernel_request(
 }
 
 // =============================================================================
+// Dev Mode Session (for development without authentication)
+// =============================================================================
+
+/// Create a dev session for testing without authentication.
+/// Only available in debug builds.
+#[tauri::command]
+fn dev_create_session(
+    state: State<'_, KernelState>,
+    auth_state: State<'_, AuthState>,
+) -> Result<AuthResult, String> {
+    #[cfg(not(debug_assertions))]
+    {
+        return Err("Dev session only available in debug builds".to_string());
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        // Start the kernel if not already running
+        {
+            let mut guard = state.0.lock().map_err(|_| "lock poisoned".to_string())?;
+            if guard.is_none() {
+                let proc = KernelProcess::start().map_err(|e| e.to_string())?;
+                *guard = Some(proc);
+            }
+        }
+
+        // Get system username
+        let username = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .unwrap_or_else(|_| "dev".to_string());
+
+        // Generate a dev session token
+        let token = auth::generate_session_token();
+
+        // Store the session
+        let session = auth::create_session(token.clone(), username.clone());
+        let mut store = auth_state.0.lock().map_err(|_| "lock poisoned")?;
+        store.insert(session);
+
+        Ok(AuthResult {
+            success: true,
+            session_token: Some(token),
+            username: Some(username),
+            error: None,
+        })
+    }
+}
+
+// =============================================================================
 // Application Entry Point
 // =============================================================================
 
@@ -230,6 +279,7 @@ fn main() {
             auth_refresh,
             auth_get_session,
             get_system_username,
+            dev_create_session,
             // Kernel commands
             kernel_start,
             kernel_request,

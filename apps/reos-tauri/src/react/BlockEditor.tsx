@@ -19,17 +19,18 @@ const editorStyles = `
     flex: 1;
     display: flex;
     flex-direction: column;
-    min-height: 200px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    min-height: 300px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 2px solid rgba(255, 255, 255, 0.15);
     border-radius: 12px;
-    padding: 16px;
+    padding: 20px;
     overflow-y: auto;
-    transition: border-color 0.15s;
+    transition: border-color 0.2s, box-shadow 0.2s;
   }
 
   .block-editor:focus-within {
-    border-color: rgba(34, 197, 94, 0.4);
+    border-color: rgba(34, 197, 94, 0.5);
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
   }
 
   .block-editor .ProseMirror {
@@ -172,9 +173,18 @@ const editorStyles = `
   .block-editor .ProseMirror p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);
     float: left;
-    color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.5);
     pointer-events: none;
     height: 0;
+    font-style: italic;
+  }
+
+  .block-editor .ProseMirror {
+    cursor: text;
+  }
+
+  .block-editor .ProseMirror:focus {
+    outline: none;
   }
 
   .block-editor-status {
@@ -485,28 +495,50 @@ export function BlockEditor({
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [initialContent, setInitialContent] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const isInitialLoad = useRef(true);
 
   // Load blocks from backend
   useEffect(() => {
     async function loadBlocks() {
+      // If no actId, show empty editor for The Play overview
       if (!actId) {
         setInitialContent({ type: 'doc', content: [{ type: 'paragraph' }] });
         setLoading(false);
         return;
       }
 
+      // If no pageId, try to load the Act's kb.md content
+      if (!pageId) {
+        try {
+          const result = (await kernelRequest('play/kb/read', {
+            act_id: actId,
+            path: 'kb.md',
+          })) as { text: string };
+
+          const markdown = result.text || '';
+          const content = markdownToTiptap(markdown);
+          setInitialContent(content);
+        } catch {
+          // Fail gracefully - just show empty editor
+          setInitialContent({ type: 'doc', content: [{ type: 'paragraph' }] });
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
+
+      // Load page blocks
       try {
         const result = (await kernelRequest('blocks/page/tree', {
-          act_id: actId,
           page_id: pageId,
         })) as BlocksPageTreeResult;
 
         const blocks = result.blocks ?? [];
         const tiptapContent = blocksToTiptap(blocks);
         setInitialContent(tiptapContent);
-      } catch (e) {
-        console.error('Failed to load blocks:', e);
+      } catch {
+        // Fail gracefully - just show empty editor
         setInitialContent({ type: 'doc', content: [{ type: 'paragraph' }] });
       } finally {
         setLoading(false);
@@ -514,8 +546,26 @@ export function BlockEditor({
     }
 
     setLoading(true);
+    setLoadError(null);
     isInitialLoad.current = true;
-    void loadBlocks();
+
+    // Timeout to prevent infinite loading - fail gracefully after 5s
+    const timeout = setTimeout(() => {
+      setLoading(false);
+      setInitialContent({ type: 'doc', content: [{ type: 'paragraph' }] });
+    }, 5000);
+
+    loadBlocks()
+      .catch(() => {
+        // Fail gracefully
+        setInitialContent({ type: 'doc', content: [{ type: 'paragraph' }] });
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        setLoading(false);
+      });
+
+    return () => clearTimeout(timeout);
   }, [actId, pageId, kernelRequest]);
 
   // Save blocks to backend
@@ -574,6 +624,8 @@ export function BlockEditor({
 
   const editor = useEditor(
     {
+      editable: true,
+      autofocus: 'end',
       extensions: [
         StarterKit.configure({
           heading: {
@@ -582,6 +634,8 @@ export function BlockEditor({
         }),
         Placeholder.configure({
           placeholder: getPlaceholder(actId, pageId),
+          showOnlyWhenEditable: true,
+          showOnlyCurrent: true,
         }),
         Link.configure({
           openOnClick: true,
@@ -698,17 +752,27 @@ export function BlockEditor({
     );
   }
 
+  // Debug: show state if editor isn't ready
+  if (!editor) {
+    return (
+      <div style={{ padding: '24px', color: '#f59e0b', border: '2px solid #f59e0b', borderRadius: '8px' }}>
+        Editor initializing... (initialContent: {initialContent ? 'ready' : 'null'})
+      </div>
+    );
+  }
+
   return (
     <>
       <style>{editorStyles}</style>
       <div className="block-editor">
-        {editor && <FormattingToolbar editor={editor} />}
+        <FormattingToolbar editor={editor} />
         <EditorContent editor={editor} />
       </div>
       <div className={`block-editor-status ${saveStatus}`}>
         {saveStatus === 'saving' && 'Saving...'}
         {saveStatus === 'saved' && 'Saved'}
         {saveStatus === 'error' && 'Error saving'}
+        {saveStatus === 'idle' && <span style={{ opacity: 0.5 }}>Type / for commands</span>}
       </div>
     </>
   );
@@ -790,6 +854,150 @@ function blocksToMarkdown(blocks: Block[]): string {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Parse simple markdown into TipTap JSON format.
+ */
+function markdownToTiptap(markdown: string): Record<string, unknown> {
+  const lines = markdown.split('\n');
+  const content: Array<Record<string, unknown>> = [];
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Skip empty lines
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    // Heading 1
+    if (line.startsWith('# ')) {
+      content.push({
+        type: 'heading',
+        attrs: { level: 1 },
+        content: [{ type: 'text', text: line.slice(2) }],
+      });
+      i++;
+      continue;
+    }
+
+    // Heading 2
+    if (line.startsWith('## ')) {
+      content.push({
+        type: 'heading',
+        attrs: { level: 2 },
+        content: [{ type: 'text', text: line.slice(3) }],
+      });
+      i++;
+      continue;
+    }
+
+    // Heading 3
+    if (line.startsWith('### ')) {
+      content.push({
+        type: 'heading',
+        attrs: { level: 3 },
+        content: [{ type: 'text', text: line.slice(4) }],
+      });
+      i++;
+      continue;
+    }
+
+    // Horizontal rule
+    if (line.trim() === '---' || line.trim() === '***') {
+      content.push({ type: 'horizontalRule' });
+      i++;
+      continue;
+    }
+
+    // Bullet list item
+    if (line.startsWith('- ') || line.startsWith('* ')) {
+      const items: Array<Record<string, unknown>> = [];
+      while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('* '))) {
+        const text = lines[i].slice(2);
+        // Check for todo
+        if (text.startsWith('[ ] ') || text.startsWith('[x] ')) {
+          const checked = text.startsWith('[x]');
+          items.push({
+            type: 'taskItem',
+            attrs: { checked },
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: text.slice(4) }] }],
+          });
+        } else {
+          items.push({
+            type: 'listItem',
+            content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+          });
+        }
+        i++;
+      }
+      // Check if this was a task list
+      if (items.length > 0 && items[0].type === 'taskItem') {
+        content.push({ type: 'taskList', content: items });
+      } else {
+        content.push({ type: 'bulletList', content: items });
+      }
+      continue;
+    }
+
+    // Numbered list
+    if (/^\d+\. /.test(line)) {
+      const items: Array<Record<string, unknown>> = [];
+      while (i < lines.length && /^\d+\. /.test(lines[i])) {
+        const text = lines[i].replace(/^\d+\. /, '');
+        items.push({
+          type: 'listItem',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+        });
+        i++;
+      }
+      content.push({ type: 'orderedList', content: items });
+      continue;
+    }
+
+    // Code block
+    if (line.startsWith('```')) {
+      const lang = line.slice(3).trim();
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // Skip closing ```
+      content.push({
+        type: 'codeBlock',
+        attrs: { language: lang || 'text' },
+        content: codeLines.length > 0 ? [{ type: 'text', text: codeLines.join('\n') }] : undefined,
+      });
+      continue;
+    }
+
+    // Blockquote
+    if (line.startsWith('> ')) {
+      content.push({
+        type: 'blockquote',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: line.slice(2) }] }],
+      });
+      i++;
+      continue;
+    }
+
+    // Default: paragraph
+    content.push({
+      type: 'paragraph',
+      content: line.trim() ? [{ type: 'text', text: line }] : undefined,
+    });
+    i++;
+  }
+
+  return {
+    type: 'doc',
+    content: content.length > 0 ? content : [{ type: 'paragraph' }],
+  };
 }
 
 export default BlockEditor;

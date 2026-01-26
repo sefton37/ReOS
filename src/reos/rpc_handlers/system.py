@@ -327,6 +327,44 @@ def handle_autostart_set(_db: Database, *, enabled: bool) -> dict[str, Any]:
 
 
 # =============================================================================
+# Open Terminal Handler
+# =============================================================================
+
+
+def handle_system_open_terminal(_db: Database) -> dict[str, Any]:
+    """Open a terminal window in the user's preferred terminal emulator."""
+    import shutil
+    import subprocess
+
+    # Common terminal emulators in preference order
+    terminals = [
+        "gnome-terminal",
+        "konsole",
+        "xfce4-terminal",
+        "mate-terminal",
+        "tilix",
+        "terminator",
+        "alacritty",
+        "kitty",
+        "xterm",
+    ]
+
+    for terminal in terminals:
+        if shutil.which(terminal):
+            try:
+                subprocess.Popen([terminal], start_new_session=True)
+                return {"success": True, "terminal": terminal}
+            except Exception as e:
+                logger.warning("Failed to launch %s: %s", terminal, e)
+                continue
+
+    return {
+        "success": False,
+        "error": "No supported terminal emulator found. Install gnome-terminal, konsole, or another terminal.",
+    }
+
+
+# =============================================================================
 # CAIRN Attention Handler
 # =============================================================================
 

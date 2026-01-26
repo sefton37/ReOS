@@ -44,7 +44,8 @@ _local = threading.local()
 # v8: Add root_block_id to acts for block-based root content
 # v9: Add disable_auto_complete column to scenes (auto-complete vs needs_attention on overdue)
 # v10: Enforce recurring scenes cannot be 'complete' - cleanup existing data
-SCHEMA_VERSION = 10
+# v11: Add block_relationships and block_embeddings tables for memory graph
+SCHEMA_VERSION = 11
 
 
 def _play_db_path() -> Path:
@@ -244,6 +245,35 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_rich_text_block ON rich_text(block_id);
         CREATE INDEX IF NOT EXISTS idx_rich_text_position ON rich_text(block_id, position);
+
+        -- Block relationships table (v11: Memory graph for semantic connections)
+        CREATE TABLE IF NOT EXISTS block_relationships (
+            id TEXT PRIMARY KEY,
+            source_block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+            target_block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+            relationship_type TEXT NOT NULL,
+            confidence REAL DEFAULT 1.0,
+            weight REAL DEFAULT 1.0,
+            source TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(source_block_id, target_block_id, relationship_type),
+            CHECK(source_block_id != target_block_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_block_rel_source ON block_relationships(source_block_id);
+        CREATE INDEX IF NOT EXISTS idx_block_rel_target ON block_relationships(target_block_id);
+        CREATE INDEX IF NOT EXISTS idx_block_rel_type ON block_relationships(relationship_type);
+
+        -- Block embeddings table (v11: Vector embeddings for semantic search)
+        CREATE TABLE IF NOT EXISTS block_embeddings (
+            block_id TEXT PRIMARY KEY REFERENCES blocks(id) ON DELETE CASCADE,
+            embedding BLOB NOT NULL,
+            embedding_model TEXT DEFAULT 'all-MiniLM-L6-v2',
+            content_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_block_emb_hash ON block_embeddings(content_hash);
     """)
 
     conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
@@ -306,6 +336,11 @@ def _run_schema_migrations(conn: sqlite3.Connection, current_version: int) -> No
     if current_version < 10:
         logger.info("Running v10 migration: Clean up recurring scenes in 'complete' stage")
         _migrate_v9_to_v10(conn)
+
+    # Migration v10 -> v11: Add block_relationships and block_embeddings tables
+    if current_version < 11:
+        logger.info("Running v11 migration: Add memory graph tables")
+        _migrate_v10_to_v11(conn)
 
     # Update schema version
     conn.execute("UPDATE schema_version SET version = ?", (SCHEMA_VERSION,))
@@ -629,6 +664,53 @@ def _migrate_v9_to_v10(conn: sqlite3.Connection) -> None:
         logger.info("No recurring scenes needed cleanup")
 
     logger.info("v10 migration complete")
+
+
+def _migrate_v10_to_v11(conn: sqlite3.Connection) -> None:
+    """Migrate from v10 to v11 schema.
+
+    Adds block_relationships and block_embeddings tables for the
+    hybrid vector-graph memory system.
+
+    - block_relationships: Typed edges between blocks (references, follows_from, etc.)
+    - block_embeddings: Vector embeddings for semantic search
+    """
+    # Create block_relationships table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS block_relationships (
+            id TEXT PRIMARY KEY,
+            source_block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+            target_block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+            relationship_type TEXT NOT NULL,
+            confidence REAL DEFAULT 1.0,
+            weight REAL DEFAULT 1.0,
+            source TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(source_block_id, target_block_id, relationship_type),
+            CHECK(source_block_id != target_block_id)
+        )
+    """)
+
+    # Create indexes for efficient graph traversal
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_block_rel_source ON block_relationships(source_block_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_block_rel_target ON block_relationships(target_block_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_block_rel_type ON block_relationships(relationship_type)")
+
+    # Create block_embeddings table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS block_embeddings (
+            block_id TEXT PRIMARY KEY REFERENCES blocks(id) ON DELETE CASCADE,
+            embedding BLOB NOT NULL,
+            embedding_model TEXT DEFAULT 'all-MiniLM-L6-v2',
+            content_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    # Create index for staleness detection
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_block_emb_hash ON block_embeddings(content_hash)")
+
+    logger.info("v11 migration complete")
 
 
 def _migrate_calendar_data_from_cairn(conn: sqlite3.Connection) -> None:

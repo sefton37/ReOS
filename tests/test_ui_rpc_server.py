@@ -264,7 +264,18 @@ class TestPlayHandlers:
     @pytest.fixture(autouse=True)
     def isolate_play_data(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Isolate Play data to prevent tests from polluting real user data."""
+        from reos import play_db
+
+        # Close any existing connection BEFORE changing env var
+        play_db.close_connection()
+
+        # Set the isolated data directory
         monkeypatch.setenv("REOS_DATA_DIR", str(tmp_path / "data"))
+
+        yield
+
+        # Clean up after test
+        play_db.close_connection()
 
     def test_play_list_acts_returns_acts(self, db: Database) -> None:
         """play/acts/list should return all acts."""

@@ -233,6 +233,24 @@ from .rpc_handlers.blocks import (
     handle_blocks_unchecked_todos as _handle_blocks_unchecked_todos,
 )
 
+# Memory RPC handlers (hybrid vector-graph memory system)
+from .rpc_handlers.memory import (
+    handle_memory_relationships_create as _handle_memory_relationships_create,
+    handle_memory_relationships_list as _handle_memory_relationships_list,
+    handle_memory_relationships_update as _handle_memory_relationships_update,
+    handle_memory_relationships_delete as _handle_memory_relationships_delete,
+    handle_memory_search as _handle_memory_search,
+    handle_memory_related as _handle_memory_related,
+    handle_memory_path as _handle_memory_path,
+    handle_memory_index_block as _handle_memory_index_block,
+    handle_memory_index_batch as _handle_memory_index_batch,
+    handle_memory_remove_index as _handle_memory_remove_index,
+    handle_memory_extract_relationships as _handle_memory_extract_relationships,
+    handle_memory_learn_from_feedback as _handle_memory_learn_from_feedback,
+    handle_memory_auto_link as _handle_memory_auto_link,
+    handle_memory_stats as _handle_memory_stats,
+)
+
 _JSON = dict[str, Any]
 
 
@@ -1585,6 +1603,246 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             return _jsonrpc_result(
                 req_id=req_id,
                 result=_handle_blocks_unchecked_todos(db, act_id=act_id),
+            )
+
+        # --- Memory (Hybrid Vector-Graph Memory System) ---
+
+        if method == "memory/relationships/create":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            source_id = params.get("source_id")
+            target_id = params.get("target_id")
+            rel_type = params.get("rel_type")
+            if not isinstance(source_id, str) or not source_id:
+                raise RpcError(code=-32602, message="source_id is required")
+            if not isinstance(target_id, str) or not target_id:
+                raise RpcError(code=-32602, message="target_id is required")
+            if not isinstance(rel_type, str) or not rel_type:
+                raise RpcError(code=-32602, message="rel_type is required")
+            confidence = params.get("confidence", 1.0)
+            weight = params.get("weight", 1.0)
+            source = params.get("source", "user")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_relationships_create(
+                    db,
+                    source_id=source_id,
+                    target_id=target_id,
+                    rel_type=rel_type,
+                    confidence=confidence,
+                    weight=weight,
+                    source=source,
+                ),
+            )
+
+        if method == "memory/relationships/list":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            block_id = params.get("block_id")
+            if not isinstance(block_id, str) or not block_id:
+                raise RpcError(code=-32602, message="block_id is required")
+            direction = params.get("direction", "both")
+            rel_types = params.get("rel_types")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_relationships_list(
+                    db,
+                    block_id=block_id,
+                    direction=direction,
+                    rel_types=rel_types,
+                ),
+            )
+
+        if method == "memory/relationships/update":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            relationship_id = params.get("relationship_id")
+            if not isinstance(relationship_id, str) or not relationship_id:
+                raise RpcError(code=-32602, message="relationship_id is required")
+            confidence = params.get("confidence")
+            weight = params.get("weight")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_relationships_update(
+                    db,
+                    relationship_id=relationship_id,
+                    confidence=confidence,
+                    weight=weight,
+                ),
+            )
+
+        if method == "memory/relationships/delete":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            relationship_id = params.get("relationship_id")
+            if not isinstance(relationship_id, str) or not relationship_id:
+                raise RpcError(code=-32602, message="relationship_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_relationships_delete(
+                    db,
+                    relationship_id=relationship_id,
+                ),
+            )
+
+        if method == "memory/search":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            query = params.get("query")
+            if not isinstance(query, str) or not query.strip():
+                raise RpcError(code=-32602, message="query is required")
+            act_id = params.get("act_id")
+            max_results = params.get("max_results", 20)
+            include_graph = params.get("include_graph", True)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_search(
+                    db,
+                    query=query,
+                    act_id=act_id,
+                    max_results=max_results,
+                    include_graph=include_graph,
+                ),
+            )
+
+        if method == "memory/related":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            block_id = params.get("block_id")
+            if not isinstance(block_id, str) or not block_id:
+                raise RpcError(code=-32602, message="block_id is required")
+            depth = params.get("depth", 2)
+            rel_types = params.get("rel_types")
+            direction = params.get("direction", "both")
+            max_nodes = params.get("max_nodes", 50)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_related(
+                    db,
+                    block_id=block_id,
+                    depth=depth,
+                    rel_types=rel_types,
+                    direction=direction,
+                    max_nodes=max_nodes,
+                ),
+            )
+
+        if method == "memory/path":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            start_id = params.get("start_id")
+            end_id = params.get("end_id")
+            if not isinstance(start_id, str) or not start_id:
+                raise RpcError(code=-32602, message="start_id is required")
+            if not isinstance(end_id, str) or not end_id:
+                raise RpcError(code=-32602, message="end_id is required")
+            max_depth = params.get("max_depth", 5)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_path(
+                    db,
+                    start_id=start_id,
+                    end_id=end_id,
+                    max_depth=max_depth,
+                ),
+            )
+
+        if method == "memory/index/block":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            block_id = params.get("block_id")
+            if not isinstance(block_id, str) or not block_id:
+                raise RpcError(code=-32602, message="block_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_index_block(db, block_id=block_id),
+            )
+
+        if method == "memory/index/batch":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            block_ids = params.get("block_ids")
+            if not isinstance(block_ids, list):
+                raise RpcError(code=-32602, message="block_ids must be a list")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_index_batch(db, block_ids=block_ids),
+            )
+
+        if method == "memory/index/remove":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            block_id = params.get("block_id")
+            if not isinstance(block_id, str) or not block_id:
+                raise RpcError(code=-32602, message="block_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_remove_index(db, block_id=block_id),
+            )
+
+        if method == "memory/extract":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            block_id = params.get("block_id")
+            content = params.get("content")
+            if not isinstance(block_id, str) or not block_id:
+                raise RpcError(code=-32602, message="block_id is required")
+            if not isinstance(content, str):
+                raise RpcError(code=-32602, message="content is required")
+            act_id = params.get("act_id")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_extract_relationships(
+                    db,
+                    block_id=block_id,
+                    content=content,
+                    act_id=act_id,
+                ),
+            )
+
+        if method == "memory/learn":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            chain_block_id = params.get("chain_block_id")
+            rating = params.get("rating")
+            if not isinstance(chain_block_id, str) or not chain_block_id:
+                raise RpcError(code=-32602, message="chain_block_id is required")
+            if not isinstance(rating, int) or rating < 1 or rating > 5:
+                raise RpcError(code=-32602, message="rating must be an integer 1-5")
+            corrected_block_id = params.get("corrected_block_id")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_learn_from_feedback(
+                    db,
+                    chain_block_id=chain_block_id,
+                    rating=rating,
+                    corrected_block_id=corrected_block_id,
+                ),
+            )
+
+        if method == "memory/auto_link":
+            if not isinstance(params, dict):
+                params = {}
+            act_id = params.get("act_id")
+            threshold = params.get("threshold", 0.8)
+            max_links = params.get("max_links", 3)
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_auto_link(
+                    db,
+                    act_id=act_id,
+                    threshold=threshold,
+                    max_links=max_links,
+                ),
+            )
+
+        if method == "memory/stats":
+            if not isinstance(params, dict):
+                params = {}
+            act_id = params.get("act_id")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_memory_stats(db, act_id=act_id),
             )
 
         # --- Context Meter & Knowledge Management ---

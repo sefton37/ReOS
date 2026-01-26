@@ -35,6 +35,11 @@ Zero trust. Local only. Encrypted at rest. Never phones home. The only report go
 │              │  (identity ↔ attention)       │                   │
 │              └───────────────┬───────────────┘                   │
 │                              │                                   │
+│  ┌───────────────────────────┴───────────────────────────────┐  │
+│  │                   Memory Retriever                         │  │
+│  │  (semantic search + graph expansion for relevant context)  │  │
+│  └───────────────────────────┬───────────────────────────────┘  │
+│                              │                                   │
 │              ┌───────────────┴───────────────┐                   │
 │              │      Knowledge Graph          │                   │
 │              │  (contacts ↔ projects/tasks)  │                   │
@@ -45,12 +50,13 @@ Zero trust. Local only. Encrypted at rest. Never phones home. The only report go
          │                    │                    │
          ▼                    ▼                    ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   Play Store    │  │Thunderbird Bridge│  │  CAIRN SQLite   │
-│  (Acts/Scenes/  │  │ (Calendar, Email,│  │ (Activity logs, │
-│   KB)           │  │  Contacts)       │  │  priorities,    │
-│                 │  │                  │  │  coherence)     │
+│   Play Store    │  │Thunderbird Bridge│  │  Memory Store   │
+│  (Acts/Scenes/  │  │ (Calendar, Email,│  │ (Embeddings,    │
+│   Blocks/KB)    │  │  Contacts)       │  │  Relationships) │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
+
+**Memory Retriever**: When CAIRN responds, it retrieves relevant past interactions, reasoning chains, and knowledge facts via semantic similarity and relationship traversal. See [Memory System](./memory-system.md) for details.
 
 ## Data Model
 
@@ -551,3 +557,13 @@ src/reos/
 ├── linux_tools.py      # ReOS (system agent)
 └── ...
 ```
+
+---
+
+## Related Documentation
+
+- [Foundation](./FOUNDATION.md) — Core philosophy and architecture overview
+- [Memory System](./memory-system.md) — Semantic search and relationship graph for context retrieval
+- [The Play](./the-play.md) — Life organization system (Acts/Scenes)
+- [Blocks API](./blocks-api.md) — Block editor system
+- [RLHF Learning](./rlhf-learning.md) — Feedback collection and learning
