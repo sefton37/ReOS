@@ -29,6 +29,7 @@ from enum import Enum, auto
 from typing import Any
 
 from reos.providers.base import LLMProvider
+from reos.cairn.consciousness_stream import ConsciousnessObserver, ConsciousnessEventType
 
 
 class IntentCategory(Enum):
@@ -231,28 +232,82 @@ class CairnIntentEngine:
         """
         import sys
 
+        # Get consciousness observer for streaming events to UI
+        observer = ConsciousnessObserver.get_instance()
+
         # Stage 1: Extract intent
+        observer.emit(
+            ConsciousnessEventType.PHASE_START,
+            "Stage 1: Intent Extraction",
+            f"Analyzing: \"{user_input[:100]}{'...' if len(user_input) > 100 else ''}\"",
+        )
         print(f"[INTENT] Stage 1: Extracting intent from: {user_input[:100]!r}", file=sys.stderr)
         intent = self._extract_intent(user_input)
+        observer.emit(
+            ConsciousnessEventType.INTENT_EXTRACTED,
+            f"Intent: {intent.category.name} → {intent.action.name}",
+            f"Category: {intent.category.name}\n"
+            f"Action: {intent.action.name}\n"
+            f"Target: {intent.target}\n"
+            f"Confidence: {intent.confidence:.0%}\n"
+            f"Reasoning: {intent.reasoning}",
+            category=intent.category.name,
+            action=intent.action.name,
+            confidence=intent.confidence,
+        )
         print(f"[INTENT] Stage 1 result: category={intent.category.name}, action={intent.action.name}, confidence={intent.confidence:.2f}", file=sys.stderr)
 
         # Stage 2: Verify intent
+        observer.emit(
+            ConsciousnessEventType.PHASE_START,
+            "Stage 2: Intent Verification",
+            "Checking if intent is actionable and selecting appropriate tool...",
+        )
         print(f"[INTENT] Stage 2: Verifying intent", file=sys.stderr)
         verified = self._verify_intent(intent)
+        observer.emit(
+            ConsciousnessEventType.INTENT_VERIFIED,
+            f"Verified: {verified.verified}" + (f" → {verified.tool_name}" if verified.tool_name else ""),
+            f"Verified: {verified.verified}\n"
+            f"Tool: {verified.tool_name or 'None (no tool needed)'}\n"
+            f"Reason: {verified.reason}\n"
+            + (f"Tool Args: {json.dumps(verified.tool_args, indent=2)}" if verified.tool_args else ""),
+            verified=verified.verified,
+            tool=verified.tool_name,
+        )
         print(f"[INTENT] Stage 2 result: verified={verified.verified}, tool={verified.tool_name}", file=sys.stderr)
 
         # Stage 3: Execute tool if verified
         tool_result = None
         all_tool_results = []  # Track all tool calls for recovery
         if verified.verified and verified.tool_name and execute_tool:
+            observer.emit(
+                ConsciousnessEventType.TOOL_CALL_START,
+                f"Calling: {verified.tool_name}",
+                f"Tool: {verified.tool_name}\n"
+                f"Arguments: {json.dumps(verified.tool_args, indent=2, default=str)}",
+                tool=verified.tool_name,
+            )
             print(f"[INTENT] Stage 3: Executing tool {verified.tool_name} with args {verified.tool_args}", file=sys.stderr)
             try:
                 tool_result = execute_tool(verified.tool_name, verified.tool_args)
                 all_tool_results.append({"tool": verified.tool_name, "result": tool_result})
+                observer.emit(
+                    ConsciousnessEventType.TOOL_CALL_COMPLETE,
+                    f"Tool Result: {verified.tool_name}",
+                    json.dumps(tool_result, indent=2, default=str)[:2000],
+                    tool=verified.tool_name,
+                    success=not tool_result.get("error"),
+                )
                 print(f"[INTENT] Stage 3 result: {json.dumps(tool_result, default=str)[:500]}", file=sys.stderr)
 
                 # Stage 3.5: Recovery - if tool failed or returned error, try to recover
                 if tool_result and tool_result.get("error"):
+                    observer.emit(
+                        ConsciousnessEventType.REASONING_ITERATION,
+                        "Stage 3.5: Attempting Recovery",
+                        f"Tool returned error: {tool_result.get('error')}\nAttempting alternative approach...",
+                    )
                     print(f"[INTENT] Stage 3.5: Tool returned error, attempting recovery", file=sys.stderr)
                     recovery_result = self._attempt_recovery(
                         user_input=user_input,
@@ -264,12 +319,30 @@ class CairnIntentEngine:
                     if recovery_result:
                         tool_result = recovery_result
                         all_tool_results.append({"tool": "recovery", "result": recovery_result})
+                        observer.emit(
+                            ConsciousnessEventType.REASONING_RESULT,
+                            "Recovery Successful",
+                            json.dumps(recovery_result, indent=2, default=str)[:1000],
+                        )
 
             except Exception as e:
+                observer.emit(
+                    ConsciousnessEventType.TOOL_CALL_COMPLETE,
+                    f"Tool Error: {verified.tool_name}",
+                    f"Error: {e}",
+                    tool=verified.tool_name,
+                    success=False,
+                    error=str(e),
+                )
                 print(f"[INTENT] Stage 3 error: {e}", file=sys.stderr)
                 tool_result = {"error": str(e)}
 
         # Stage 4: Generate response
+        observer.emit(
+            ConsciousnessEventType.PHASE_START,
+            "Stage 4: Response Generation",
+            "Synthesizing response from collected data...",
+        )
         print(f"[INTENT] Stage 4: Generating response", file=sys.stderr)
         response, thinking = self._generate_response(
             verified_intent=verified,
@@ -279,6 +352,14 @@ class CairnIntentEngine:
             execute_tool=execute_tool,
         )
         print(f"[INTENT] Stage 4 response: {response[:200]}...", file=sys.stderr)
+
+        # Emit final response ready event
+        observer.emit(
+            ConsciousnessEventType.RESPONSE_READY,
+            "Response Ready",
+            f"Final response ({len(response)} chars):\n\n{response[:500]}{'...' if len(response) > 500 else ''}",
+            response_length=len(response),
+        )
 
         return IntentResult(
             verified_intent=verified,
@@ -1074,10 +1155,28 @@ Generate a helpful response that accurately describes the data above. If the dat
 No data was retrieved. Explain that you couldn't get the requested information."""
 
         try:
+            # Get consciousness observer
+            observer = ConsciousnessObserver.get_instance()
+
+            observer.emit(
+                ConsciousnessEventType.LLM_CALL_START,
+                "Calling LLM for Response",
+                f"Generating response with {len(system)} char system prompt...",
+            )
             raw = self.llm.chat_text(system=system, user=user, temperature=0.3, top_p=0.9)
             response, thinking = self._parse_response(raw)
+            observer.emit(
+                ConsciousnessEventType.LLM_CALL_COMPLETE,
+                "LLM Response Received",
+                f"Generated {len(response)} char response",
+            )
 
             # Stage 5: Hallucination check (cheap local LLM verification)
+            observer.emit(
+                ConsciousnessEventType.COHERENCE_START,
+                "Stage 5: Hallucination Check",
+                "Verifying response is grounded in actual data...",
+            )
             print(f"[INTENT] Stage 5: Verifying response for hallucination", file=sys.stderr)
 
             is_valid, rejection_reason = self._verify_no_hallucination(
@@ -1087,6 +1186,13 @@ No data was retrieved. Explain that you couldn't get the requested information."
             )
 
             if not is_valid:
+                observer.emit(
+                    ConsciousnessEventType.COHERENCE_RESULT,
+                    "Hallucination Detected!",
+                    f"Response rejected: {rejection_reason}\nAttempting recovery...",
+                    valid=False,
+                    reason=rejection_reason,
+                )
                 print(f"[INTENT] Stage 5: REJECTED - {rejection_reason}", file=sys.stderr)
 
                 # Stage 5.5: Recovery - try to get more data instead of giving up
@@ -1109,16 +1215,40 @@ No data was retrieved. Explain that you couldn't get the requested information."
                 )
                 return clarification, thinking + [f"[Clarification needed: {rejection_reason}]"]
 
+            observer.emit(
+                ConsciousnessEventType.COHERENCE_RESULT,
+                "Response Verified OK",
+                "Response is grounded in actual data - no hallucination detected.",
+                valid=True,
+            )
             print(f"[INTENT] Stage 5: Response verified OK", file=sys.stderr)
 
             # Stage 6: Check for repetition
+            observer.emit(
+                ConsciousnessEventType.PHASE_START,
+                "Stage 6: Repetition Check",
+                "Checking if response is too similar to recent responses...",
+            )
             if self._is_response_repetitive(response):
+                observer.emit(
+                    ConsciousnessEventType.REASONING_RESULT,
+                    "Repetition Detected!",
+                    "Response was too similar to a recent response. Adjusting to avoid repetition.",
+                    repetitive=True,
+                )
                 print(f"[INTENT] Stage 6: Detected repetitive response, adjusting", file=sys.stderr)
                 # Instead of repeating, acknowledge and offer alternatives
                 response = (
                     "I realize I may be covering similar ground. "
                     "Is there something specific you'd like me to focus on, "
                     "or would you like to try a different question?"
+                )
+            else:
+                observer.emit(
+                    ConsciousnessEventType.PHASE_COMPLETE,
+                    "Repetition Check Passed",
+                    "Response is sufficiently different from recent responses.",
+                    repetitive=False,
                 )
 
             # Track this response for future repetition detection

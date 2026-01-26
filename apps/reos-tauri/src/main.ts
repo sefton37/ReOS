@@ -574,28 +574,50 @@ function buildUi() {
   setTimeout(scheduleNextPoll, ACTIVE_POLL_INTERVAL);
 
   // Handle CAIRN chat messages (default conversational mode)
+  // Uses async chat to enable real-time consciousness streaming
   async function handleCairnMessage(message: string, options?: { extendedThinking?: boolean }): Promise<void> {
     // Show thinking indicator while waiting for response
     cairnView.showThinking();
     try {
-      const result = (await kernelRequest('chat/respond', {
+      // Start async chat - returns immediately with chat_id
+      // This allows consciousness/poll requests to be handled while chat processes
+      const asyncResult = (await kernelRequest('cairn/chat_async', {
         text: message,
         conversation_id: currentConversationId,
-        agent_type: currentAgent,  // Pass current agent for persona selection
-        // Extended thinking: true=force on, undefined=auto-detect, false would disable
-        // When toggle is on, force it. When off, let backend auto-detect for complex prompts.
         extended_thinking: options?.extendedThinking === true ? true : undefined,
-        // No use_code_mode flag - CAIRN is the default conversational agent
-      })) as ChatRespondResult;
-      cairnView.hideThinking();
-      if (result.conversation_id) {
-        currentConversationId = result.conversation_id;
-      }
-      // Use addAssistantMessage to include full response data (thinking steps, tool calls)
-      cairnView.addAssistantMessage(result);
+      })) as { chat_id: string; status: string };
 
-      // Refresh attention items after CAIRN chat - beat moves may have changed act assignments
-      void refreshAttentionItems();
+      const chatId = asyncResult.chat_id;
+
+      // Poll for chat completion
+      // The consciousness stream polling runs in parallel (started in cairnView.ts)
+      let chatComplete = false;
+      while (!chatComplete) {
+        // Small delay between status checks
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        const statusResult = (await kernelRequest('cairn/chat_status', {
+          chat_id: chatId,
+        })) as { status: string; result?: ChatRespondResult; error?: string };
+
+        if (statusResult.status === 'complete' && statusResult.result) {
+          chatComplete = true;
+          cairnView.hideThinking();
+          if (statusResult.result.conversation_id) {
+            currentConversationId = statusResult.result.conversation_id;
+          }
+          // Use addAssistantMessage to include full response data (thinking steps, tool calls)
+          cairnView.addAssistantMessage(statusResult.result);
+
+          // Refresh attention items after CAIRN chat - beat moves may have changed act assignments
+          void refreshAttentionItems();
+        } else if (statusResult.status === 'error') {
+          chatComplete = true;
+          cairnView.hideThinking();
+          cairnView.addChatMessage('assistant', `Error: ${statusResult.error || 'Unknown error'}`);
+        }
+        // If status is "processing", continue polling
+      }
     } catch (error) {
       cairnView.hideThinking();
       cairnView.addChatMessage('assistant', `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);

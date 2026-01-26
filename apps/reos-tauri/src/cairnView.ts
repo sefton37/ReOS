@@ -9,8 +9,9 @@
  */
 
 import { el } from './dom';
-import type { ChatRespondResult, ExtendedThinkingTrace, ThinkingNode, FacetCheck, Tension } from './types';
+import type { ChatRespondResult, ExtendedThinkingTrace, ThinkingNode, FacetCheck, Tension, ConsciousnessEvent } from './types';
 import { highlight, injectSyntaxHighlightStyles } from './syntaxHighlight';
+import { createConsciousnessPane } from './consciousnessPane';
 
 interface ArchivePreviewData {
   title: string;
@@ -639,6 +640,10 @@ export function createCairnView(
 
     chatInput.value = '';
     addChatMessage('user', message);
+
+    // Start consciousness streaming before sending
+    void startConsciousnessPolling();
+
     await callbacks.onSendMessage(message, { extendedThinking: state.extendedThinkingEnabled });
   };
 
@@ -656,9 +661,197 @@ export function createCairnView(
   chatPanel.appendChild(chatMessages);
   chatPanel.appendChild(inputArea);
 
+  // ============ RIGHT: Consciousness Stream Panel ============
+  const consciousnessContainer = el('div');
+  consciousnessContainer.className = 'consciousness-container';
+  consciousnessContainer.style.cssText = `
+    width: 480px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-left: 1px solid rgba(255,255,255,0.1);
+    background: rgba(0,0,0,0.15);
+  `;
+
+  // Create consciousness pane
+  const consciousnessPane = createConsciousnessPane(consciousnessContainer);
+
+  // Add consciousness pane styles
+  const consciousnessStyles = document.createElement('style');
+  consciousnessStyles.textContent = `
+    .consciousness-pane {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    .consciousness-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      background: rgba(0,0,0,0.2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .consciousness-header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .consciousness-scroll-btn {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.6);
+      font-size: 14px;
+      cursor: pointer;
+      padding: 2px 6px;
+      transition: opacity 0.2s;
+    }
+    .consciousness-scroll-btn:hover {
+      color: rgba(255,255,255,0.9);
+    }
+    .consciousness-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #a78bfa;
+    }
+    .consciousness-clear-btn {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.4);
+      font-size: 18px;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+    .consciousness-clear-btn:hover {
+      color: rgba(255,255,255,0.7);
+    }
+    .consciousness-events {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+    .consciousness-event {
+      margin-bottom: 8px;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .consciousness-event-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: rgba(255,255,255,0.05);
+      cursor: pointer;
+    }
+    .consciousness-event-header:hover {
+      background: rgba(255,255,255,0.08);
+    }
+    .consciousness-icon {
+      font-size: 14px;
+    }
+    .consciousness-event .consciousness-title {
+      flex: 1;
+      font-size: 12px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.9);
+    }
+    .consciousness-timestamp {
+      font-size: 10px;
+      color: rgba(255,255,255,0.4);
+      font-family: monospace;
+    }
+    .consciousness-expand-btn {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.4);
+      font-size: 12px;
+      cursor: pointer;
+      padding: 2px 6px;
+    }
+    .consciousness-content {
+      padding: 8px 12px;
+      background: rgba(0,0,0,0.2);
+      font-size: 11px;
+      font-family: monospace;
+      color: rgba(255,255,255,0.7);
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .consciousness-footer {
+      padding: 8px 16px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      background: rgba(0,0,0,0.2);
+    }
+    .consciousness-status {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+    }
+    .consciousness-status.active {
+      color: #22c55e;
+    }
+    /* Event type styling */
+    .event-phase {
+      border-left: 3px solid #3b82f6;
+    }
+    .event-result {
+      border-left: 3px solid #22c55e;
+    }
+    .event-llm {
+      border-left: 3px solid #a78bfa;
+    }
+    .event-reasoning {
+      border-left: 3px solid #f59e0b;
+    }
+  `;
+  document.head.appendChild(consciousnessStyles);
+
+  // Consciousness polling state
+  let consciousnessPolling = false;
+  let consciousnessEvents: ConsciousnessEvent[] = [];
+  let consciousnessIndex = 0;
+
+  async function startConsciousnessPolling() {
+    consciousnessPolling = true;
+    consciousnessEvents = [];
+    consciousnessIndex = 0;
+    consciousnessPane.clear();
+
+    // Note: consciousness/start is called by cairn/chat_async, no need to call it here
+    // This avoids race conditions where we might clear events after they start being emitted
+
+    // Poll for events
+    const pollInterval = setInterval(async () => {
+      if (!consciousnessPolling) {
+        clearInterval(pollInterval);
+        return;
+      }
+
+      try {
+        const result = await callbacks.kernelRequest('consciousness/poll', {
+          since_index: consciousnessIndex,
+        }) as { events: ConsciousnessEvent[]; next_index: number };
+
+        if (result.events && result.events.length > 0) {
+          consciousnessEvents.push(...result.events);
+          consciousnessIndex = result.next_index;
+          consciousnessPane.update(consciousnessEvents, true);
+        }
+      } catch (e) {
+        console.warn('Consciousness poll failed:', e);
+      }
+    }, 200); // Poll every 200ms
+  }
+
+  function stopConsciousnessPolling() {
+    consciousnessPolling = false;
+    consciousnessPane.update(consciousnessEvents, false);
+  }
+
   // Assemble container
   container.appendChild(surfacedPanel);
   container.appendChild(chatPanel);
+  container.appendChild(consciousnessContainer);
 
   // ============ Functions ============
 
@@ -1102,6 +1295,8 @@ export function createCairnView(
 
   function hideThinking(): void {
     thinkingIndicator.style.display = 'none';
+    // Stop consciousness polling when response is received
+    stopConsciousnessPolling();
   }
 
   function clearChat(): void {
