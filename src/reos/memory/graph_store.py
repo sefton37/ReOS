@@ -225,7 +225,7 @@ class MemoryGraphStore:
         else:  # both
             base_query = """
                 SELECT * FROM block_relationships
-                WHERE source_block_id = ? OR target_block_id = ?
+                WHERE (source_block_id = ? OR target_block_id = ?)
             """
             params = [block_id, block_id]
 
