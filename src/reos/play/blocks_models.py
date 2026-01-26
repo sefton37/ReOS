@@ -36,6 +36,12 @@ class BlockType(str, Enum):
     # Scene embed (links to existing scene)
     SCENE = "scene"
 
+    # Reasoning chain blocks (RLHF feedback system)
+    REASONING_CHAIN = "reasoning_chain"      # Container for entire reasoning chain
+    USER_PROMPT = "user_prompt"              # User's input message
+    CONSCIOUSNESS_EVENT = "consciousness_event"  # Individual thinking step
+    LLM_RESPONSE = "llm_response"            # Final LLM response
+
 
 # Block types that support nesting children
 NESTABLE_TYPES = frozenset({
@@ -44,6 +50,7 @@ NESTABLE_TYPES = frozenset({
     BlockType.NUMBERED_LIST,
     BlockType.TO_DO,
     BlockType.CALLOUT,
+    BlockType.REASONING_CHAIN,  # Contains user_prompt, consciousness_events, llm_response
 })
 
 

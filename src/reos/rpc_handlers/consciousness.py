@@ -221,6 +221,116 @@ def handle_cairn_chat_status(
 # =============================================================================
 
 
+# =============================================================================
+# Consciousness Persistence Handlers
+# =============================================================================
+
+
+def handle_consciousness_persist(
+    _db: Database,
+    *,
+    conversation_id: str,
+    user_message_id: str,
+    response_message_id: str,
+    act_id: str | None = None,
+) -> dict[str, Any]:
+    """Persist consciousness events as a reasoning chain block hierarchy.
+
+    Creates a block structure:
+        reasoning_chain (root)
+        ├── user_prompt (position: 0)
+        ├── consciousness_event (position: 1..N-1)
+        └── llm_response (position: N)
+
+    Args:
+        conversation_id: ID of the conversation
+        user_message_id: ID of the user's message
+        response_message_id: ID of the LLM's response message
+        act_id: Optional act ID (uses active act if not provided)
+
+    Returns:
+        Dict with chain_block_id and event_count
+    """
+    import json
+
+    from reos.cairn.consciousness_stream import ConsciousnessObserver
+    from reos.play import blocks_db
+    from reos.play.blocks_models import BlockType
+    from reos.play_db import list_acts
+
+    # Get active act if not provided
+    if not act_id:
+        _, active_act_id = list_acts()
+        act_id = active_act_id
+
+    # We need an act_id to create blocks
+    if not act_id:
+        return {"error": "No act_id provided and no active act", "chain_block_id": None, "event_count": 0}
+
+    # Get all consciousness events from the current session
+    observer = ConsciousnessObserver.get_instance()
+    events = observer.get_all()
+
+    # Create the reasoning_chain block (root container)
+    chain_block = blocks_db.create_block(
+        type=BlockType.REASONING_CHAIN,
+        act_id=act_id,
+        properties={
+            "conversation_id": conversation_id,
+            "feedback_status": "pending",  # pending, positive, negative
+            "feedback_comment": None,
+            "feedback_timestamp": None,
+        },
+    )
+
+    position = 0
+
+    # Create user_prompt block (first child)
+    blocks_db.create_block(
+        type=BlockType.USER_PROMPT,
+        act_id=act_id,
+        parent_id=chain_block.id,
+        position=position,
+        properties={
+            "message_id": user_message_id,
+        },
+    )
+    position += 1
+
+    # Create consciousness_event blocks for each event
+    for event in events:
+        blocks_db.create_block(
+            type=BlockType.CONSCIOUSNESS_EVENT,
+            act_id=act_id,
+            parent_id=chain_block.id,
+            position=position,
+            properties={
+                "event_type": event.event_type.name,
+                "timestamp": event.timestamp.isoformat(),
+                "title": event.title,
+                "content": event.content,
+                "metadata": json.dumps(event.metadata) if event.metadata else None,
+            },
+        )
+        position += 1
+
+    # Create llm_response block (last child)
+    blocks_db.create_block(
+        type=BlockType.LLM_RESPONSE,
+        act_id=act_id,
+        parent_id=chain_block.id,
+        position=position,
+        properties={
+            "message_id": response_message_id,
+        },
+    )
+
+    return {
+        "chain_block_id": chain_block.id,
+        "event_count": len(events),
+    }
+
+
 def handle_handoff_validate_all(_db: Database) -> dict[str, Any]:
     """Validate all agent manifests (15-tool cap check)."""
     from reos.handoff import validate_all_manifests

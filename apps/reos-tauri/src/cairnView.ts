@@ -71,6 +71,7 @@ export function createCairnView(
   clearChat: () => void;
   getChatInput: () => HTMLInputElement;
   updateSurfaced: (items: Array<{ title: string; reason: string; urgency: string; is_recurring?: boolean; recurrence_frequency?: string; act_color?: string }>) => void;
+  persistAndShowFeedback: (conversationId: string, userMessageId: string, responseMessageId: string) => Promise<void>;
 } {
   const state: CairnViewState = {
     chatMessages: [],
@@ -80,6 +81,13 @@ export function createCairnView(
 
   // Fingerprint of current surfaced items to avoid unnecessary re-renders
   let surfacedFingerprint = '';
+
+  // RLHF Feedback state
+  let awaitingFeedback = false;
+  let currentChainBlockId: string | null = null;
+  let currentUserMessageId: string | null = null;
+  let currentResponseMessageId: string | null = null;
+  let feedbackRowElement: HTMLElement | null = null;
 
   // Inject syntax highlighting styles
   injectSyntaxHighlightStyles();
@@ -635,6 +643,28 @@ export function createCairnView(
   `;
 
   const handleSend = async () => {
+    // Block sending if awaiting feedback
+    if (awaitingFeedback) {
+      // Show a brief message in the chat
+      const warningEl = el('div');
+      warningEl.style.cssText = `
+        align-self: center;
+        background: rgba(245, 158, 11, 0.15);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        border-radius: 8px;
+        padding: 8px 16px;
+        color: #fbbf24;
+        font-size: 13px;
+        margin: 8px 0;
+      `;
+      warningEl.textContent = 'Please provide feedback on the previous response first';
+      chatMessages.insertBefore(warningEl, thinkingIndicator);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      // Remove after 3 seconds
+      setTimeout(() => warningEl.remove(), 3000);
+      return;
+    }
+
     const message = chatInput.value.trim();
     if (!message) return;
 
@@ -1299,6 +1329,181 @@ export function createCairnView(
     stopConsciousnessPolling();
   }
 
+  /** Create and show the feedback row UI */
+  function showFeedbackRow(): void {
+    // Remove any existing feedback row
+    if (feedbackRowElement) {
+      feedbackRowElement.remove();
+    }
+
+    feedbackRowElement = el('div');
+    feedbackRowElement.className = 'feedback-row';
+    feedbackRowElement.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 12px 16px;
+      background: rgba(147, 51, 234, 0.1);
+      border: 1px solid rgba(147, 51, 234, 0.3);
+      border-radius: 12px;
+      margin: 8px 0;
+    `;
+
+    const label = el('span');
+    label.style.cssText = `
+      color: rgba(255,255,255,0.8);
+      font-size: 13px;
+    `;
+    label.textContent = 'Was this helpful?';
+
+    const thumbsUp = el('button');
+    thumbsUp.className = 'feedback-btn feedback-up';
+    thumbsUp.style.cssText = `
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 8px;
+      padding: 8px 16px;
+      color: #22c55e;
+      font-size: 18px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    `;
+    thumbsUp.innerHTML = '<span>👍</span><span style="font-size: 12px;">Yes</span>';
+    thumbsUp.addEventListener('mouseenter', () => {
+      thumbsUp.style.background = 'rgba(34, 197, 94, 0.25)';
+    });
+    thumbsUp.addEventListener('mouseleave', () => {
+      thumbsUp.style.background = 'rgba(34, 197, 94, 0.15)';
+    });
+    thumbsUp.addEventListener('click', () => submitFeedback(5));
+
+    const thumbsDown = el('button');
+    thumbsDown.className = 'feedback-btn feedback-down';
+    thumbsDown.style.cssText = `
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 8px;
+      padding: 8px 16px;
+      color: #ef4444;
+      font-size: 18px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    `;
+    thumbsDown.innerHTML = '<span>👎</span><span style="font-size: 12px;">No</span>';
+    thumbsDown.addEventListener('mouseenter', () => {
+      thumbsDown.style.background = 'rgba(239, 68, 68, 0.25)';
+    });
+    thumbsDown.addEventListener('mouseleave', () => {
+      thumbsDown.style.background = 'rgba(239, 68, 68, 0.15)';
+    });
+    thumbsDown.addEventListener('click', () => submitFeedback(1));
+
+    feedbackRowElement.appendChild(label);
+    feedbackRowElement.appendChild(thumbsUp);
+    feedbackRowElement.appendChild(thumbsDown);
+
+    // Insert before thinking indicator
+    chatMessages.insertBefore(feedbackRowElement, thinkingIndicator);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    // Disable the input visually
+    chatInput.style.opacity = '0.5';
+    chatInput.placeholder = 'Please provide feedback first...';
+    sendBtn.style.opacity = '0.5';
+    sendBtn.style.pointerEvents = 'none';
+  }
+
+  /** Submit feedback for the current reasoning chain */
+  async function submitFeedback(rating: number): Promise<void> {
+    if (!currentChainBlockId) {
+      console.warn('No chain block ID for feedback');
+      return;
+    }
+
+    try {
+      await callbacks.kernelRequest('reasoning/feedback', {
+        chain_block_id: currentChainBlockId,
+        rating,
+      });
+
+      // Update feedback row to show submitted state
+      if (feedbackRowElement) {
+        const isPositive = rating === 5;
+        feedbackRowElement.innerHTML = `
+          <span style="color: ${isPositive ? '#22c55e' : '#ef4444'}; font-size: 14px;">
+            ${isPositive ? '👍' : '👎'} Thanks for your feedback!
+          </span>
+        `;
+        feedbackRowElement.style.background = isPositive
+          ? 'rgba(34, 197, 94, 0.1)'
+          : 'rgba(239, 68, 68, 0.1)';
+        feedbackRowElement.style.borderColor = isPositive
+          ? 'rgba(34, 197, 94, 0.3)'
+          : 'rgba(239, 68, 68, 0.3)';
+
+        // Fade out after 2 seconds
+        setTimeout(() => {
+          if (feedbackRowElement) {
+            feedbackRowElement.style.transition = 'opacity 0.5s';
+            feedbackRowElement.style.opacity = '0';
+            setTimeout(() => feedbackRowElement?.remove(), 500);
+          }
+        }, 2000);
+      }
+
+      // Re-enable input
+      awaitingFeedback = false;
+      currentChainBlockId = null;
+      chatInput.style.opacity = '1';
+      chatInput.placeholder = 'Ask CAIRN anything...';
+      sendBtn.style.opacity = '1';
+      sendBtn.style.pointerEvents = 'auto';
+
+    } catch (e) {
+      console.error('Failed to submit feedback:', e);
+    }
+  }
+
+  /** Persist consciousness events and show feedback UI */
+  async function persistAndShowFeedback(
+    conversationId: string,
+    userMessageId: string,
+    responseMessageId: string,
+  ): Promise<void> {
+    try {
+      // Persist the reasoning chain
+      const result = await callbacks.kernelRequest('consciousness/persist', {
+        conversation_id: conversationId,
+        user_message_id: userMessageId,
+        response_message_id: responseMessageId,
+      }) as { chain_block_id: string | null; event_count: number; error?: string };
+
+      if (result.error || !result.chain_block_id) {
+        console.warn('Failed to persist consciousness:', result.error);
+        return;
+      }
+
+      // Store state for feedback
+      currentChainBlockId = result.chain_block_id;
+      currentUserMessageId = userMessageId;
+      currentResponseMessageId = responseMessageId;
+      awaitingFeedback = true;
+
+      // Show the feedback row
+      showFeedbackRow();
+
+    } catch (e) {
+      console.error('Failed to persist consciousness:', e);
+    }
+  }
+
   function clearChat(): void {
     state.chatMessages = [];
     chatMessages.innerHTML = '';
@@ -1427,5 +1632,6 @@ export function createCairnView(
     clearChat,
     getChatInput,
     updateSurfaced,
+    persistAndShowFeedback,
   };
 }

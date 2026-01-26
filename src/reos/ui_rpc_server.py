@@ -181,9 +181,17 @@ from .rpc_handlers.consciousness import (
     handle_consciousness_start as _handle_consciousness_start,
     handle_consciousness_poll as _handle_consciousness_poll,
     handle_consciousness_snapshot as _handle_consciousness_snapshot,
+    handle_consciousness_persist as _handle_consciousness_persist,
     handle_cairn_chat_async as _handle_cairn_chat_async,
     handle_cairn_chat_status as _handle_cairn_chat_status,
     handle_handoff_validate_all as _handle_handoff_validate_all,
+)
+
+# Reasoning chain RPC handlers (RLHF feedback system)
+from .rpc_handlers.reasoning import (
+    handle_reasoning_feedback as _handle_reasoning_feedback,
+    handle_reasoning_chain_get as _handle_reasoning_chain_get,
+    handle_reasoning_chains_list as _handle_reasoning_chains_list,
 )
 
 # Execution RPC handlers (extracted to separate module)
@@ -1912,8 +1920,82 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                 ),
             )
 
+        # -------------------------------------------------------------------------
+        # Reasoning Chain & RLHF Feedback (consciousness persistence)
+        # -------------------------------------------------------------------------
 
+        if method == "consciousness/persist":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            conversation_id = params.get("conversation_id")
+            user_message_id = params.get("user_message_id")
+            response_message_id = params.get("response_message_id")
+            act_id = params.get("act_id")
+            if not isinstance(conversation_id, str) or not conversation_id:
+                raise RpcError(code=-32602, message="conversation_id is required")
+            if not isinstance(user_message_id, str) or not user_message_id:
+                raise RpcError(code=-32602, message="user_message_id is required")
+            if not isinstance(response_message_id, str) or not response_message_id:
+                raise RpcError(code=-32602, message="response_message_id is required")
+            if act_id is not None and not isinstance(act_id, str):
+                raise RpcError(code=-32602, message="act_id must be a string or null")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_consciousness_persist(
+                    db,
+                    conversation_id=conversation_id,
+                    user_message_id=user_message_id,
+                    response_message_id=response_message_id,
+                    act_id=act_id,
+                ),
+            )
 
+        if method == "reasoning/feedback":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            chain_block_id = params.get("chain_block_id")
+            rating = params.get("rating")
+            comment = params.get("comment")
+            if not isinstance(chain_block_id, str) or not chain_block_id:
+                raise RpcError(code=-32602, message="chain_block_id is required")
+            if not isinstance(rating, int):
+                raise RpcError(code=-32602, message="rating must be an integer (1 or 5)")
+            if comment is not None and not isinstance(comment, str):
+                raise RpcError(code=-32602, message="comment must be a string or null")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_reasoning_feedback(
+                    db,
+                    chain_block_id=chain_block_id,
+                    rating=rating,
+                    comment=comment,
+                ),
+            )
+
+        if method == "reasoning/chain":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            chain_block_id = params.get("chain_block_id")
+            if not isinstance(chain_block_id, str) or not chain_block_id:
+                raise RpcError(code=-32602, message="chain_block_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_reasoning_chain_get(db, chain_block_id=chain_block_id),
+            )
+
+        if method == "reasoning/list":
+            if not isinstance(params, dict):
+                params = {}
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_reasoning_chains_list(
+                    db,
+                    act_id=params.get("act_id"),
+                    feedback_status=params.get("feedback_status"),
+                    limit=params.get("limit", 50),
+                    offset=params.get("offset", 0),
+                ),
+            )
 
         raise RpcError(code=-32601, message=f"Method not found: {method}")
 

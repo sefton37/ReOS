@@ -156,6 +156,8 @@ class ChatResponse:
     extended_thinking_trace: dict[str, Any] | None = None
     # Additional metadata (intent tracking, etc.)
     metadata: dict[str, Any] | None = None
+    # User message ID (for RLHF feedback tracking)
+    user_message_id: str | None = None
 
 
 class ChatAgent:
@@ -1318,6 +1320,7 @@ class ChatAgent:
             evidence_summary=evidence_summary,
             has_uncertainties=has_uncertainties,
             extended_thinking_trace=extended_thinking_trace,
+            user_message_id=user_message_id,
         )
 
     def respond_text(self, user_text: str) -> str:

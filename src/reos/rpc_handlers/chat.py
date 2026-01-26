@@ -110,6 +110,7 @@ def handle_chat_respond(
         "thinking_steps": response.thinking_steps,
         "pending_approval_id": response.pending_approval_id,
         "extended_thinking_trace": response.extended_thinking_trace,
+        "user_message_id": response.user_message_id,
     }
 
 

@@ -95,6 +95,8 @@ export type ChatRespondResult = {
   };
   // Extended Thinking: Deep reasoning trace for CAIRN
   extended_thinking_trace?: ExtendedThinkingTrace | null;
+  // RLHF: User message ID for feedback tracking
+  user_message_id?: string | null;
 };
 
 // Conversation types

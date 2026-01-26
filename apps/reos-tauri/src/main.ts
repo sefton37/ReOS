@@ -609,6 +609,15 @@ function buildUi() {
           // Use addAssistantMessage to include full response data (thinking steps, tool calls)
           cairnView.addAssistantMessage(statusResult.result);
 
+          // Persist consciousness events and show feedback UI (RLHF)
+          if (statusResult.result.conversation_id && statusResult.result.user_message_id && statusResult.result.message_id) {
+            void cairnView.persistAndShowFeedback(
+              statusResult.result.conversation_id,
+              statusResult.result.user_message_id,
+              statusResult.result.message_id,
+            );
+          }
+
           // Refresh attention items after CAIRN chat - beat moves may have changed act assignments
           void refreshAttentionItems();
         } else if (statusResult.status === 'error') {
