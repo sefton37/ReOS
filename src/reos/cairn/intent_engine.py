@@ -42,6 +42,7 @@ class IntentCategory(Enum):
     KNOWLEDGE = auto()     # Knowledge base questions
     PLAY = auto()          # The Play hierarchy (Acts, Scenes, Beats)
     UNDO = auto()          # User wants to undo/revert last action
+    FEEDBACK = auto()      # Meta-commentary about CAIRN's responses
     UNKNOWN = auto()       # Cannot determine
 
 
@@ -111,6 +112,11 @@ INTENT_PATTERNS: dict[IntentCategory, list[str]] = {
     IntentCategory.PERSONAL: [
         "about me", "my goals", "my values", "who am i",
         "my story", "my identity", "tell me about myself",
+        # Response formatting preferences
+        "be more", "be less", "shorter", "longer", "brief",
+        "verbose", "concise", "detailed", "bullet points",
+        "format your", "formatting of your", "your response",
+        "your answer", "how you respond", "the way you",
     ],
     IntentCategory.PLAY: [
         # Acts
@@ -141,6 +147,31 @@ INTENT_PATTERNS: dict[IntentCategory, list[str]] = {
         "i didn't mean", "didn't mean that", "that was wrong", "wrong one",
         "take it back", "take that back",
     ],
+    IntentCategory.FEEDBACK: [
+        # Repetition complaints
+        "repeating yourself", "you already said", "said that already",
+        "you just said", "same thing", "same answer",
+        # Correction/disagreement
+        "that's not what", "not what i meant", "not what i asked",
+        "wrong answer", "incorrect", "misunderstood",
+        "bad assumption", "wrong assumption",
+        # Quality feedback
+        "that was helpful", "that was good", "that was bad",
+        "not helpful", "confusing", "makes no sense",
+        # Meta about CAIRN behavior
+        "why did you", "why are you", "stop doing that",
+        "don't do that", "you should", "you shouldn't",
+    ],
+}
+
+# Code-related nouns that indicate actual code intent (not just "formatting")
+CODE_INDICATOR_NOUNS = {
+    "code", "function", "class", "method", "variable", "file",
+    "script", "program", "module", "package", "library", "api",
+    "bug", "error", "exception", "debug", "test", "compile",
+    "syntax", "logic", "algorithm", "loop", "array", "string",
+    "python", "javascript", "rust", "java", "html", "css", "sql",
+    "git", "commit", "branch", "merge", "repo", "repository",
 }
 
 # Tool mappings for each category (default tool - may be refined in _verify_intent)
@@ -158,6 +189,9 @@ CATEGORY_TOOLS: dict[IntentCategory, str] = {
 class CairnIntentEngine:
     """Multi-stage intent processing for CAIRN."""
 
+    # Maximum number of recent responses to track for repetition detection
+    MAX_RESPONSE_HISTORY = 5
+
     def __init__(
         self,
         llm: LLMProvider,
@@ -174,6 +208,9 @@ class CairnIntentEngine:
         self.llm = llm
         self.available_tools = available_tools or set()
         self.play_data = play_data or {}
+        # Conversation memory: track recent responses to avoid repetition
+        self._response_history: list[str] = []
+        self._last_intent_category: IntentCategory | None = None
 
     def process(
         self,
@@ -296,6 +333,23 @@ class CairnIntentEngine:
         for category, patterns in INTENT_PATTERNS.items():
             for pattern in patterns:
                 if pattern in user_lower:
+                    # Special handling for CODE category: require code-related nouns
+                    # to avoid misclassifying "formatting" as code
+                    if category == IntentCategory.CODE:
+                        words = set(user_lower.split())
+                        has_code_noun = bool(words & CODE_INDICATOR_NOUNS)
+                        if not has_code_noun:
+                            # No code nouns - this might be about response formatting
+                            # Check if it's about CAIRN's responses (PERSONAL preference)
+                            if any(p in user_lower for p in [
+                                "your response", "your answer", "the way you",
+                                "how you respond", "formatting of your",
+                            ]):
+                                category = IntentCategory.PERSONAL
+                            else:
+                                # Skip CODE, let it fall through to other categories or LLM
+                                continue
+
                     # Determine action based on common verbs
                     action = IntentAction.VIEW  # Default
                     if any(w in user_lower for w in ["create", "add", "new", "make"]):
@@ -334,7 +388,7 @@ class CairnIntentEngine:
 
 Return ONLY a JSON object with these fields:
 {
-    "category": "CALENDAR|CONTACTS|SYSTEM|CODE|TASKS|PERSONAL|KNOWLEDGE|UNDO|UNKNOWN",
+    "category": "CALENDAR|CONTACTS|SYSTEM|CODE|TASKS|PERSONAL|KNOWLEDGE|UNDO|FEEDBACK|UNKNOWN",
     "action": "VIEW|SEARCH|CREATE|UPDATE|DELETE|STATUS|UNKNOWN",
     "target": "what they're asking about (string)",
     "confidence": 0.0-1.0,
@@ -345,13 +399,18 @@ Categories:
 - CALENDAR: Questions about schedule, events, appointments, meetings
 - CONTACTS: Questions about people, contacts, phone numbers, emails
 - SYSTEM: Questions about computer, CPU, memory, disk, processes, services
-- CODE: Questions about programming, development, code
+- CODE: Questions about programming, development, code (ONLY if they mention
+        actual code things like functions, files, bugs, syntax - NOT just "formatting")
 - TASKS: Questions about todos, tasks, reminders, deadlines
-- PERSONAL: Questions about the user themselves (identity, goals, values)
+- PERSONAL: Questions about the user themselves (identity, goals, values),
+            OR preferences about how you should respond (formatting, brevity, style)
 - KNOWLEDGE: Questions about stored knowledge, notes, projects
 - UNDO: User wants to undo, revert, or reverse their last action
         (e.g., "undo that", "put it back", "go back", "revert", "nevermind",
          "I didn't mean that", "cancel that", "take it back")
+- FEEDBACK: Meta-commentary about YOUR responses or behavior
+        (e.g., "you're repeating yourself", "that's wrong", "not what I meant",
+         "that was helpful", "confusing", "why did you say that")
 - UNKNOWN: Cannot determine
 
 Actions:
@@ -409,6 +468,15 @@ Be precise. Output ONLY valid JSON."""
                 verified=True,
                 tool_name=None,  # No tool needed
                 reason="Personal questions answered from THE_PLAY context",
+            )
+
+        # For FEEDBACK category, no tool needed - acknowledge and adjust
+        if intent.category == IntentCategory.FEEDBACK:
+            return VerifiedIntent(
+                intent=intent,
+                verified=True,
+                tool_name=None,  # No tool needed
+                reason="Meta-feedback about CAIRN behavior",
             )
 
         # Check if the tool is available
@@ -942,6 +1010,10 @@ IMPORTANT:
         if not verified_intent.verified:
             return verified_intent.fallback_message or "I couldn't process that request.", []
 
+        # Handle FEEDBACK category - meta-commentary about CAIRN's responses
+        if verified_intent.intent.category == IntentCategory.FEEDBACK:
+            return self._handle_feedback(verified_intent.intent), []
+
         # Build a strict prompt that prevents hallucination
         system = f"""You are CAIRN, the Attention Minder. Generate a response based STRICTLY on the data provided.
 
@@ -1038,6 +1110,21 @@ No data was retrieved. Explain that you couldn't get the requested information."
                 return clarification, thinking + [f"[Clarification needed: {rejection_reason}]"]
 
             print(f"[INTENT] Stage 5: Response verified OK", file=sys.stderr)
+
+            # Stage 6: Check for repetition
+            if self._is_response_repetitive(response):
+                print(f"[INTENT] Stage 6: Detected repetitive response, adjusting", file=sys.stderr)
+                # Instead of repeating, acknowledge and offer alternatives
+                response = (
+                    "I realize I may be covering similar ground. "
+                    "Is there something specific you'd like me to focus on, "
+                    "or would you like to try a different question?"
+                )
+
+            # Track this response for future repetition detection
+            self._track_response(response)
+            self._last_intent_category = verified_intent.intent.category
+
             return response, thinking
 
         except Exception as e:
@@ -1098,6 +1185,97 @@ No data was retrieved. Explain that you couldn't get the requested information."
             f"I'm not sure I understood correctly. You wanted to {action} something "
             f"related to {category}. Could you rephrase that or provide more details?"
         )
+
+    def _handle_feedback(self, intent: ExtractedIntent) -> str:
+        """Handle meta-feedback about CAIRN's responses.
+
+        This handles comments like "you're repeating yourself" or
+        "that's not what I meant" with appropriate acknowledgment.
+        """
+        user_lower = intent.raw_input.lower()
+
+        # Repetition complaints
+        if any(p in user_lower for p in [
+            "repeating", "same thing", "same answer", "already said",
+            "you just said",
+        ]):
+            return (
+                "You're right, I apologize for repeating myself. "
+                "Let me try a different approach. What would you like to know or do?"
+            )
+
+        # Misunderstanding complaints
+        if any(p in user_lower for p in [
+            "not what i meant", "not what i asked", "misunderstood",
+            "wrong", "incorrect", "bad assumption",
+        ]):
+            return (
+                "I apologize for the misunderstanding. "
+                "Could you rephrase what you're looking for? "
+                "I want to make sure I help you correctly this time."
+            )
+
+        # Quality complaints
+        if any(p in user_lower for p in [
+            "not helpful", "confusing", "makes no sense",
+        ]):
+            return (
+                "I'm sorry my response wasn't helpful. "
+                "Let me try again - what specifically would you like me to help with?"
+            )
+
+        # Positive feedback
+        if any(p in user_lower for p in [
+            "helpful", "good", "great", "thanks", "thank you",
+        ]):
+            return "I'm glad I could help! Is there anything else you'd like to know?"
+
+        # Generic feedback acknowledgment
+        return (
+            "Thank you for the feedback. I'll try to do better. "
+            "How can I help you?"
+        )
+
+    def _is_response_repetitive(self, response: str) -> bool:
+        """Check if a response is too similar to recent responses.
+
+        Uses simple text similarity to detect near-duplicate responses.
+        """
+        if not self._response_history:
+            return False
+
+        # Normalize response for comparison
+        response_normalized = response.lower().strip()
+
+        for past_response in self._response_history:
+            past_normalized = past_response.lower().strip()
+
+            # Check for exact or near-exact match
+            if response_normalized == past_normalized:
+                return True
+
+            # Check for high overlap (simple word-based similarity)
+            response_words = set(response_normalized.split())
+            past_words = set(past_normalized.split())
+
+            if len(response_words) > 5 and len(past_words) > 5:
+                # Calculate Jaccard similarity
+                intersection = len(response_words & past_words)
+                union = len(response_words | past_words)
+                similarity = intersection / union if union > 0 else 0
+
+                # If more than 80% similar, it's repetitive
+                if similarity > 0.8:
+                    return True
+
+        return False
+
+    def _track_response(self, response: str) -> None:
+        """Track a response in history for repetition detection."""
+        self._response_history.append(response)
+        # Keep only the most recent responses
+        if len(self._response_history) > self.MAX_RESPONSE_HISTORY:
+            self._response_history.pop(0)
 
     def _verify_no_hallucination(
         self,

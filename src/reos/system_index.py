@@ -879,7 +879,7 @@ class SystemIndexer:
                     embedding_bytes = embeddings[j].tobytes()
                     conn.execute(
                         """
-                        INSERT INTO semantic_embeddings
+                        INSERT OR REPLACE INTO semantic_embeddings
                         (id, source_type, name, description, embedding, indexed_at)
                         VALUES (?, ?, ?, ?, ?, ?)
                         """,
@@ -941,7 +941,7 @@ class SystemIndexer:
                 embedding_bytes = embeddings[i].tobytes()
                 conn.execute(
                     """
-                    INSERT INTO semantic_embeddings
+                    INSERT OR REPLACE INTO semantic_embeddings
                     (id, source_type, name, description, embedding, indexed_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
