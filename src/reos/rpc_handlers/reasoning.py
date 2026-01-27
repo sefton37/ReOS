@@ -1,11 +1,13 @@
 """Reasoning chain RPC handlers for RLHF feedback system.
 
 These handlers manage reasoning chains and user feedback for training data collection.
+Feedback triggers memory learning to strengthen/weaken relationships.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,6 +16,8 @@ from reos.play import blocks_db
 from reos.play.blocks_models import BlockType
 
 from . import RpcError
+
+logger = logging.getLogger(__name__)
 
 
 def handle_reasoning_feedback(
@@ -56,11 +60,36 @@ def handle_reasoning_feedback(
     if comment:
         blocks_db.set_block_property(chain_block_id, "feedback_comment", comment)
 
+    # Trigger memory learning from feedback
+    # This strengthens relationships for positive feedback, weakens for negative
+    memory_changes: list[dict[str, Any]] = []
+    try:
+        from reos.memory import MemoryGraphStore
+        from reos.memory.extractor import RelationshipExtractor
+
+        graph_store = MemoryGraphStore()
+        extractor = RelationshipExtractor(graph_store=graph_store)
+        memory_changes = extractor.extract_from_feedback(
+            chain_block_id,
+            rating,
+            corrected_block_id=None,  # No correction provided via simple UI
+        )
+        logger.info(
+            "Memory learning from feedback: chain=%s rating=%d changes=%d",
+            chain_block_id,
+            rating,
+            len(memory_changes),
+        )
+    except Exception as e:
+        # Don't fail the feedback if memory learning has issues
+        logger.warning("Memory learning failed for feedback: %s", e)
+
     return {
         "ok": True,
         "chain_block_id": chain_block_id,
         "feedback_status": feedback_status,
         "feedback_timestamp": feedback_timestamp,
+        "memory_changes": len(memory_changes),
     }
 
 

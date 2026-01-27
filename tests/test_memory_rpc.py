@@ -686,3 +686,85 @@ class TestMemoryStatsHandler:
         assert "relationships_by_type" in result
         assert result["total_relationships"] >= 1
         assert result["total_embeddings"] >= 1
+
+
+# =============================================================================
+# Reasoning Feedback Integration Tests
+# =============================================================================
+
+
+class TestReasoningFeedbackMemoryIntegration:
+    """Test that reasoning/feedback triggers memory learning."""
+
+    def test_positive_feedback_triggers_memory_learning(
+        self, initialized_db, test_act
+    ) -> None:
+        """Positive feedback via reasoning/feedback strengthens memory relationships."""
+        from reos.play.blocks_db import create_block
+        from reos.play.blocks_models import BlockType
+        from reos.rpc_handlers.reasoning import handle_reasoning_feedback
+        from reos.rpc_handlers.memory import handle_memory_relationships_create
+
+        # Create a reasoning chain
+        chain = create_block(
+            type=BlockType.REASONING_CHAIN,
+            act_id=test_act,
+            rich_text=[{"content": "Test reasoning chain"}],
+        )
+
+        # Create a target block and relationship
+        target = create_block(
+            type=BlockType.PARAGRAPH,
+            act_id=test_act,
+            rich_text=[{"content": "Related knowledge"}],
+        )
+
+        # Create a relationship from chain to target
+        handle_memory_relationships_create(
+            initialized_db,
+            source_id=chain.id,
+            target_id=target.id,
+            rel_type="references",
+            confidence=0.5,  # Starting confidence
+        )
+
+        # Submit positive feedback via reasoning/feedback RPC
+        result = handle_reasoning_feedback(
+            initialized_db,
+            chain_block_id=chain.id,
+            rating=5,  # Thumbs up
+        )
+
+        # Verify feedback was stored
+        assert result["ok"] is True
+        assert result["feedback_status"] == "positive"
+        # Verify memory learning was triggered
+        assert "memory_changes" in result
+
+    def test_negative_feedback_triggers_memory_learning(
+        self, initialized_db, test_act
+    ) -> None:
+        """Negative feedback via reasoning/feedback triggers memory learning."""
+        from reos.play.blocks_db import create_block
+        from reos.play.blocks_models import BlockType
+        from reos.rpc_handlers.reasoning import handle_reasoning_feedback
+
+        # Create a reasoning chain
+        chain = create_block(
+            type=BlockType.REASONING_CHAIN,
+            act_id=test_act,
+            rich_text=[{"content": "Test reasoning chain with bad response"}],
+        )
+
+        # Submit negative feedback
+        result = handle_reasoning_feedback(
+            initialized_db,
+            chain_block_id=chain.id,
+            rating=1,  # Thumbs down
+        )
+
+        # Verify feedback was stored
+        assert result["ok"] is True
+        assert result["feedback_status"] == "negative"
+        # Verify memory learning was triggered
+        assert "memory_changes" in result
