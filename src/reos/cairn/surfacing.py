@@ -194,7 +194,17 @@ class CairnSurfacer:
         """
         candidates: list[SurfacedItem] = []
 
-        # 1. Sync calendar events to Scenes (creates Scenes for new events)
+        # 1a. ALWAYS refresh next_occurrence for recurring scenes (regardless of Thunderbird)
+        # This ensures recurring events don't become stale and disappear from the UI
+        try:
+            from reos.cairn.scene_calendar_sync import _refresh_all_recurring_scenes_in_db
+            refreshed = _refresh_all_recurring_scenes_in_db()
+            if refreshed > 0:
+                logger.debug("Refreshed next_occurrence for %d recurring scenes", refreshed)
+        except Exception as e:
+            logger.warning("Failed to refresh recurring scenes: %s", e)
+
+        # 1b. Sync calendar events to Scenes (creates Scenes for new events) - requires Thunderbird
         if self.thunderbird:
             try:
                 from reos.cairn.scene_calendar_sync import sync_calendar_to_scenes
@@ -261,9 +271,12 @@ class CairnSurfacer:
             if scene_info.get("next_occurrence"):
                 next_occ = datetime.fromisoformat(scene_info["next_occurrence"]) if isinstance(scene_info["next_occurrence"], str) else scene_info["next_occurrence"]
 
-            # Get scene location from CANONICAL source (play_fs), not stale CAIRN cache
-            scene_location = find_scene_location(scene_info["scene_id"])
-            act_id = scene_location["act_id"] if scene_location else None
+            # Use act_id from the SQL query (already canonical from play.db)
+            # Fallback to find_scene_location only if act_id is missing
+            act_id = scene_info.get("act_id")
+            if not act_id:
+                scene_location = find_scene_location(scene_info["scene_id"])
+                act_id = scene_location["act_id"] if scene_location else None
 
             candidates.append(
                 SurfacedItem(

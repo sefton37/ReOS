@@ -24,6 +24,8 @@ dependencies = [
   "tenacity>=8.2.0,<10.0.0",        # Retry with exponential backoff
   # Markdown parsing for block editor
   "mistletoe>=1.3.0,<2.0.0",        # Markdown -> AST parser
+  # Calendar recurrence computation
+  "python-dateutil>=2.8.0,<3.0.0", # RRULE parsing for recurring events
 ]
 
 [project.optional-dependencies]
