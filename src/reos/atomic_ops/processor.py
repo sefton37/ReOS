@@ -3,7 +3,7 @@
 This module orchestrates the full atomic operations pipeline:
 1. Feature extraction from user requests
 2. Classification into 3x2x3 taxonomy
-3. Decomposition of complex requests
+3. Decomposition of complex requests (LLM-based)
 4. Storage of operations for verification
 
 This is the primary interface for agents (CAIRN, ReOS, RIVA) to
@@ -14,13 +14,19 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional, Protocol
 
 from .classifier import AtomicClassifier, ClassificationConfig
 from .decomposer import AtomicDecomposer, DecompositionResult
 from .features import FeatureExtractor
 from .models import AtomicOperation, OperationStatus
 from .schema import AtomicOpsStore
+
+
+class LLMProvider(Protocol):
+    """Protocol for LLM providers."""
+    def chat_json(self, system: str, user: str, temperature: float = 0.1, top_p: float = 0.9) -> str:
+        ...
 
 
 @dataclass
@@ -57,6 +63,7 @@ class AtomicOpsProcessor:
         conn: sqlite3.Connection,
         classifier_config: Optional[ClassificationConfig] = None,
         auto_init_embeddings: bool = True,
+        llm: Optional[LLMProvider] = None,
     ):
         """Initialize the processor.
 
@@ -64,8 +71,10 @@ class AtomicOpsProcessor:
             conn: SQLite database connection.
             classifier_config: Optional classifier configuration.
             auto_init_embeddings: Whether to auto-initialize sentence-transformers.
+            llm: Optional LLM provider for semantic decomposition.
         """
         self.store = AtomicOpsStore(conn)
+        self.llm = llm
 
         # Initialize feature extractor
         self.feature_extractor = FeatureExtractor()
@@ -76,8 +85,8 @@ class AtomicOpsProcessor:
             feature_extractor=self.feature_extractor,
         )
 
-        # Initialize decomposer
-        self.decomposer = AtomicDecomposer(classifier=self.classifier)
+        # Initialize decomposer with LLM for semantic decomposition
+        self.decomposer = AtomicDecomposer(classifier=self.classifier, llm=llm)
 
         # Track embedding initialization status
         self._embeddings_initialized = False

@@ -657,13 +657,30 @@ Be precise. Output ONLY valid JSON."""
                 args["title"] = title
 
         if tool_name == "cairn_update_scene":
-            # Extract scene name and new title
-            scene_name = self._extract_scene_name(intent.raw_input)
-            new_title = self._extract_new_title(intent.raw_input)
-            if scene_name:
-                args["scene_name"] = scene_name
-            if new_title:
-                args["new_title"] = new_title
+            # Check if this is a move operation (updating act_id)
+            user_lower = intent.raw_input.lower()
+            move_patterns = [
+                "should be moved", "move to", "moved to", "should be in",
+                "belongs to", "put in", "wrong act", "different act",
+            ]
+            is_move = any(p in user_lower for p in move_patterns)
+
+            if is_move:
+                # Extract scene move args (scene_name, act_name, new_act_name)
+                move_args = self._extract_scene_move_args(intent.raw_input)
+                args.update(move_args)
+            else:
+                # Standard update: just scene_name and new_title
+                scene_name = self._extract_scene_name(intent.raw_input)
+                new_title = self._extract_new_title(intent.raw_input)
+                if scene_name:
+                    args["scene_name"] = scene_name
+                if new_title:
+                    args["new_title"] = new_title
+                # Also try to get act_name for context
+                act_name = self._extract_act_name(intent.raw_input)
+                if act_name:
+                    args["act_name"] = act_name
 
         if tool_name == "cairn_delete_scene":
             # Extract scene name
@@ -991,6 +1008,114 @@ IMPORTANT:
             args["beat_name"] = beat_candidates[0]
         if act_candidates:
             args["target_act_name"] = act_candidates[0]
+
+        return args
+
+    def _extract_scene_move_args(self, user_input: str) -> dict[str, Any]:
+        """Extract scene_name, act_name (source), and new_act_name (target) for move operations.
+
+        Uses LLM-based extraction with Play context to understand natural language
+        like "The X scene should be moved to Y" or "Move X to the Y act".
+        """
+        import sys
+
+        # PRIMARY: LLM-based extraction using Play context
+        if self.play_data and (self.play_data.get("acts") or self.play_data.get("all_scenes")):
+            print(f"[INTENT] Using LLM extraction for scene move", file=sys.stderr)
+            llm_args = self._llm_extract_scene_move_args(user_input)
+            if llm_args.get("scene_name") and llm_args.get("new_act_name"):
+                print(f"[INTENT] LLM extracted scene move: scene={llm_args.get('scene_name')!r}, "
+                      f"from={llm_args.get('act_name')!r}, to={llm_args.get('new_act_name')!r}", file=sys.stderr)
+                return llm_args
+            print(f"[INTENT] LLM extraction incomplete, trying regex fallback", file=sys.stderr)
+
+        # FALLBACK: Regex-based extraction
+        return self._regex_extract_scene_move_args(user_input)
+
+    def _llm_extract_scene_move_args(self, user_input: str) -> dict[str, Any]:
+        """Use LLM with Play context to extract scene move arguments."""
+        # Build context about available acts and scenes
+        acts_list = self.play_data.get("acts", [])
+        scenes_list = self.play_data.get("all_scenes", [])
+
+        act_names = [a["title"] for a in acts_list]
+        scene_info = [f"'{s['title']}' (in {s.get('act_title', 'unknown')} act)" for s in scenes_list[:30]]
+
+        system = f"""You are an ENTITY EXTRACTOR. Extract the scene name, source act, and target act from the user's move request.
+
+AVAILABLE ACTS in The Play:
+{json.dumps(act_names, indent=2)}
+
+EXISTING SCENES:
+{chr(10).join(scene_info) if scene_info else "No scenes yet"}
+
+The user wants to move a scene to a different act. Extract:
+1. scene_name: The title of the scene being moved (match from EXISTING SCENES if possible)
+2. act_name: The current act containing the scene (look up from EXISTING SCENES, may be implicit)
+3. new_act_name: The target act to move to (match from AVAILABLE ACTS)
+
+Return ONLY a JSON object:
+{{"scene_name": "exact scene title", "act_name": "source act title or null", "new_act_name": "target act title"}}
+
+IMPORTANT:
+- Match to existing entities using fuzzy matching
+- "Career act" → "Career"
+- If source act_name is not mentioned but can be inferred from scene list, include it
+- Never include "act" or "scene" as part of the name itself
+- If multiple scenes match, pick the most likely one from context"""
+
+        user = f"USER REQUEST: {user_input}"
+
+        try:
+            raw = self.llm.chat_json(system=system, user=user, temperature=0.1, top_p=0.9)
+            data = json.loads(raw)
+            result = {
+                "scene_name": data.get("scene_name", "").strip() if data.get("scene_name") else None,
+                "new_act_name": data.get("new_act_name", "").strip() if data.get("new_act_name") else None,
+            }
+            # Only include act_name if provided (optional for tool, will be inferred)
+            if data.get("act_name"):
+                result["act_name"] = data.get("act_name", "").strip()
+            return result
+        except (json.JSONDecodeError, Exception) as e:
+            import sys
+            print(f"[INTENT] LLM scene move extraction failed: {e}", file=sys.stderr)
+            return {}
+
+    def _regex_extract_scene_move_args(self, user_input: str) -> dict[str, Any]:
+        """Regex-based extraction for scene moves as fallback."""
+        user_lower = user_input.lower()
+        args: dict[str, Any] = {}
+
+        # Pattern 1: "The X scene(s) should be moved to Y"
+        match = re.search(
+            r"(?:the\s+)?(.+?)\s+scenes?\s+(?:should be|should go|needs? to be)\s+(?:moved\s+)?(?:to|in)\s+(?:the\s+)?(.+?)(?:\s+act)?(?:,|\.|$)",
+            user_lower
+        )
+        if match:
+            args["scene_name"] = match.group(1).strip()
+            args["new_act_name"] = match.group(2).strip()
+            return args
+
+        # Pattern 2: "move X scene to Y"
+        match = re.search(
+            r"move\s+(?:the\s+)?(.+?)\s+(?:scene\s+)?(?:to|into)\s+(?:the\s+)?(.+?)(?:\s+act)?(?:,|\.|$)",
+            user_lower
+        )
+        if match:
+            args["scene_name"] = match.group(1).strip()
+            args["new_act_name"] = match.group(2).strip()
+            return args
+
+        # Pattern 3: "X belongs in Y"
+        match = re.search(
+            r"(.+?)\s+(?:belongs|should be)\s+(?:in|to)\s+(?:the\s+)?(.+?)(?:\s+act)?(?:,|\.|$)",
+            user_lower
+        )
+        if match:
+            args["scene_name"] = match.group(1).strip()
+            args["new_act_name"] = match.group(2).strip()
+            return args
 
         return args
 

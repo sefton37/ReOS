@@ -190,6 +190,72 @@ def list_ollama_models(
     return out
 
 
+@dataclass(frozen=True)
+class OllamaModelDetails:
+    """Detailed model information from Ollama."""
+
+    name: str
+    parameter_size: str | None
+    quantization_level: str | None
+    family: str | None
+    size_bytes: int | None
+    modified_at: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for RPC responses."""
+        return {
+            "name": self.name,
+            "parameter_size": self.parameter_size,
+            "quantization": self.quantization_level,
+            "family": self.family,
+            "size_bytes": self.size_bytes,
+            "modified_at": self.modified_at,
+        }
+
+
+def list_ollama_models_detailed(
+    *,
+    url: str | None = None,
+    timeout_seconds: float = TIMEOUTS.OLLAMA_MODELS,
+) -> list[OllamaModelDetails]:
+    """List available Ollama models with detailed information.
+
+    Returns full model info from /api/tags including parameter_size,
+    quantization_level, and family from the Ollama response.
+    """
+    base = (url or settings.ollama_url).rstrip("/")
+    url_tags = base + "/api/tags"
+
+    with httpx.Client(timeout=timeout_seconds) as client:
+        res = client.get(url_tags)
+        res.raise_for_status()
+        payload = res.json()
+        models = payload.get("models") or []
+
+    out: list[OllamaModelDetails] = []
+    if isinstance(models, list):
+        for m in models:
+            if not isinstance(m, dict):
+                continue
+            name = m.get("name")
+            if not isinstance(name, str):
+                continue
+
+            details = m.get("details", {})
+            if not isinstance(details, dict):
+                details = {}
+
+            out.append(OllamaModelDetails(
+                name=name,
+                parameter_size=details.get("parameter_size"),
+                quantization_level=details.get("quantization_level"),
+                family=details.get("family"),
+                size_bytes=m.get("size"),
+                modified_at=m.get("modified_at"),
+            ))
+    return out
+
+
 def _default_model(timeout_seconds: float = TIMEOUTS.OLLAMA_MODELS) -> str:
     """Get the default model (from settings or first available)."""
     if settings.ollama_model:

@@ -877,7 +877,27 @@ def kb_read(*, act_id: str, scene_id: str | None = None, beat_id: str | None = N
     target = _resolve_kb_file(kb_root=kb_root, rel_path=path)
     if not target.exists():
         if Path(path).as_posix() == "kb.md":
-            target.write_text("# KB\n\n", encoding="utf-8")
+            # Use special welcome content for Your Story
+            if act_id == YOUR_STORY_ACT_ID and scene_id is None:
+                default_content = """\
+# Your Story
+
+Welcome to The Play.
+
+The Play organizes your life into **Acts**—ongoing narratives like Career, Health, or Learning. Each Act is a knowledge base for that area of your life.
+
+This is **Your Story**—the autobiographical entry point. Use it to capture:
+
+- Your background and experience
+- Core values and principles
+- Writing samples and resume content
+- Anything that defines who you are
+
+Select an Act from the sidebar to focus on a specific narrative, or start writing here to build your story.
+"""
+                target.write_text(default_content, encoding="utf-8")
+            else:
+                target.write_text("# KB\n\n", encoding="utf-8")
         else:
             raise FileNotFoundError(path)
     return target.read_text(encoding="utf-8", errors="replace")

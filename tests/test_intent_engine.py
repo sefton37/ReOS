@@ -86,7 +86,7 @@ class TestIntentEnums:
         """All expected categories are defined."""
         expected = [
             "CALENDAR", "CONTACTS", "SYSTEM", "CODE", "PERSONAL",
-            "TASKS", "KNOWLEDGE", "PLAY", "UNDO", "CONVERSATION", "UNKNOWN",
+            "TASKS", "KNOWLEDGE", "PLAY", "UNDO", "FEEDBACK", "UNKNOWN",
         ]
         actual = [c.name for c in IntentCategory]
         assert set(expected) == set(actual)
@@ -95,7 +95,7 @@ class TestIntentEnums:
         """All expected actions are defined."""
         expected = [
             "VIEW", "SEARCH", "CREATE", "UPDATE", "DELETE",
-            "STATUS", "DISCUSS", "UNKNOWN",
+            "STATUS", "UNKNOWN",
         ]
         actual = [a.name for a in IntentAction]
         assert set(expected) == set(actual)
@@ -129,11 +129,11 @@ class TestIntentPatterns:
         assert "undo" in patterns
         assert "revert" in patterns
 
-    def test_conversation_patterns_exist(self) -> None:
-        """Conversation category has patterns."""
-        patterns = INTENT_PATTERNS.get(IntentCategory.CONVERSATION, [])
-        assert any("brainstorm" in p for p in patterns)
-        assert any("what do you think" in p for p in patterns)
+    def test_feedback_patterns_exist(self) -> None:
+        """Feedback category has patterns."""
+        patterns = INTENT_PATTERNS.get(IntentCategory.FEEDBACK, [])
+        assert any("repeating" in p for p in patterns)
+        assert any("not what i" in p for p in patterns)
 
 
 # =============================================================================
@@ -282,13 +282,13 @@ class TestIntentVerification:
         assert verified.verified is True
         assert verified.tool_name is None
 
-    def test_verify_conversation_no_tool(self, intent_engine: CairnIntentEngine) -> None:
-        """Conversation category uses reasoning, not tools."""
+    def test_verify_feedback_no_tool(self, intent_engine: CairnIntentEngine) -> None:
+        """Feedback category uses direct handling, not tools."""
         intent = ExtractedIntent(
-            category=IntentCategory.CONVERSATION,
-            action=IntentAction.DISCUSS,
-            target="ideas",
-            raw_input="What do you think about AI?",
+            category=IntentCategory.FEEDBACK,
+            action=IntentAction.UNKNOWN,
+            target="response quality",
+            raw_input="You're repeating yourself",
         )
 
         verified = intent_engine._verify_intent(intent)

@@ -5,17 +5,26 @@ contains multiple distinct actions, it should be decomposed into
 atomic operations that can each be classified and verified independently.
 
 Core principle: "If you can't verify it, decompose it."
+
+Uses LLM-based inference for decomposition detection and splitting.
+No regex patterns - pure semantic understanding.
 """
 
 from __future__ import annotations
 
-import re
+import json
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional, Protocol
 from uuid import uuid4
 
 from .classifier import AtomicClassifier, ClassificationResult
 from .models import AtomicOperation, OperationStatus
+
+
+class LLMProvider(Protocol):
+    """Protocol for LLM providers."""
+    def chat_json(self, system: str, user: str, temperature: float = 0.1, top_p: float = 0.9) -> str:
+        ...
 
 
 @dataclass
@@ -26,43 +35,36 @@ class DecompositionResult:
     operations: list[AtomicOperation]
     reasoning: str
     confidence: float
-
-
-# Patterns that suggest multiple operations
-MULTI_OP_PATTERNS = [
-    r'\bthen\b',           # "do X then Y"
-    r'\band\s+(?:then\s+)?', # "X and Y" or "X and then Y"
-    r'\bafter\s+that\b',    # "do X, after that Y"
-    r'\bfirst\b.*\bthen\b', # "first X, then Y"
-    r'\balso\b',            # "X, also Y"
-    r'[;]',                 # semicolon separator
-    r'\d+\.\s+',            # numbered list "1. X 2. Y"
-]
-
-# Conjunctions that connect independent clauses
-CLAUSE_SEPARATORS = [
-    ", then ", " then ", " and then ",
-    "; ", " after that ", " also ",
-    " followed by ", " next ",
-]
+    needs_clarification: bool = False
+    clarification_prompt: str | None = None
 
 
 class AtomicDecomposer:
     """Decompose complex requests into atomic operations.
 
-    Strategies:
-    1. Pattern-based splitting (conjunctions, numbered lists)
-    2. Semantic analysis for implicit multi-step requests
-    3. Confidence-based decomposition triggers
+    Uses LLM-based inference to understand:
+    1. Whether a request contains multiple distinct operations
+    2. How to split the request into atomic units
+    3. When clarification is needed due to ambiguity
+
+    The atomic structure is recursive - when uncertain, we decompose
+    further until we reach atomic units that can be verified with
+    high confidence.
     """
 
-    def __init__(self, classifier: Optional[AtomicClassifier] = None):
+    def __init__(
+        self,
+        classifier: Optional[AtomicClassifier] = None,
+        llm: Optional[LLMProvider] = None,
+    ):
         """Initialize decomposer.
 
         Args:
             classifier: Classifier for sub-operation classification.
+            llm: LLM provider for semantic decomposition.
         """
         self.classifier = classifier or AtomicClassifier()
+        self.llm = llm
 
     def decompose(
         self,
@@ -74,6 +76,10 @@ class AtomicDecomposer:
     ) -> DecompositionResult:
         """Decompose a request into atomic operations.
 
+        Uses LLM to understand whether decomposition is needed and how
+        to split the request. If uncertain, returns needs_clarification
+        so the atomic verification pipeline can handle disambiguation.
+
         Args:
             request: User's natural language request.
             user_id: User identifier.
@@ -84,10 +90,35 @@ class AtomicDecomposer:
         Returns:
             DecompositionResult with atomic operations.
         """
-        # Check if decomposition is needed
-        needs_split = force_decomposition or self._needs_decomposition(request)
+        # Use LLM to analyze the request
+        analysis = self._analyze_request(request)
 
-        if not needs_split:
+        # If LLM is uncertain, signal clarification needed
+        if analysis.get("needs_clarification") and analysis.get("confidence", 1.0) < 0.7:
+            # Create a placeholder operation that signals clarification needed
+            op = AtomicOperation(
+                id=str(uuid4()),
+                user_request=request,
+                user_id=user_id,
+                source_agent=source_agent,
+                parent_id=parent_id,
+                status=OperationStatus.AWAITING_VERIFICATION,
+            )
+
+            return DecompositionResult(
+                original_request=request,
+                decomposed=False,
+                operations=[op],
+                reasoning=analysis.get("reasoning", "Uncertain decomposition"),
+                confidence=analysis.get("confidence", 0.5),
+                needs_clarification=True,
+                clarification_prompt=analysis.get("clarification_prompt"),
+            )
+
+        needs_split = force_decomposition or analysis.get("needs_decomposition", False)
+        sub_requests = analysis.get("sub_requests", [request])
+
+        if not needs_split or len(sub_requests) <= 1:
             # Single operation - classify and return
             classification_result = self.classifier.classify(request)
 
@@ -105,32 +136,7 @@ class AtomicDecomposer:
                 original_request=request,
                 decomposed=False,
                 operations=[op],
-                reasoning="Single atomic operation",
-                confidence=classification_result.classification.confidence,
-            )
-
-        # Split into sub-requests
-        sub_requests = self._split_request(request)
-
-        if len(sub_requests) <= 1:
-            # Splitting didn't produce multiple operations
-            classification_result = self.classifier.classify(request)
-
-            op = AtomicOperation(
-                id=str(uuid4()),
-                user_request=request,
-                user_id=user_id,
-                source_agent=source_agent,
-                classification=classification_result.classification,
-                parent_id=parent_id,
-                status=OperationStatus.AWAITING_VERIFICATION,
-            )
-
-            return DecompositionResult(
-                original_request=request,
-                decomposed=False,
-                operations=[op],
-                reasoning="Could not split into sub-operations",
+                reasoning=analysis.get("reasoning", "Single atomic operation"),
                 confidence=classification_result.classification.confidence,
             )
 
@@ -141,6 +147,7 @@ class AtomicDecomposer:
         child_operations = []
         child_ids = []
         total_confidence = 0.0
+        any_needs_clarification = False
 
         for sub_request in sub_requests:
             sub_request = sub_request.strip()
@@ -148,6 +155,11 @@ class AtomicDecomposer:
                 continue
 
             classification_result = self.classifier.classify(sub_request)
+
+            # Check if this sub-operation needs further decomposition (recursive)
+            if classification_result.classification.confidence < 0.6:
+                # Low confidence - may need further decomposition or clarification
+                any_needs_clarification = True
 
             child_op = AtomicOperation(
                 id=str(uuid4()),
@@ -184,77 +196,105 @@ class AtomicDecomposer:
             original_request=request,
             decomposed=True,
             operations=all_operations,
-            reasoning=f"Split into {len(child_operations)} sub-operations",
-            confidence=avg_confidence,
+            reasoning=analysis.get("reasoning", f"Split into {len(child_operations)} sub-operations"),
+            confidence=min(avg_confidence, analysis.get("confidence", 1.0)),
+            needs_clarification=any_needs_clarification,
+            clarification_prompt=analysis.get("clarification_prompt") if any_needs_clarification else None,
         )
 
+    def _analyze_request(self, request: str) -> dict[str, Any]:
+        """Use LLM to analyze if request needs decomposition and how.
+
+        Returns a dict with:
+            - needs_decomposition: bool
+            - sub_requests: list[str] (if decomposed)
+            - confidence: float
+            - reasoning: str
+            - needs_clarification: bool
+            - clarification_prompt: str | None
+        """
+        if not self.llm:
+            # Fallback to simple heuristics if no LLM
+            return {
+                "needs_decomposition": False,
+                "sub_requests": [request],
+                "confidence": 0.5,
+                "reasoning": "No LLM available for semantic analysis",
+                "needs_clarification": False,
+                "clarification_prompt": None,
+            }
+
+        system = """You are an OPERATION DECOMPOSER. Analyze if a user's request contains multiple distinct operations.
+
+WHAT COUNTS AS MULTIPLE OPERATIONS:
+- "Move X and Y to Z" = TWO operations (move X to Z, move Y to Z)
+- "Delete the file and restart the service" = TWO operations
+- "Show me X" = ONE operation
+- "Create a scene about X" = ONE operation
+- "Move those two scenes to Career" = MAY BE multiple (depends on which scenes)
+
+WHAT DOES NOT COUNT:
+- "Move the X and Y scene" where "X and Y" is part of a single entity name = ONE operation
+- Compound nouns or multi-word entity names should not be split
+
+IMPORTANT:
+- If you're uncertain which entities the user refers to, signal needs_clarification
+- Only decompose when you're CONFIDENT there are multiple distinct operations
+- Preserve entity references exactly as stated by the user
+
+Return ONLY a JSON object:
+{
+    "needs_decomposition": true/false,
+    "operation_count": number,
+    "sub_requests": ["first operation", "second operation", ...],
+    "confidence": 0.0-1.0,
+    "reasoning": "why you made this decision",
+    "needs_clarification": true if uncertain about entity references,
+    "clarification_prompt": "question to ask if clarification needed"
+}"""
+
+        user = f"""USER REQUEST: "{request}"
+
+Analyze: Does this contain multiple distinct operations? If yes, what are they?"""
+
+        try:
+            raw = self.llm.chat_json(system=system, user=user, temperature=0.1, top_p=0.9)
+            data = json.loads(raw)
+
+            return {
+                "needs_decomposition": data.get("needs_decomposition", False),
+                "sub_requests": data.get("sub_requests", [request]),
+                "confidence": float(data.get("confidence", 0.5)),
+                "reasoning": data.get("reasoning", ""),
+                "needs_clarification": data.get("needs_clarification", False),
+                "clarification_prompt": data.get("clarification_prompt"),
+            }
+
+        except Exception as e:
+            return {
+                "needs_decomposition": False,
+                "sub_requests": [request],
+                "confidence": 0.3,
+                "reasoning": f"LLM analysis failed: {e}",
+                "needs_clarification": True,
+                "clarification_prompt": "Could you rephrase your request more specifically?",
+            }
+
     def _needs_decomposition(self, request: str) -> bool:
-        """Check if request needs decomposition."""
-        # Check for multi-operation patterns
-        for pattern in MULTI_OP_PATTERNS:
-            if re.search(pattern, request, re.IGNORECASE):
-                return True
+        """Check if request needs decomposition using LLM.
 
-        # Check for clause separators
-        request_lower = request.lower()
-        for sep in CLAUSE_SEPARATORS:
-            if sep in request_lower:
-                return True
-
-        # Check request length (very long requests often need decomposition)
-        if len(request.split()) > 30:
-            return True
-
-        return False
+        This is kept for backward compatibility with create_operation_tree.
+        """
+        analysis = self._analyze_request(request)
+        return analysis["needs_decomposition"]
 
     def _split_request(self, request: str) -> list[str]:
-        """Split request into sub-requests."""
-        parts = []
+        """Split request into sub-requests using LLM.
 
-        # Try numbered list first
-        numbered_match = re.findall(r'(?:^|\s)(\d+)\.\s*([^0-9]+?)(?=(?:\s*\d+\.)|$)', request, re.DOTALL)
-        if len(numbered_match) >= 2:
-            return [part[1].strip() for part in numbered_match]
-
-        # Try clause separators
-        current = request
-        for sep in CLAUSE_SEPARATORS:
-            if sep in current.lower():
-                # Split on this separator
-                idx = current.lower().find(sep)
-                before = current[:idx].strip()
-                after = current[idx + len(sep):].strip()
-
-                if before:
-                    parts.append(before)
-                if after:
-                    # Recursively split the remainder
-                    parts.extend(self._split_request(after))
-                return parts
-
-        # Fallback: try splitting on " and " if it looks like independent clauses
-        if " and " in request.lower():
-            and_parts = re.split(r'\s+and\s+', request, flags=re.IGNORECASE)
-            # Only split if both parts look like complete requests
-            if len(and_parts) == 2:
-                # Check if both have verbs (simple heuristic)
-                if self._looks_like_action(and_parts[0]) and self._looks_like_action(and_parts[1]):
-                    return [p.strip() for p in and_parts]
-
-        # No split found
-        return [request]
-
-    def _looks_like_action(self, text: str) -> bool:
-        """Check if text looks like an actionable request."""
-        action_words = {
-            "show", "display", "list", "get", "find", "search",
-            "create", "make", "add", "write", "save",
-            "run", "execute", "start", "stop", "kill",
-            "delete", "remove", "update", "modify",
-            "install", "open", "close", "restart",
-        }
-        words = set(text.lower().split())
-        return bool(words & action_words)
+        This is kept for backward compatibility.
+        """
+        analysis = self._analyze_request(request)
+        return analysis.get("sub_requests", [request])
 
 
 def create_operation_tree(

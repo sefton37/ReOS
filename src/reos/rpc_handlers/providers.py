@@ -132,7 +132,7 @@ _pull_lock = threading.Lock()
 
 def handle_ollama_status(db: Database) -> dict[str, Any]:
     """Get Ollama connection status and current settings."""
-    from reos.ollama import check_ollama, list_ollama_models
+    from reos.ollama import check_ollama, list_ollama_models, list_ollama_models_detailed
     from reos.settings import settings
 
     # Get stored settings
@@ -149,13 +149,21 @@ def handle_ollama_status(db: Database) -> dict[str, Any]:
     # Check connection
     health = check_ollama(url=url)
 
-    # List models if reachable
+    # List models if reachable - use detailed listing for enriched data
     models: list[str] = []
+    models_detailed: list[dict[str, Any]] = []
     if health.reachable:
         try:
-            models = list_ollama_models(url=url)
+            detailed = list_ollama_models_detailed(url=url)
+            models = [m.name for m in detailed]
+            models_detailed = [m.to_dict() for m in detailed]
         except Exception as e:
             logger.warning("Failed to list Ollama models: %s", e)
+            # Fallback to simple list
+            try:
+                models = list_ollama_models(url=url)
+            except Exception as e2:
+                logger.warning("Fallback model list also failed: %s", e2)
 
     # Get hardware info
     hardware = detect_system_hardware()
@@ -167,6 +175,7 @@ def handle_ollama_status(db: Database) -> dict[str, Any]:
         "model_count": health.model_count,
         "error": health.error,
         "available_models": models,
+        "available_models_detailed": models_detailed,
         "gpu_enabled": gpu_enabled,
         "gpu_available": hardware["gpu_available"],
         "gpu_name": hardware["gpu_name"],
@@ -306,7 +315,7 @@ def handle_ollama_model_info(db: Database, *, model: str) -> dict[str, Any]:
             if any(marker.lower() in template_lower for marker in thinking_markers):
                 capabilities["thinking"] = True
             # Known thinking models
-            if any(name in model_lower for name in ["deepseek", "qwq", "o1", "reflection"]):
+            if any(name in model_lower for name in ["deepseek", "qwq", "o1", "reflection", "magistral"]):
                 capabilities["thinking"] = True
 
             # Embedding capability

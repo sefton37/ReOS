@@ -410,16 +410,18 @@ export function createPlayActView(options: PlayActViewOptions): {
     content.appendChild(editorWrap);
 
     // Mount React BlockEditor
+    // Use 'your-story' as the actId when The Play is selected without a specific Act
+    // This is the autobiographical entry point for the whole knowledge base
     state.editorContainer = editorWrap;
     state.editorCleanup = mountBlockEditor(editorWrap, {
-      actId: state.activeActId ?? '',
+      actId: state.activeActId ?? 'your-story',
       pageId: state.selectedPageId,
       kernelRequest,
     });
   }
 
   function getContentTitle(): string {
-    if (!state.activeActId) return 'The Play';
+    if (!state.activeActId) return 'Your Story';
     if (state.selectedPageId) {
       // Find page title from cache
       const pages = state.pagesCache.get(state.activeActId) || [];

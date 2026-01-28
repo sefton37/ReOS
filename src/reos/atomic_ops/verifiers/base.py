@@ -38,6 +38,9 @@ class VerificationContext:
     llm_available: bool = False
     llm_model: Optional[str] = None
 
+    # Additional context (e.g., conversation history for understanding "fix that")
+    additional_context: Optional[str] = None
+
 
 class BaseVerifier(ABC):
     """Base class for all verifiers.

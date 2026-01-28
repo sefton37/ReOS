@@ -19,6 +19,10 @@
     "@tiptap/extension-code-block-lowlight": "^2.1.0",
     "@tiptap/extension-link": "^2.1.0",
     "@tiptap/extension-placeholder": "^2.1.0",
+    "@tiptap/extension-table": "^2.27.2",
+    "@tiptap/extension-table-cell": "^2.27.2",
+    "@tiptap/extension-table-header": "^2.27.2",
+    "@tiptap/extension-table-row": "^2.27.2",
     "@tiptap/extension-task-item": "^2.1.0",
     "@tiptap/extension-task-list": "^2.1.0",
     "@tiptap/pm": "^2.1.0",
@@ -27,8 +31,8 @@
     "@tiptap/suggestion": "^2.1.0",
     "lowlight": "^3.0.0",
     "react": "^18.2.0",
-    "tippy.js": "^6.3.7",
     "react-dom": "^18.2.0",
+    "tippy.js": "^6.3.7",
     "zod": "^3.24.0"
   },
   "devDependencies": {

@@ -147,7 +147,10 @@ class CairnAtomicBridge:
             verification_mode: Verification pipeline mode.
             auto_approve_low_risk: Auto-approve read-only operations.
         """
-        self.processor = AtomicOpsProcessor(conn, auto_init_embeddings=True)
+        # Extract LLM from intent engine for semantic decomposition
+        llm = intent_engine.llm if intent_engine else None
+
+        self.processor = AtomicOpsProcessor(conn, auto_init_embeddings=True, llm=llm)
         self.verifier = VerificationPipeline(mode=verification_mode)
         self.feedback = FeedbackCollector(self.processor.store)
         self.intent_engine = intent_engine
@@ -167,15 +170,17 @@ class CairnAtomicBridge:
         execute_tool: Optional[Callable] = None,
         persona_context: str = "",
         safety_level: str = "standard",
+        conversation_context: str = "",
     ) -> CairnOperationResult:
         """Process a user request through the full atomic ops pipeline.
 
         This is the main entry point for CAIRN operations. It:
         1. Creates an atomic operation from the request
-        2. Classifies using CAIRN's intent engine + atomic ops classifier
-        3. Verifies through the 5-layer pipeline
-        4. Executes if approved (or auto-approved for low-risk)
-        5. Collects feedback
+        2. Decomposes if needed ("X and Y" → two operations)
+        3. Classifies using CAIRN's intent engine + atomic ops classifier
+        4. Verifies through the 5-layer pipeline
+        5. Executes if approved (or auto-approved for low-risk)
+        6. Collects feedback
 
         Args:
             user_input: User's natural language request.
@@ -183,11 +188,14 @@ class CairnAtomicBridge:
             execute_tool: Function to execute MCP tools.
             persona_context: Context about the user (from THE_PLAY).
             safety_level: Safety level (permissive, standard, strict).
+            conversation_context: Recent conversation for context (helps "fix that").
 
         Returns:
             CairnOperationResult with operation, verification, and response.
         """
-        # Step 1: Process through atomic ops pipeline
+        import sys
+
+        # Step 1: Process through atomic ops pipeline (includes decomposition)
         proc_result = self.processor.process_request(
             request=user_input,
             user_id=user_id,
@@ -206,19 +214,58 @@ class CairnAtomicBridge:
                 response="I couldn't process that request.",
             )
 
-        # Get primary operation
-        operation = proc_result.operations[0]
+        # Check if decomposition needs clarification
+        decomp_result = self.processor.decomposer.decompose(
+            request=user_input,
+            user_id=user_id,
+            source_agent="cairn",
+        )
+        if decomp_result.needs_clarification and decomp_result.clarification_prompt:
+            # Return clarification request instead of proceeding with uncertain decomposition
+            return CairnOperationResult(
+                operation=AtomicOperation(user_request=user_input, user_id=user_id),
+                verification=PipelineResult(
+                    passed=True,  # Not failed, just needs clarification
+                    status=OperationStatus.AWAITING_APPROVAL,
+                    results={},
+                    warnings=["Clarification needed"],
+                ),
+                response=decomp_result.clarification_prompt,
+                needs_approval=True,
+            )
+
+        # Check if request was decomposed into multiple operations
+        primary_op = proc_result.operations[0]
+        if primary_op.is_decomposed and primary_op.child_ids:
+            print(f"[ATOMIC] Decomposed into {len(primary_op.child_ids)} operations", file=sys.stderr)
+            # Process each child operation and combine results
+            return self._process_decomposed(
+                parent_op=primary_op,
+                child_ops=[op for op in proc_result.operations[1:] if op.id in primary_op.child_ids],
+                user_id=user_id,
+                execute_tool=execute_tool,
+                persona_context=persona_context,
+                safety_level=safety_level,
+                conversation_context=conversation_context,
+            )
+
+        # Single operation - process normally
+        operation = primary_op
 
         # Step 2: Enhance classification with CAIRN intent if available
+        # Pass conversation context so intent engine understands "fix that", etc.
         if self.intent_engine:
-            operation = self._enhance_with_intent(operation, user_input)
+            operation = self._enhance_with_intent(
+                operation, user_input, conversation_context=conversation_context
+            )
 
-        # Step 3: Build verification context
+        # Step 3: Build verification context with conversation history
         context = VerificationContext(
             user_id=user_id,
             source_agent="cairn",
             safety_level=safety_level,
             llm_available=self.intent_engine is not None,
+            additional_context=conversation_context if conversation_context else None,
         )
 
         # Step 4: Run verification pipeline
@@ -240,7 +287,7 @@ class CairnAtomicBridge:
             # Execute through CAIRN intent engine
             if self.intent_engine and execute_tool:
                 intent_result = self.intent_engine.process(
-                    user_input=user_input,
+                    user_input=operation.user_request,  # Use operation's request (may be sub-request)
                     execute_tool=execute_tool,
                     persona_context=persona_context,
                 )
@@ -443,42 +490,137 @@ class CairnAtomicBridge:
         """Get the ID of the last completed operation."""
         return self._last_operation_id
 
+    def _process_decomposed(
+        self,
+        parent_op: AtomicOperation,
+        child_ops: list[AtomicOperation],
+        user_id: str,
+        execute_tool: Optional[Callable],
+        persona_context: str,
+        safety_level: str,
+        conversation_context: str,
+    ) -> CairnOperationResult:
+        """Process decomposed operations (e.g., "X and Y scenes").
+
+        Each child operation is processed through the full pipeline
+        and results are combined.
+        """
+        import sys
+
+        all_responses = []
+        all_intent_results = []
+        any_failed = False
+
+        for child_op in child_ops:
+            print(f"[ATOMIC] Processing child: {child_op.user_request[:50]!r}", file=sys.stderr)
+
+            # Enhance with CAIRN intent
+            if self.intent_engine:
+                child_op = self._enhance_with_intent(
+                    child_op, child_op.user_request, conversation_context=conversation_context
+                )
+
+            # Build verification context
+            context = VerificationContext(
+                user_id=user_id,
+                source_agent="cairn",
+                safety_level=safety_level,
+                llm_available=self.intent_engine is not None,
+                additional_context=conversation_context,
+            )
+
+            # Verify
+            verification = self.verifier.verify(child_op, context)
+
+            if verification.passed and self.intent_engine and execute_tool:
+                # Execute this sub-operation
+                intent_result = self.intent_engine.process(
+                    user_input=child_op.user_request,
+                    execute_tool=execute_tool,
+                    persona_context=persona_context,
+                )
+                all_responses.append(intent_result.response)
+                all_intent_results.append(intent_result)
+                child_op.status = OperationStatus.COMPLETE
+            else:
+                any_failed = True
+                all_responses.append(f"Could not process: {child_op.user_request}")
+
+        # Combine responses
+        combined_response = "\n\n".join(all_responses) if all_responses else "No operations completed."
+
+        # Use first intent result as primary (for compatibility)
+        primary_intent = all_intent_results[0] if all_intent_results else None
+
+        return CairnOperationResult(
+            operation=parent_op,
+            verification=PipelineResult(
+                passed=not any_failed,
+                status=OperationStatus.COMPLETE if not any_failed else OperationStatus.FAILED,
+                results={},
+                warnings=[],
+            ),
+            intent_result=primary_intent,
+            response=combined_response,
+            approved=True,
+            needs_approval=False,
+        )
+
     def _enhance_with_intent(
         self,
         operation: AtomicOperation,
         user_input: str,
+        conversation_context: str = "",
     ) -> AtomicOperation:
-        """Enhance operation classification with CAIRN intent extraction."""
+        """Enhance operation classification with CAIRN intent extraction.
+
+        Uses conversation context to understand contextual references like "fix that".
+        """
         if not self.intent_engine:
             return operation
 
-        # Extract intent category using CAIRN's pattern matching
-        from reos.cairn.intent_engine import INTENT_PATTERNS, IntentAction
+        # Use LLM to extract intent with context (not just pattern matching)
+        from reos.cairn.intent_engine import INTENT_PATTERNS
 
         user_lower = user_input.lower()
         detected_category = None
         detected_action = None
 
-        # Check patterns
-        for category_name, patterns in INTENT_PATTERNS.items():
-            for pattern in patterns:
-                if pattern in user_lower:
-                    detected_category = category_name.name
+        # For contextual references ("fix that", "do it"), use LLM with conversation context
+        contextual_refs = ["that", "it", "this", "those", "them"]
+        has_contextual_ref = any(ref in user_lower.split() for ref in contextual_refs)
+
+        if has_contextual_ref and conversation_context and self.intent_engine.llm:
+            # Use LLM to resolve contextual reference
+            resolved = self._resolve_contextual_reference(
+                user_input, conversation_context, self.intent_engine.llm
+            )
+            if resolved:
+                detected_category = resolved.get("category")
+                detected_action = resolved.get("action")
+
+        # Fall back to pattern matching if LLM didn't resolve
+        if not detected_category:
+            for category_name, patterns in INTENT_PATTERNS.items():
+                for pattern in patterns:
+                    if pattern in user_lower:
+                        detected_category = category_name.name
+                        break
+                if detected_category:
                     break
-            if detected_category:
-                break
 
         # Detect action
-        if any(w in user_lower for w in ["create", "add", "new", "make"]):
-            detected_action = "CREATE"
-        elif any(w in user_lower for w in ["find", "search", "look for"]):
-            detected_action = "SEARCH"
-        elif any(w in user_lower for w in ["update", "change", "modify", "move"]):
-            detected_action = "UPDATE"
-        elif any(w in user_lower for w in ["delete", "remove"]):
-            detected_action = "DELETE"
-        else:
-            detected_action = "VIEW"
+        if not detected_action:
+            if any(w in user_lower for w in ["create", "add", "new", "make"]):
+                detected_action = "CREATE"
+            elif any(w in user_lower for w in ["find", "search", "look for"]):
+                detected_action = "SEARCH"
+            elif any(w in user_lower for w in ["update", "change", "modify", "move", "fix"]):
+                detected_action = "UPDATE"
+            elif any(w in user_lower for w in ["delete", "remove"]):
+                detected_action = "DELETE"
+            else:
+                detected_action = "VIEW"
 
         # Get base classification from category
         if detected_category and detected_category in INTENT_TO_CLASSIFICATION:
@@ -505,6 +647,56 @@ class CairnAtomicBridge:
             operation.classification = refined
 
         return operation
+
+    def _resolve_contextual_reference(
+        self,
+        user_input: str,
+        conversation_context: str,
+        llm: Any,
+    ) -> dict[str, str] | None:
+        """Use LLM to resolve contextual references like "fix that".
+
+        Given conversation context, determines what "that/it/this" refers to
+        and extracts the appropriate intent category and action.
+        """
+        import json
+        import sys
+
+        if not conversation_context:
+            return None
+
+        system = """You are an INTENT RESOLVER. The user said something with a contextual reference
+like "fix that", "do it", "show me that". Given the conversation context, determine:
+
+1. What does "that/it/this" refer to?
+2. What category of operation is this? (CALENDAR, PLAY, SYSTEM, PERSONAL, TASKS, CONTACTS)
+3. What action? (VIEW, CREATE, UPDATE, DELETE, SEARCH)
+
+IMPORTANT: If the conversation was about scenes, acts, beats, or "The Play" → category is PLAY.
+If "fix" or "move" or similar action word → action is UPDATE.
+
+Return ONLY a JSON object:
+{"category": "PLAY", "action": "UPDATE", "resolved_subject": "what the user is referring to"}
+
+If you can't determine, return: {"category": null, "action": null}"""
+
+        user = f"""RECENT CONVERSATION:
+{conversation_context[-2000:]}
+
+USER NOW SAYS: {user_input}
+
+What is the user referring to and what do they want to do?"""
+
+        try:
+            raw = llm.chat_json(system=system, user=user, temperature=0.1, top_p=0.9)
+            data = json.loads(raw)
+            if data.get("category"):
+                print(f"[ATOMIC] Resolved contextual ref: {data}", file=sys.stderr)
+                return data
+        except Exception as e:
+            print(f"[ATOMIC] Failed to resolve contextual ref: {e}", file=sys.stderr)
+
+        return None
 
     def _needs_user_approval(
         self,

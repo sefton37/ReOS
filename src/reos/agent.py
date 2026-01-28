@@ -348,14 +348,15 @@ class ChatAgent:
             return None
 
     def _gather_play_data(self) -> dict[str, Any]:
-        """Gather The Play data (acts and beats) for intent engine context.
+        """Gather The Play data (acts, scenes, and beats) for intent engine context.
 
         Returns:
-            Dictionary with 'acts' and 'all_beats' lists for LLM-based extraction.
+            Dictionary with 'acts', 'all_scenes', and 'all_beats' lists for LLM-based extraction.
         """
         try:
             acts, active_id = play_list_acts()
             acts_data = []
+            all_scenes = []
             all_beats = []
 
             for act in acts:
@@ -369,6 +370,12 @@ class ChatAgent:
                 try:
                     scenes = play_list_scenes(act_id=act.act_id)
                     for scene in scenes:
+                        all_scenes.append({
+                            "scene_id": scene.scene_id,
+                            "title": scene.title,
+                            "act_id": act.act_id,
+                            "act_title": act.title,
+                        })
                         # Get beats for this scene
                         try:
                             beats = play_list_beats(act_id=act.act_id, scene_id=scene.scene_id)
@@ -388,12 +395,13 @@ class ChatAgent:
 
             return {
                 "acts": acts_data,
+                "all_scenes": all_scenes,
                 "all_beats": all_beats,
                 "active_act_id": active_id,
             }
         except Exception as e:
             logger.debug("Error gathering play data: %s", e)
-            return {"acts": [], "all_beats": [], "active_act_id": None}
+            return {"acts": [], "all_scenes": [], "all_beats": [], "active_act_id": None}
 
     def _get_active_act_with_repo(self) -> Act | None:
         """Get the active Act if it has a repository assigned.
@@ -1124,12 +1132,13 @@ class ChatAgent:
 
         llm = self._get_provider()
 
-        # Use new Intent Engine for CAIRN (multi-stage processing)
+        # Use Atomic Ops Bridge for CAIRN (proper decomposition + verification)
         if agent_type == "cairn":
             import sys
-            print(f"[CAIRN] Using IntentEngine for: {user_text[:100]!r}", file=sys.stderr)
+            print(f"[CAIRN] Using AtomicBridge for: {user_text[:100]!r}", file=sys.stderr)
 
             from reos.cairn.intent_engine import CairnIntentEngine
+            from reos.atomic_ops.cairn_integration import CairnAtomicBridge
 
             # Get available tool names
             available_tools = {t.name for t in tools}
@@ -1142,17 +1151,48 @@ class ChatAgent:
                 except ToolError as e:
                     return {"error": e.message, "code": e.code}
 
-            # Process through intent engine with Play context (from ctx, not re-loaded)
+            # Create intent engine with Play context
             intent_engine = CairnIntentEngine(
                 llm=llm,
                 available_tools=available_tools,
-                play_data=ctx.play_data,  # Use already-loaded data
+                play_data=ctx.play_data,
             )
-            result = intent_engine.process(
+
+            # Add conversation context for intent verification ("fix that" → understand "that")
+            conversation_context = ctx.conversation_history or ""
+
+            # Process through atomic ops bridge (decomposition + verification + execution)
+            bridge = CairnAtomicBridge(
+                conn=self._db,
+                intent_engine=intent_engine,
+            )
+            bridge_result = bridge.process_request(
                 user_input=user_text,
+                user_id="default",
                 execute_tool=execute_tool,
-                persona_context=ctx.play_context,  # Use already-loaded context
+                persona_context=ctx.play_context,
+                conversation_context=conversation_context,
             )
+
+            # Extract result from bridge
+            result = bridge_result.intent_result
+            if result is None:
+                # Bridge didn't execute through intent engine (e.g., needs approval)
+                from reos.cairn.intent_engine import IntentResult, VerifiedIntent, ExtractedIntent, IntentCategory, IntentAction
+                result = IntentResult(
+                    verified_intent=VerifiedIntent(
+                        intent=ExtractedIntent(
+                            category=IntentCategory.UNKNOWN,
+                            action=IntentAction.UNKNOWN,
+                            target="",
+                            raw_input=user_text,
+                        ),
+                        verified=False,
+                        tool_name=None,
+                    ),
+                    tool_result=None,
+                    response=bridge_result.response,
+                )
 
             # Build response in expected format
             tool_results = []

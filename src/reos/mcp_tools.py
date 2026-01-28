@@ -1661,7 +1661,15 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
 
             store_path = Path(play_path) / ".cairn" / "cairn.db"
             store = CairnStore(store_path)
-            handler = CairnToolHandler(store=store)
+
+            # Get LLM for entity resolution (cheap local inference)
+            from reos.providers import get_provider
+            try:
+                llm = get_provider(db)
+            except Exception:
+                llm = None  # Fallback to fuzzy match if no LLM available
+
+            handler = CairnToolHandler(store=store, llm=llm)
 
             result = handler.call_tool(name, args)
             cairn_logger.info("CAIRN tool %s succeeded: %s", name, result)

@@ -44,6 +44,15 @@ interface AutostartStatus {
   reos_exists: boolean;
 }
 
+interface OllamaModelDetailed {
+  name: string;
+  parameter_size: string | null;
+  quantization: string | null;
+  family: string | null;
+  size_bytes: number | null;
+  modified_at: string | null;
+}
+
 interface OllamaStatus {
   url: string;
   model: string;
@@ -51,6 +60,7 @@ interface OllamaStatus {
   model_count: number | null;
   error: string | null;
   available_models: string[];
+  available_models_detailed?: OllamaModelDetailed[];
   gpu_enabled: boolean;
   gpu_available: boolean;
   gpu_name: string | null;
@@ -64,6 +74,26 @@ interface OllamaStatus {
     gpu_type: string | null;
     recommended_max_params: string;
   };
+}
+
+// Unified model for display in the model list
+interface UnifiedModel {
+  name: string;
+  isInstalled: boolean;
+  params: string | null;
+  desc: string | null;
+  caps: { tools?: boolean; vision?: boolean; thinking?: boolean } | null;
+  size: string | null;
+  ctx: number | null;
+  ramNeeded: number | null;
+  loading: boolean;
+}
+
+// Model filter state
+interface ModelFilters {
+  search: string;
+  capabilities: Set<string>;  // 'thinking', 'tools', 'vision'
+  sizeCategory: 'all' | 'small' | 'medium' | 'large' | 'xl';
 }
 
 interface ModelInfo {
@@ -256,6 +286,16 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
   // Integrations state
   let thunderbirdStatus: ThunderbirdCheckResult | null = null;
   let autostartStatus: AutostartStatus | null = null;
+
+  // Model filter state
+  let modelFilters: ModelFilters = {
+    search: '',
+    capabilities: new Set<string>(),
+    sizeCategory: 'all',
+  };
+
+  // Cache for model capabilities (fetched progressively)
+  const modelCapabilitiesCache = new Map<string, ModelInfo>();
 
   // Create overlay container
   const overlay = el('div');
@@ -1127,7 +1167,9 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
     ctxSlider.value = String(currentCtx);
     ctxSlider.style.cssText = `
       width: 100%;
+      box-sizing: border-box;
       accent-color: #3b82f6;
+      margin: 0;
     `;
 
     ctxSlider.addEventListener('input', () => {
@@ -1193,57 +1235,12 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
     `;
     modelSection.appendChild(currentModelBox);
 
-    // Available models
-    if (ollamaStatus?.available_models && ollamaStatus.available_models.length > 0) {
-      const modelsLabel = el('div');
-      modelsLabel.textContent = 'Available Models';
-      modelsLabel.style.cssText = 'margin-bottom: 8px; font-size: 13px; color: rgba(255,255,255,0.7);';
-      modelSection.appendChild(modelsLabel);
+    // =========================================================================
+    // Unified Model List with Filters
+    // =========================================================================
 
-      const modelsList = el('div');
-      modelsList.style.cssText = `
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-bottom: 16px;
-      `;
-
-      for (const model of ollamaStatus.available_models) {
-        const modelBtn = el('button');
-        modelBtn.textContent = model;
-        const isActive = model === ollamaStatus.model;
-        modelBtn.style.cssText = `
-          padding: 6px 12px;
-          background: ${isActive ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255,255,255,0.05)'};
-          border: 1px solid ${isActive ? '#22c55e' : '#444'};
-          border-radius: 4px;
-          color: ${isActive ? '#22c55e' : 'rgba(255,255,255,0.8)'};
-          cursor: pointer;
-          font-size: 12px;
-        `;
-        modelBtn.addEventListener('click', async () => {
-          try {
-            await kernelRequest('ollama/set_model', { model });
-            await loadData();
-          } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : String(e);
-            alert('Failed to set model: ' + msg);
-          }
-        });
-        modelsList.appendChild(modelBtn);
-      }
-      modelSection.appendChild(modelsList);
-    }
-
-    // Popular Models Section
-    const popularLabel = el('div');
-    popularLabel.textContent = 'Recommended Models';
-    popularLabel.style.cssText = 'margin-bottom: 8px; font-size: 13px; color: rgba(255,255,255,0.7);';
-    modelSection.appendChild(popularLabel);
-
-    // Models with full specs - sorted by size for hardware recommendations
-    // caps: { tools?, vision?, thinking? }
-    const allPopularModels = [
+    // Recommended models catalog with full specs
+    const recommendedModels = [
       { name: 'phi3:mini', params: '3.8B', desc: 'Microsoft\'s compact model', size: '2.3GB', ramNeeded: 4, ctx: 4096, caps: {} },
       { name: 'llama3.2:3b', params: '3B', desc: 'Meta\'s efficient small model', size: '2.0GB', ramNeeded: 4, ctx: 8192, caps: { tools: true } },
       { name: 'gemma2:2b', params: '2B', desc: 'Google\'s tiny powerhouse', size: '1.6GB', ramNeeded: 3, ctx: 8192, caps: {} },
@@ -1255,6 +1252,7 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
       { name: 'qwq:latest', params: '32B', desc: 'Alibaba reasoning model', size: '20GB', ramNeeded: 24, ctx: 32768, caps: { thinking: true } },
       { name: 'deepseek-r1:7b', params: '7B', desc: 'DeepSeek reasoning', size: '4.7GB', ramNeeded: 8, ctx: 16384, caps: { thinking: true } },
       { name: 'deepseek-r1:14b', params: '14B', desc: 'DeepSeek reasoning', size: '9GB', ramNeeded: 16, ctx: 16384, caps: { thinking: true } },
+      { name: 'magistral:latest', params: '24B', desc: 'Mistral reasoning model', size: '14GB', ramNeeded: 16, ctx: 32768, caps: { thinking: true, tools: true } },
       { name: 'codellama:7b', params: '7B', desc: 'Optimized for coding', size: '3.8GB', ramNeeded: 8, ctx: 16384, caps: {} },
       { name: 'deepseek-coder:6.7b', params: '6.7B', desc: 'Code specialist', size: '3.8GB', ramNeeded: 8, ctx: 16384, caps: {} },
       { name: 'gemma2:9b', params: '9B', desc: 'Google\'s capable model', size: '5.4GB', ramNeeded: 10, ctx: 8192, caps: {} },
@@ -1271,124 +1269,388 @@ export function createSettingsOverlay(onClose?: () => void): SettingsOverlay {
       { name: 'llama3.1:405b', params: '405B', desc: 'Largest open model', size: '230GB', ramNeeded: 256, ctx: 8192, caps: { tools: true } },
     ];
 
-    // Filter models based on available memory
-    // Use max of GPU VRAM and RAM since Ollama can offload to CPU
-    const gpuMem = hw?.gpu_vram_gb || 0;
-    const ramMem = hw?.ram_gb || 8;
-    const availableMem = Math.max(gpuMem, ramMem);
-    const popularModels = allPopularModels.filter(m => m.ramNeeded <= availableMem + 4); // +4GB buffer
+    // Parse parameter count from string like "3B", "7B", "70B"
+    function parseParamCount(params: string | null): number {
+      if (!params) return 0;
+      const match = params.match(/^(\d+(?:\.\d+)?)/i);
+      if (!match) return 0;
+      return parseFloat(match[1]);
+    }
 
-    const popularGrid = el('div');
-    popularGrid.style.cssText = `
+    // Determine size category from param count
+    function getSizeCategory(params: string | null): 'small' | 'medium' | 'large' | 'xl' {
+      const count = parseParamCount(params);
+      if (count < 7) return 'small';
+      if (count < 14) return 'medium';
+      if (count < 70) return 'large';
+      return 'xl';
+    }
+
+    // Build unified model list
+    function buildUnifiedModels(): UnifiedModel[] {
+      const installed = new Set(ollamaStatus?.available_models || []);
+      const installedDetailed = new Map<string, OllamaModelDetailed>();
+      for (const m of ollamaStatus?.available_models_detailed || []) {
+        installedDetailed.set(m.name, m);
+      }
+
+      const result: UnifiedModel[] = [];
+      const seenNames = new Set<string>();
+
+      // First, add all installed models (matching to recommendations if possible)
+      for (const modelName of installed) {
+        const baseName = modelName.split(':')[0];
+        const rec = recommendedModels.find(r => r.name === modelName || r.name.split(':')[0] === baseName);
+        const detailed = installedDetailed.get(modelName);
+
+        // Check cache for capabilities
+        const cached = modelCapabilitiesCache.get(modelName);
+
+        result.push({
+          name: modelName,
+          isInstalled: true,
+          params: detailed?.parameter_size || rec?.params || null,
+          desc: rec?.desc || null,
+          caps: cached?.capabilities || rec?.caps || null,
+          size: rec?.size || (detailed?.size_bytes ? formatBytes(detailed.size_bytes) : null),
+          ctx: cached?.context_length || rec?.ctx || null,
+          ramNeeded: rec?.ramNeeded || null,
+          loading: !cached && !rec?.caps,
+        });
+        seenNames.add(modelName);
+        if (rec) seenNames.add(rec.name);
+      }
+
+      // Then add recommended models that aren't installed
+      for (const rec of recommendedModels) {
+        if (seenNames.has(rec.name)) continue;
+
+        result.push({
+          name: rec.name,
+          isInstalled: false,
+          params: rec.params,
+          desc: rec.desc,
+          caps: rec.caps,
+          size: rec.size,
+          ctx: rec.ctx,
+          ramNeeded: rec.ramNeeded,
+          loading: false,
+        });
+      }
+
+      // Sort: installed first, then by param size
+      result.sort((a, b) => {
+        if (a.isInstalled !== b.isInstalled) return a.isInstalled ? -1 : 1;
+        return parseParamCount(a.params) - parseParamCount(b.params);
+      });
+
+      return result;
+    }
+
+    // Filter models based on current filter state
+    function filterModels(models: UnifiedModel[]): UnifiedModel[] {
+      return models.filter(m => {
+        // Text search
+        if (modelFilters.search) {
+          const searchLower = modelFilters.search.toLowerCase();
+          const nameMatch = m.name.toLowerCase().includes(searchLower);
+          const descMatch = m.desc?.toLowerCase().includes(searchLower) || false;
+          if (!nameMatch && !descMatch) return false;
+        }
+
+        // Size category filter
+        if (modelFilters.sizeCategory !== 'all') {
+          const category = getSizeCategory(m.params);
+          if (category !== modelFilters.sizeCategory) return false;
+        }
+
+        // Capability filters (AND logic - must have all selected)
+        if (modelFilters.capabilities.size > 0) {
+          if (!m.caps) return false;
+          for (const cap of modelFilters.capabilities) {
+            if (cap === 'tools' && !m.caps.tools) return false;
+            if (cap === 'vision' && !m.caps.vision) return false;
+            if (cap === 'thinking' && !m.caps.thinking) return false;
+          }
+        }
+
+        // No hardware filter - show all models, but UI will indicate if they might not fit
+        return true;
+      });
+    }
+
+    // Progressive capability loading for installed models without cached info
+    async function loadModelCapabilities(modelName: string): Promise<void> {
+      if (modelCapabilitiesCache.has(modelName)) return;
+      try {
+        const info = await kernelRequest('ollama/model_info', { model: modelName }) as ModelInfo;
+        modelCapabilitiesCache.set(modelName, info);
+        renderModelGrid(); // Re-render to update badges
+      } catch {
+        // Silently fail - model will show without capability badges
+      }
+    }
+
+    // Filter bar container
+    const filterBar = el('div');
+    filterBar.style.cssText = `
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+      align-items: center;
+    `;
+
+    // Search input
+    const searchInput = el('input') as HTMLInputElement;
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search models...';
+    searchInput.value = modelFilters.search;
+    searchInput.style.cssText = `
+      flex: 1;
+      min-width: 150px;
+      padding: 6px 10px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid #444;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 12px;
+    `;
+    searchInput.addEventListener('input', () => {
+      modelFilters.search = searchInput.value;
+      renderModelGrid();
+    });
+    filterBar.appendChild(searchInput);
+
+    // Size dropdown
+    const sizeSelect = el('select') as HTMLSelectElement;
+    sizeSelect.style.cssText = `
+      padding: 6px 10px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid #444;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 12px;
+      cursor: pointer;
+    `;
+    sizeSelect.innerHTML = `
+      <option value="all">All Sizes</option>
+      <option value="small">Small (&lt;7B)</option>
+      <option value="medium">Medium (7-14B)</option>
+      <option value="large">Large (14-70B)</option>
+      <option value="xl">XL (70B+)</option>
+    `;
+    sizeSelect.value = modelFilters.sizeCategory;
+    sizeSelect.addEventListener('change', () => {
+      modelFilters.sizeCategory = sizeSelect.value as ModelFilters['sizeCategory'];
+      renderModelGrid();
+    });
+    filterBar.appendChild(sizeSelect);
+
+    // Capability chips
+    const capsContainer = el('div');
+    capsContainer.style.cssText = 'display: flex; gap: 6px;';
+
+    function createCapChip(cap: string, emoji: string, label: string) {
+      const chip = el('button');
+      const isActive = modelFilters.capabilities.has(cap);
+      chip.innerHTML = `${emoji} ${label}`;
+      chip.style.cssText = `
+        padding: 4px 8px;
+        background: ${isActive ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.05)'};
+        border: 1px solid ${isActive ? '#3b82f6' : '#444'};
+        border-radius: 4px;
+        color: ${isActive ? '#60a5fa' : 'rgba(255,255,255,0.6)'};
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.15s;
+      `;
+      chip.addEventListener('click', () => {
+        if (modelFilters.capabilities.has(cap)) {
+          modelFilters.capabilities.delete(cap);
+        } else {
+          modelFilters.capabilities.add(cap);
+        }
+        renderFilterBar(); // Re-render chips to update style
+        renderModelGrid();
+      });
+      return chip;
+    }
+
+    function renderFilterBar() {
+      capsContainer.innerHTML = '';
+      capsContainer.appendChild(createCapChip('tools', '🔧', 'Tools'));
+      capsContainer.appendChild(createCapChip('vision', '👁️', 'Vision'));
+      capsContainer.appendChild(createCapChip('thinking', '🧠', 'Thinking'));
+    }
+    renderFilterBar();
+    filterBar.appendChild(capsContainer);
+
+    modelSection.appendChild(filterBar);
+
+    // Model grid container
+    const modelGrid = el('div');
+    modelGrid.style.cssText = `
       display: grid;
       grid-template-columns: repeat(2, 1fr);
       gap: 8px;
       margin-bottom: 16px;
+      max-height: 300px;
+      overflow-y: auto;
     `;
 
-    for (const model of popularModels) {
-      const isInstalled = ollamaStatus?.available_models?.some(m => m.startsWith(model.name.split(':')[0]));
-      const modelCard = el('button');
-      modelCard.style.cssText = `
-        padding: 10px 12px;
-        background: ${isInstalled ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255,255,255,0.03)'};
-        border: 1px solid ${isInstalled ? 'rgba(34, 197, 94, 0.3)' : '#333'};
-        border-radius: 6px;
-        text-align: left;
-        cursor: ${isInstalled ? 'default' : 'pointer'};
-        transition: all 0.2s;
-      `;
-      if (!isInstalled) {
-        modelCard.addEventListener('mouseenter', () => {
-          modelCard.style.background = 'rgba(59, 130, 246, 0.1)';
-          modelCard.style.borderColor = 'rgba(59, 130, 246, 0.4)';
-        });
-        modelCard.addEventListener('mouseleave', () => {
-          modelCard.style.background = 'rgba(255,255,255,0.03)';
-          modelCard.style.borderColor = '#333';
-        });
+    function renderModelGrid() {
+      modelGrid.innerHTML = '';
+      const allModels = buildUnifiedModels();
+      const filtered = filterModels(allModels);
+
+      if (filtered.length === 0) {
+        const noResults = el('div');
+        noResults.style.cssText = 'grid-column: 1 / -1; text-align: center; color: rgba(255,255,255,0.5); padding: 20px;';
+        noResults.textContent = modelFilters.search || modelFilters.capabilities.size > 0 || modelFilters.sizeCategory !== 'all'
+          ? 'No models match your filters'
+          : 'No models available';
+        modelGrid.appendChild(noResults);
+        return;
       }
 
-      // Build capability badges
-      const capBadges: string[] = [];
-      if (model.caps.tools) capBadges.push('<span style="color: #4ade80;">🔧</span>');
-      if (model.caps.vision) capBadges.push('<span style="color: #60a5fa;">👁️</span>');
-      if (model.caps.thinking) capBadges.push('<span style="color: #f472b6;">🧠</span>');
-      const capBadgeHtml = capBadges.length > 0 ? `<span style="margin-left: 6px;">${capBadges.join(' ')}</span>` : '';
+      for (const model of filtered) {
+        const isActive = model.name === ollamaStatus?.model;
+        const modelCard = el('button');
+        modelCard.style.cssText = `
+          padding: 10px 12px;
+          background: ${model.isInstalled ? (isActive ? 'rgba(34, 197, 94, 0.2)' : 'rgba(34, 197, 94, 0.1)') : 'rgba(255,255,255,0.03)'};
+          border: 1px solid ${model.isInstalled ? (isActive ? '#22c55e' : 'rgba(34, 197, 94, 0.3)') : '#333'};
+          border-radius: 6px;
+          text-align: left;
+          cursor: pointer;
+          transition: all 0.2s;
+        `;
 
-      modelCard.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
-          <div style="font-size: 13px; font-weight: 500; color: #fff;">
-            ${model.name} ${isInstalled ? '<span style="color: #22c55e; font-size: 11px;">✓</span>' : ''}${capBadgeHtml}
-          </div>
-          <div style="font-size: 10px; padding: 2px 6px; background: rgba(59,130,246,0.2); border-radius: 3px; color: #60a5fa;">
-            ${model.params}
-          </div>
-        </div>
-        <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 4px;">${model.desc}</div>
-        <div style="display: flex; gap: 8px; font-size: 10px; color: rgba(255,255,255,0.4);">
-          <span>📦 ${model.size}</span>
-          <span>📝 ${model.ctx.toLocaleString()} ctx</span>
-        </div>
-      `;
+        if (!model.isInstalled) {
+          modelCard.addEventListener('mouseenter', () => {
+            modelCard.style.background = 'rgba(59, 130, 246, 0.1)';
+            modelCard.style.borderColor = 'rgba(59, 130, 246, 0.4)';
+          });
+          modelCard.addEventListener('mouseleave', () => {
+            modelCard.style.background = 'rgba(255,255,255,0.03)';
+            modelCard.style.borderColor = '#333';
+          });
+        }
 
-      if (!isInstalled) {
-        modelCard.addEventListener('click', async () => {
-          // Disable hover effects during download
-          modelCard.onmouseenter = null;
-          modelCard.onmouseleave = null;
-          modelCard.style.cursor = 'default';
-          modelCard.style.background = 'rgba(59, 130, 246, 0.1)';
-          modelCard.style.borderColor = 'rgba(59, 130, 246, 0.4)';
+        // Check if model might not fit in memory
+        const gpuMem = hw?.gpu_vram_gb || 0;
+        const ramMem = hw?.ram_gb || 8;
+        const availableMem = Math.max(gpuMem, ramMem);
+        const mightNotFit = model.ramNeeded && model.ramNeeded > availableMem + 4;
 
-          modelCard.innerHTML = `
-            <div style="font-size: 13px; font-weight: 500; color: #3b82f6; margin-bottom: 4px;">
-              Downloading ${model.name}...
+        // Build capability badges
+        const capBadges: string[] = [];
+        if (model.loading) {
+          capBadges.push('<span style="color: rgba(255,255,255,0.3);">...</span>');
+        } else if (model.caps) {
+          if (model.caps.tools) capBadges.push('<span style="color: #4ade80;">🔧</span>');
+          if (model.caps.vision) capBadges.push('<span style="color: #60a5fa;">👁️</span>');
+          if (model.caps.thinking) capBadges.push('<span style="color: #f472b6;">🧠</span>');
+        }
+        const capBadgeHtml = capBadges.length > 0 ? `<span style="margin-left: 6px;">${capBadges.join(' ')}</span>` : '';
+
+        modelCard.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+            <div style="font-size: 13px; font-weight: 500; color: #fff;">
+              ${model.name}
+              ${model.isInstalled ? `<span style="color: #22c55e; font-size: 11px;">${isActive ? '● Active' : '✓'}</span>` : ''}
+              ${capBadgeHtml}
             </div>
-            <div style="height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden; margin-bottom: 4px;">
-              <div class="progress-bar" style="height: 100%; width: 0%; background: #3b82f6; transition: width 0.3s;"></div>
-            </div>
-            <div class="progress-text" style="font-size: 11px; color: rgba(255,255,255,0.5);">Starting...</div>
-          `;
+            ${model.params ? `<div style="font-size: 10px; padding: 2px 6px; background: rgba(59,130,246,0.2); border-radius: 3px; color: #60a5fa;">${model.params}</div>` : ''}
+          </div>
+          ${model.desc ? `<div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 4px;">${model.desc}</div>` : ''}
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; font-size: 10px; color: rgba(255,255,255,0.4);">
+            ${model.size ? `<span>📦 ${model.size}</span>` : ''}
+            ${model.ctx ? `<span>📝 ${model.ctx.toLocaleString()} ctx</span>` : ''}
+            ${mightNotFit ? `<span style="color: #f59e0b;" title="Requires ~${model.ramNeeded}GB, you have ${Math.round(availableMem)}GB">⚠️ May not fit</span>` : ''}
+            ${!model.isInstalled && !mightNotFit ? '<span style="color: #3b82f6;">⬇ Download</span>' : ''}
+            ${!model.isInstalled && mightNotFit ? '<span style="color: #f59e0b;">⬇ Download (slow)</span>' : ''}
+          </div>
+        `;
 
-          const progressBar = modelCard.querySelector('.progress-bar') as HTMLElement;
-          const progressText = modelCard.querySelector('.progress-text') as HTMLElement;
+        // Click handler - select if installed, download if not
+        if (model.isInstalled) {
+          modelCard.addEventListener('click', async () => {
+            try {
+              await kernelRequest('ollama/set_model', { model: model.name });
+              await loadData();
+            } catch (e: unknown) {
+              const msg = e instanceof Error ? e.message : String(e);
+              alert('Failed to set model: ' + msg);
+            }
+          });
 
-          try {
-            await downloadModelWithProgress(model.name, (status) => {
-              if (progressBar) progressBar.style.width = `${status.progress}%`;
-              if (progressText) {
-                if (status.total > 0) {
-                  progressText.textContent = `${status.progress}% - ${formatBytes(status.completed)} / ${formatBytes(status.total)}`;
-                } else {
-                  progressText.textContent = status.status || 'Downloading...';
-                }
-              }
-            });
-
-            modelCard.style.background = 'rgba(34, 197, 94, 0.1)';
-            modelCard.style.borderColor = 'rgba(34, 197, 94, 0.3)';
-            modelCard.innerHTML = `
-              <div style="font-size: 13px; font-weight: 500; color: #22c55e; margin-bottom: 2px;">
-                ✓ ${model.name}
-              </div>
-              <div style="font-size: 11px; color: rgba(255,255,255,0.5);">Download complete!</div>
-            `;
-            setTimeout(() => void loadData(), 1500);
-          } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : String(e);
-            modelCard.style.background = 'rgba(239, 68, 68, 0.1)';
-            modelCard.style.borderColor = 'rgba(239, 68, 68, 0.3)';
-            modelCard.innerHTML = `
-              <div style="font-size: 13px; font-weight: 500; color: #ef4444; margin-bottom: 2px;">✗ Failed</div>
-              <div style="font-size: 11px; color: rgba(255,255,255,0.5);">${msg}</div>
-            `;
+          // Trigger capability loading for installed models
+          if (model.loading) {
+            void loadModelCapabilities(model.name);
           }
-        });
+        } else {
+          modelCard.addEventListener('click', async () => {
+            // Disable hover effects during download
+            modelCard.onmouseenter = null;
+            modelCard.onmouseleave = null;
+            modelCard.style.cursor = 'default';
+            modelCard.style.background = 'rgba(59, 130, 246, 0.1)';
+            modelCard.style.borderColor = 'rgba(59, 130, 246, 0.4)';
+
+            modelCard.innerHTML = `
+              <div style="font-size: 13px; font-weight: 500; color: #3b82f6; margin-bottom: 4px;">
+                Downloading ${model.name}...
+              </div>
+              <div style="height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden; margin-bottom: 4px;">
+                <div class="progress-bar" style="height: 100%; width: 0%; background: #3b82f6; transition: width 0.3s;"></div>
+              </div>
+              <div class="progress-text" style="font-size: 11px; color: rgba(255,255,255,0.5);">Starting...</div>
+            `;
+
+            const progressBar = modelCard.querySelector('.progress-bar') as HTMLElement;
+            const progressText = modelCard.querySelector('.progress-text') as HTMLElement;
+
+            try {
+              await downloadModelWithProgress(model.name, (status) => {
+                if (progressBar) progressBar.style.width = `${status.progress}%`;
+                if (progressText) {
+                  if (status.total > 0) {
+                    progressText.textContent = `${status.progress}% - ${formatBytes(status.completed)} / ${formatBytes(status.total)}`;
+                  } else {
+                    progressText.textContent = status.status || 'Downloading...';
+                  }
+                }
+              });
+
+              modelCard.style.background = 'rgba(34, 197, 94, 0.1)';
+              modelCard.style.borderColor = 'rgba(34, 197, 94, 0.3)';
+              modelCard.innerHTML = `
+                <div style="font-size: 13px; font-weight: 500; color: #22c55e; margin-bottom: 2px;">
+                  ✓ ${model.name}
+                </div>
+                <div style="font-size: 11px; color: rgba(255,255,255,0.5);">Download complete!</div>
+              `;
+              setTimeout(() => void loadData(), 1500);
+            } catch (e: unknown) {
+              const msg = e instanceof Error ? e.message : String(e);
+              modelCard.style.background = 'rgba(239, 68, 68, 0.1)';
+              modelCard.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+              modelCard.innerHTML = `
+                <div style="font-size: 13px; font-weight: 500; color: #ef4444; margin-bottom: 2px;">✗ Failed</div>
+                <div style="font-size: 11px; color: rgba(255,255,255,0.5);">${msg}</div>
+              `;
+            }
+          });
+        }
+
+        modelGrid.appendChild(modelCard);
       }
-      popularGrid.appendChild(modelCard);
     }
-    modelSection.appendChild(popularGrid);
+
+    renderModelGrid();
+    modelSection.appendChild(modelGrid);
 
     // Custom model download
     const downloadRow = createSettingRow('Download Other Model', 'Enter any model from ollama.com/library');

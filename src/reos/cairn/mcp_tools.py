@@ -684,13 +684,17 @@ def list_tools() -> list[Tool]:
         ),
         Tool(
             name="cairn_update_scene",
-            description="Update a Scene's title, intent, or notes.",
+            description=(
+                "Update a Scene's properties including title, notes, stage, or move it to a different Act. "
+                "To move a scene, provide new_act_name with the target Act. "
+                "For moves, act_name is optional - the scene will be found by name across all Acts."
+            ),
             input_schema={
                 "type": "object",
                 "properties": {
                     "act_name": {
                         "type": "string",
-                        "description": "Name of the Act (fuzzy matched)",
+                        "description": "Name of the Act containing the Scene (fuzzy matched). Optional for move operations.",
                     },
                     "scene_name": {
                         "type": "string",
@@ -700,16 +704,24 @@ def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "New title for the Scene",
                     },
-                    "new_intent": {
+                    "new_act_name": {
                         "type": "string",
-                        "description": "New intent for the Scene",
+                        "description": "Move scene to this Act (fuzzy matched). This updates the scene's act_id.",
+                    },
+                    "new_stage": {
+                        "type": "string",
+                        "description": "New stage: planning, in_progress, awaiting_data, or complete",
                     },
                     "new_notes": {
                         "type": "string",
                         "description": "New notes for the Scene",
                     },
+                    "new_link": {
+                        "type": "string",
+                        "description": "New link/URL for the Scene",
+                    },
                 },
-                "required": ["act_name", "scene_name"],
+                "required": ["scene_name"],
             },
         ),
         Tool(
@@ -1191,17 +1203,24 @@ class CairnToolHandler:
         self,
         store: CairnStore,
         play_store: Any | None = None,
+        llm: Any | None = None,
     ):
         """Initialize the handler.
 
         Args:
             store: CAIRN SQLite store.
             play_store: Optional Play store for entity titles.
+            llm: LLM provider for entity resolution (uses cheap local inference).
         """
         self.store = store
         self.play_store = play_store
+        self._llm = llm
         self._thunderbird: ThunderbirdBridge | None = None
         self._surfacer: CairnSurfacer | None = None
+
+    def set_llm(self, llm: Any):
+        """Set the LLM provider for entity resolution."""
+        self._llm = llm
 
     @property
     def thunderbird(self) -> ThunderbirdBridge | None:
@@ -2297,6 +2316,64 @@ class CairnToolHandler:
 
         return None
 
+    def _fuzzy_match_all(
+        self, query: str, candidates: list[tuple[str, str]], threshold: float = 0.3
+    ) -> list[tuple[str, str, float]]:
+        """Find ALL candidates matching above threshold (for disambiguation).
+
+        Args:
+            query: The search string.
+            candidates: List of (id, name) tuples to match against.
+            threshold: Minimum score to include (default 0.3).
+
+        Returns:
+            List of (id, name, score) sorted by score descending.
+        """
+        if not candidates:
+            return []
+
+        query_lower = query.lower().strip()
+        matches = []
+
+        for cid, name in candidates:
+            name_lower = name.lower()
+            score = 0.0
+
+            # Exact match
+            if name_lower == query_lower:
+                score = 1.0
+            # Substring match
+            elif query_lower in name_lower:
+                score = len(query_lower) / len(name_lower)
+            elif name_lower in query_lower:
+                score = len(name_lower) / len(query_lower) * 0.8
+            else:
+                # Word overlap
+                query_words = set(query_lower.split())
+                name_words = set(name_lower.split())
+                overlap = query_words & name_words
+                if overlap:
+                    score = len(overlap) / max(len(query_words), len(name_words))
+
+            if score >= threshold:
+                matches.append((cid, name, score))
+
+        # Sort by score descending
+        matches.sort(key=lambda x: x[2], reverse=True)
+        return matches
+
+    def _needs_disambiguation(self, matches: list[tuple[str, str, float]]) -> bool:
+        """Check if multiple matches are close enough to need disambiguation.
+
+        Returns True if there are 2+ matches with similar scores (within 0.2 of each other).
+        """
+        if len(matches) < 2:
+            return False
+
+        top_score = matches[0][2]
+        close_matches = [m for m in matches if top_score - m[2] < 0.2]
+        return len(close_matches) >= 2
+
     def _list_beats(self, args: dict[str, Any]) -> dict[str, Any]:
         """List all beats with their locations."""
         from reos import play_fs
@@ -2799,58 +2876,252 @@ class CairnToolHandler:
             return {"success": False, "error": str(e)}
 
     def _update_scene(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Update a scene."""
+        """Update a scene's fields or move it to a different Act.
+
+        Supports updating: title, stage, notes, link, and act (via new_act_name).
+        Moving a scene is just updating its act_id field.
+
+        Uses LLM-based entity resolution - no fuzzy matching.
+        When uncertain, returns clarification request for atomic verification to handle.
+        """
         from reos import play_fs
 
         act_name = args.get("act_name")
         scene_name = args.get("scene_name")
         new_title = args.get("new_title")
-        new_intent = args.get("new_intent")
+        new_act_name = args.get("new_act_name")  # For moving to different Act
+        new_stage = args.get("new_stage")
         new_notes = args.get("new_notes")
+        new_link = args.get("new_link")
+        conversation_context = args.get("_conversation_context", "")  # Injected by bridge
 
-        if not act_name:
-            raise CairnToolError("missing_param", "act_name is required")
         if not scene_name:
             raise CairnToolError("missing_param", "scene_name is required")
 
         acts, _ = play_fs.list_acts()
-        act_lookup = [(a.act_id, a.title) for a in acts]
 
-        act_match = self._fuzzy_match(act_name, act_lookup)
-        if not act_match:
-            return {
-                "success": False,
-                "error": f"Could not find Act matching '{act_name}'",
-            }
+        # Build scene list for LLM resolution
+        all_scenes = []
+        for act in acts:
+            scenes = play_fs.list_scenes(act_id=act.act_id)
+            for s in scenes:
+                all_scenes.append({
+                    "id": s.scene_id,
+                    "scene_id": s.scene_id,
+                    "title": s.title,
+                    "act_id": act.act_id,
+                    "act_title": act.title,
+                })
 
-        act_id, act_title, _ = act_match
-        scenes = play_fs.list_scenes(act_id=act_id)
-        scene_lookup = [(s.scene_id, s.title) for s in scenes]
+        # Use LLM-based entity resolution
+        if self._llm:
+            from reos.atomic_ops.entity_resolver import EntityResolver
+            resolver = EntityResolver(self._llm)
 
-        scene_match = self._fuzzy_match(scene_name, scene_lookup)
+            # Resolve scene reference
+            resolved = resolver.resolve_scene(
+                user_reference=scene_name,
+                available_scenes=all_scenes,
+                conversation_context=conversation_context,
+            )
+
+            # If clarification needed, return it for atomic verification to handle
+            if resolved.needs_clarification or resolved.confidence < 0.7:
+                return {
+                    "success": False,
+                    "needs_clarification": True,
+                    "clarification_prompt": resolved.clarification_prompt or f"Which scene did you mean by '{scene_name}'?",
+                    "candidates": resolved.alternatives or [
+                        {"title": s["title"], "act": s["act_title"]}
+                        for s in all_scenes[:10]
+                    ],
+                    "confidence": resolved.confidence,
+                    "reasoning": resolved.reasoning,
+                }
+
+            if not resolved.entity_id:
+                return {
+                    "success": False,
+                    "error": f"Could not find scene matching '{scene_name}'",
+                    "reasoning": resolved.reasoning,
+                }
+
+            # Found the scene
+            scene_id = resolved.entity_id
+            old_scene_title = resolved.entity_name
+
+            # Find the source act
+            source_act_id = None
+            source_act_title = None
+            for s in all_scenes:
+                if s["scene_id"] == scene_id:
+                    source_act_id = s["act_id"]
+                    source_act_title = s["act_title"]
+                    break
+        else:
+            # Fallback to fuzzy match if no LLM (shouldn't happen in production)
+            act_lookup = [(a.act_id, a.title) for a in acts]
+            source_act_id = None
+            source_act_title = None
+
+            if act_name:
+                act_match = self._fuzzy_match(act_name, act_lookup)
+                if not act_match:
+                    return {
+                        "success": False,
+                        "error": f"Could not find Act matching '{act_name}'",
+                        "available_acts": [a.title for a in acts],
+                    }
+                source_act_id, source_act_title, _ = act_match
+                scenes = play_fs.list_scenes(act_id=source_act_id)
+                scene_lookup = [(s.scene_id, s.title) for s in scenes]
+                scene_match = self._fuzzy_match(scene_name, scene_lookup)
+            else:
+                flat_lookup = [(s["scene_id"], s["title"]) for s in all_scenes]
+                scene_match = self._fuzzy_match(scene_name, flat_lookup)
+                if scene_match:
+                    for s in all_scenes:
+                        if s["scene_id"] == scene_match[0]:
+                            source_act_id = s["act_id"]
+                            source_act_title = s["act_title"]
+                            break
+
+            if not scene_match:
+                return {
+                    "success": False,
+                    "error": f"Could not find scene matching '{scene_name}'",
+                }
+
+            scene_id = scene_match[0]
+            old_scene_title = scene_match[1]
+
+        # Find scene - check for disambiguation when multiple matches
+        if act_name:
+            # Search within the specified act
+            all_matches = self._fuzzy_match_all(scene_name, scene_lookup)
+            if self._needs_disambiguation(all_matches):
+                # Multiple close matches - ask user to clarify
+                return {
+                    "success": False,
+                    "error": "Multiple scenes match. Please be more specific.",
+                    "disambiguation_needed": True,
+                    "candidates": [
+                        {"title": m[1], "score": round(m[2], 2)}
+                        for m in all_matches[:5]
+                    ],
+                    "hint": f"Did you mean one of these scenes in '{source_act_title}'?",
+                }
+            scene_match = all_matches[0] if all_matches else None
+        else:
+            # Search across all acts - build a map to get act info back
+            scene_to_act = {}  # scene_id -> (act_id, act_title)
+            flat_lookup = []
+            for scene_id, scene_title, act_id, act_title in scene_lookup:
+                flat_lookup.append((scene_id, scene_title))
+                scene_to_act[scene_id] = (act_id, act_title)
+
+            all_matches = self._fuzzy_match_all(scene_name, flat_lookup)
+            if self._needs_disambiguation(all_matches):
+                # Multiple close matches - ask user to clarify with act context
+                candidates = []
+                for m in all_matches[:5]:
+                    act_info = scene_to_act.get(m[0], ("", "Unknown"))
+                    candidates.append({
+                        "title": m[1],
+                        "act": act_info[1],
+                        "score": round(m[2], 2),
+                    })
+                return {
+                    "success": False,
+                    "error": "Multiple scenes match. Please be more specific.",
+                    "disambiguation_needed": True,
+                    "candidates": candidates,
+                    "hint": "Which scene did you mean? Please use the exact title.",
+                }
+
+            scene_match = all_matches[0] if all_matches else None
+            if scene_match:
+                found_scene_id = scene_match[0]
+                source_act_id, source_act_title = scene_to_act[found_scene_id]
+
         if not scene_match:
-            return {
-                "success": False,
-                "error": f"Could not find Scene matching '{scene_name}' in Act '{act_title}'",
-                "available_scenes": [s.title for s in scenes],
-            }
+            if act_name:
+                # We were searching in a specific act
+                return {
+                    "success": False,
+                    "error": f"Could not find Scene matching '{scene_name}' in Act '{source_act_title}'",
+                    "available_scenes": [s[1] for s in scene_lookup],  # scene_lookup is [(id, title)]
+                }
+            else:
+                # We searched all acts
+                all_scenes = [s[1] for s in flat_lookup] if flat_lookup else []
+                return {
+                    "success": False,
+                    "error": f"Could not find Scene matching '{scene_name}' in any Act",
+                    "available_scenes": all_scenes[:20],  # Limit for readability
+                }
 
         scene_id, old_scene_title, _ = scene_match
+        messages = []
 
         try:
-            play_fs.update_scene(
-                act_id=act_id,
-                scene_id=scene_id,
-                title=new_title,
-                intent=new_intent,
-                notes=new_notes,
-            )
+            # Handle move to different Act (updating act_id field)
+            if new_act_name:
+                target_act_match = self._fuzzy_match(new_act_name, act_lookup)
+                if not target_act_match:
+                    return {
+                        "success": False,
+                        "error": f"Could not find target Act matching '{new_act_name}'",
+                        "available_acts": [a.title for a in acts],
+                    }
+
+                target_act_id, target_act_title, _ = target_act_match
+
+                if target_act_id != source_act_id:
+                    play_fs.move_scene(
+                        scene_id=scene_id,
+                        source_act_id=source_act_id,
+                        target_act_id=target_act_id,
+                    )
+                    messages.append(f"Moved from '{source_act_title}' to '{target_act_title}'")
+                    # Update source_act_id for subsequent update_scene call
+                    source_act_id = target_act_id
+                    source_act_title = target_act_title
+
+            # Handle other field updates
+            has_updates = any([new_title, new_stage, new_notes, new_link])
+            if has_updates:
+                play_fs.update_scene(
+                    act_id=source_act_id,
+                    scene_id=scene_id,
+                    title=new_title,
+                    stage=new_stage,
+                    notes=new_notes,
+                    link=new_link,
+                )
+                if new_title:
+                    messages.append(f"Title changed to '{new_title}'")
+                if new_stage:
+                    messages.append(f"Stage changed to '{new_stage}'")
+                if new_notes:
+                    messages.append("Notes updated")
+                if new_link:
+                    messages.append("Link updated")
+
+            if not messages:
+                return {
+                    "success": False,
+                    "error": "No changes specified. Provide new_title, new_act_name, new_stage, new_notes, or new_link.",
+                }
+
             return {
                 "success": True,
-                "message": f"Updated Scene '{old_scene_title}' in Act '{act_title}'",
+                "message": f"Updated Scene '{old_scene_title}': {'; '.join(messages)}",
                 "scene_id": scene_id,
                 "old_title": old_scene_title,
                 "new_title": new_title or old_scene_title,
+                "act_id": source_act_id,
+                "act_title": source_act_title,
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
