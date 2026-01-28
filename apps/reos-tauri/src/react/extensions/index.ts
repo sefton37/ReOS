@@ -3,3 +3,4 @@
  */
 
 export { SlashCommand } from './SlashCommand';
+export { DocumentNode } from './DocumentNode';

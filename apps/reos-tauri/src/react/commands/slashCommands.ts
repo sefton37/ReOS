@@ -4,13 +4,23 @@
 
 import type { Editor } from '@tiptap/react';
 
+/**
+ * Context passed to slash command actions for async operations.
+ */
+export interface SlashCommandContext {
+  kernelRequest: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+  actId: string | null;
+}
+
 export interface SlashCommand {
   id: string;
   label: string;
   description: string;
   icon: string;
   keywords: string[];
-  action: (editor: Editor) => void;
+  /** If true, this command requires context (kernelRequest, actId) */
+  requiresContext?: boolean;
+  action: (editor: Editor, context?: SlashCommandContext) => void | Promise<void>;
 }
 
 /**
@@ -120,6 +130,93 @@ export const slashCommands: SlashCommand[] = [
     keywords: ['quote', 'blockquote', 'callout'],
     action: (editor) => {
       editor.chain().focus().toggleBlockquote().run();
+    },
+  },
+
+  // Data blocks
+  {
+    id: 'table',
+    label: 'Table',
+    description: 'Data table with rows and columns',
+    icon: '⊞',
+    keywords: ['table', 'grid', 'data', 'spreadsheet', 'cells'],
+    action: (editor) => {
+      // Prompt for dimensions
+      const rowsInput = prompt('Number of data rows:', '3');
+      if (rowsInput === null) return; // User cancelled
+
+      const colsInput = prompt('Number of columns:', '3');
+      if (colsInput === null) return; // User cancelled
+
+      const dataRows = Math.max(1, Math.min(20, parseInt(rowsInput, 10) || 3));
+      const cols = Math.max(1, Math.min(10, parseInt(colsInput, 10) || 3));
+
+      // Add 1 for header row + requested data rows
+      editor.chain().focus().insertTable({ rows: dataRows + 1, cols, withHeaderRow: true }).run();
+    },
+  },
+
+  // Knowledge base blocks
+  {
+    id: 'document',
+    label: 'Document',
+    description: 'Insert document into knowledge base',
+    icon: '📄',
+    keywords: ['document', 'pdf', 'upload', 'attach', 'file', 'insert', 'docx', 'word', 'excel'],
+    requiresContext: true,
+    action: async (editor, context) => {
+      if (!context) {
+        console.warn('Document command requires context');
+        return;
+      }
+
+      try {
+        // Import dialog dynamically to avoid bundling issues
+        const { open } = await import('@tauri-apps/plugin-dialog');
+
+        const filePath = await open({
+          multiple: false,
+          filters: [
+            {
+              name: 'Documents',
+              extensions: ['pdf', 'docx', 'doc', 'txt', 'md', 'csv', 'xlsx', 'xls'],
+            },
+          ],
+          title: 'Select document to add to knowledge base',
+        });
+
+        if (!filePath || typeof filePath !== 'string') {
+          return; // User cancelled
+        }
+
+        // Call backend to process document
+        const result = await context.kernelRequest('documents/insert', {
+          file_path: filePath,
+          act_id: context.actId,
+        }) as {
+          documentId: string;
+          fileName: string;
+          fileType: string;
+          fileSize: number;
+          chunkCount: number;
+        };
+
+        // Insert document block into editor
+        editor.chain().focus().insertContent({
+          type: 'documentBlock',
+          attrs: {
+            documentId: result.documentId,
+            fileName: result.fileName,
+            fileType: result.fileType,
+            fileSize: result.fileSize,
+            chunkCount: result.chunkCount,
+          },
+        }).run();
+      } catch (err) {
+        console.error('Failed to insert document:', err);
+        // Show error to user
+        alert(`Failed to insert document: ${err instanceof Error ? err.message : String(err)}`);
+      }
     },
   },
 ];

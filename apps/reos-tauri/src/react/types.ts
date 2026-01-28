@@ -18,7 +18,9 @@ export type BlockType =
   | 'code'
   | 'divider'
   | 'callout'
-  | 'scene';
+  | 'scene'
+  | 'table'
+  | 'document_chunk';
 
 /**
  * Block types that support nesting children.

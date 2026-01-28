@@ -516,6 +516,58 @@ Embedding service gracefully degrades if sentence-transformers is not installed:
 
 ---
 
+## Document Integration
+
+The memory system indexes document chunks for RAG (Retrieval-Augmented Generation). When users insert documents via the `/document` slash command, the system:
+
+1. **Extracts text** from PDF, DOCX, TXT, MD, CSV, XLSX files
+2. **Chunks text** into ~500 token segments with overlap
+3. **Creates blocks** of type `document_chunk` for each segment
+4. **Indexes blocks** via `memory/index/batch` for semantic search
+
+### How Documents Appear in Memory
+
+Document chunks are treated like any other block:
+
+```
+User: "What Python experience do I have?"
+        │
+        ▼
+┌────────────────────────────────────────────────────────┐
+│ Memory Retrieval                                        │
+│                                                         │
+│ Semantic search returns:                                │
+│ - document_chunk (resume.pdf, page 1): 0.85 score      │
+│ - paragraph (career notes): 0.72 score                 │
+│ - document_chunk (resume.pdf, page 2): 0.68 score      │
+└────────────────────────────────────────────────────────┘
+```
+
+### Chunk Properties
+
+Each `document_chunk` block has properties that preserve source context:
+
+| Property | Description |
+|----------|-------------|
+| `source_document_id` | Links back to parent document |
+| `chunk_index` | Position in document (0-based) |
+| `page_number` | Source page for PDFs |
+| `section_title` | Detected section header |
+| `total_chunks` | Total chunks in document |
+
+This metadata appears in memory context, helping CAIRN cite sources:
+
+```markdown
+### Memory #3 [████] (semantic)
+*Type: document_chunk | Score: 0.85 | Source: resume.pdf (page 1)*
+
+Senior Python developer with 5 years experience building Django applications...
+```
+
+See [Documents](./documents.md) for complete documentation on document ingestion.
+
+---
+
 ## Future Extensions
 
 - **Visualization**: Graph view of block relationships in UI
@@ -529,6 +581,7 @@ Embedding service gracefully degrades if sentence-transformers is not installed:
 ## Related Documentation
 
 - [Blocks API](./blocks-api.md) — Block system that memory extends
+- [Documents](./documents.md) — Document ingestion and RAG
 - [RLHF Learning](./rlhf-learning.md) — Feedback system that feeds memory
 - [CAIRN Architecture](./cairn_architecture.md) — Agent that uses memory context
 - [Foundation](./FOUNDATION.md) — Core principles (local-first, privacy)

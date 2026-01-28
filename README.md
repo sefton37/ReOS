@@ -151,6 +151,7 @@ This structure lets CAIRN understand context. When you say "what's next?", it kn
 - **Calendar integration** — Syncs with Thunderbird (including recurring events)
 - **Contact knowledge** — Knows who's involved in what
 - **Waiting-on tracking** — Knows what you're blocked on
+- **Document knowledge base** — Import PDFs, Word docs, and more for semantic search
 - **Coherence Kernel** — Filters distractions based on your stated identity and goals
 
 ### Conclusion
@@ -425,6 +426,7 @@ Talking Rock is for you if:
 - [x] Smart surfacing ("what needs attention")
 - [x] Calendar integration (Thunderbird)
 - [x] Contact knowledge graph
+- [x] Document knowledge base (PDF, DOCX, TXT, MD, CSV, XLSX)
 - [x] Coherence Kernel for distraction filtering
 - [x] 45 MCP tools
 - [ ] 1B model optimization and testing
@@ -481,6 +483,8 @@ Talking Rock is for you if:
 
 - [Security Design](docs/security.md) — How we protect your system
 - [Blocks API](docs/blocks-api.md) — Block-based content system
+- [Documents](docs/documents.md) — Document ingestion and RAG
+- [Memory System](docs/memory-system.md) — Semantic search and retrieval
 - [Technical Roadmap](docs/tech-roadmap.md) — Development plans
 
 ---

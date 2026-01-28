@@ -4,14 +4,20 @@ import Placeholder from '@tiptap/extension-placeholder';
 import Link from '@tiptap/extension-link';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
+import Table from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableHeader from '@tiptap/extension-table-header';
+import TableCell from '@tiptap/extension-table-cell';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import tippy, { Instance as TippyInstance } from 'tippy.js';
 import type { BlockEditorProps, Block, RichTextSpan } from './types';
 import { useDebounce } from './hooks/useDebounce';
 import { SlashCommand } from './extensions/SlashCommand';
+import { DocumentNode } from './extensions/DocumentNode';
 import { SlashMenu, type SlashMenuHandle } from './commands/SlashMenu';
-import { slashCommands, filterCommands } from './commands/slashCommands';
+import { slashCommands, filterCommands, type SlashCommandContext } from './commands/slashCommands';
 import { FormattingToolbar } from './toolbar/FormattingToolbar';
+import { TableContextMenu } from './components/TableContextMenu';
 
 // Styles for the editor
 const editorStyles = `
@@ -207,10 +213,166 @@ const editorStyles = `
   .block-editor-status.error {
     color: #ef4444;
   }
+
+  /* Table styles */
+  .block-editor .ProseMirror table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
+    margin: 1em 0;
+    overflow: hidden;
+  }
+
+  .block-editor .ProseMirror td,
+  .block-editor .ProseMirror th {
+    min-width: 1em;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 8px 12px;
+    vertical-align: top;
+    box-sizing: border-box;
+    position: relative;
+  }
+
+  .block-editor .ProseMirror th {
+    font-weight: 600;
+    text-align: left;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f3f4f6;
+  }
+
+  .block-editor .ProseMirror td {
+    background: rgba(0, 0, 0, 0.1);
+  }
+
+  .block-editor .ProseMirror .selectedCell:after {
+    z-index: 2;
+    position: absolute;
+    content: "";
+    left: 0; right: 0; top: 0; bottom: 0;
+    background: rgba(34, 197, 94, 0.15);
+    pointer-events: none;
+  }
+
+  .block-editor .ProseMirror .column-resize-handle {
+    position: absolute;
+    right: -2px;
+    top: 0;
+    bottom: -2px;
+    width: 4px;
+    background-color: rgba(34, 197, 94, 0.5);
+    pointer-events: none;
+  }
+
+  .block-editor .ProseMirror.resize-cursor {
+    cursor: ew-resize;
+    cursor: col-resize;
+  }
+
+  /* Table context menu */
+  .table-context-menu {
+    position: fixed;
+    background: #1f2937;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 4px 0;
+    min-width: 180px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+    z-index: 1000;
+  }
+
+  .table-context-menu-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    color: #e5e7eb;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .table-context-menu-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .table-context-menu-item.danger {
+    color: #ef4444;
+  }
+
+  .table-context-menu-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 4px 0;
+  }
 `;
 
 interface BlocksPageTreeResult {
   blocks: Block[];
+}
+
+/**
+ * Table data structure for markdown conversion.
+ */
+interface TableData {
+  headers: string[];
+  rows: string[][];
+}
+
+/**
+ * Extract table data from a TipTap table node for markdown conversion.
+ */
+function extractTableData(tableNode: Record<string, unknown>): TableData {
+  const tableContent = tableNode.content as Array<Record<string, unknown>> | undefined;
+  const headers: string[] = [];
+  const rows: string[][] = [];
+
+  if (!tableContent) return { headers, rows };
+
+  for (let rowIndex = 0; rowIndex < tableContent.length; rowIndex++) {
+    const row = tableContent[rowIndex];
+    const rowContent = row.content as Array<Record<string, unknown>> | undefined;
+    if (!rowContent) continue;
+
+    const cells: string[] = [];
+    for (const cell of rowContent) {
+      const cellType = cell.type as string;
+      const cellContent = cell.content as Array<Record<string, unknown>> | undefined;
+
+      // Extract text from cell content
+      let cellText = '';
+      if (cellContent) {
+        for (const paragraph of cellContent) {
+          const paragraphContent = paragraph.content as Array<Record<string, unknown>> | undefined;
+          if (paragraphContent) {
+            for (const textNode of paragraphContent) {
+              if (textNode.type === 'text') {
+                cellText += textNode.text as string || '';
+              }
+            }
+          }
+        }
+      }
+      cells.push(cellText);
+
+      // First row with tableHeader cells is the header row
+      if (rowIndex === 0 && cellType === 'tableHeader') {
+        headers.push(cellText);
+      }
+    }
+
+    // If we found headers, the first row is already processed
+    if (headers.length > 0 && rowIndex === 0) {
+      continue;
+    }
+
+    rows.push(cells);
+  }
+
+  // If no explicit headers found, treat first row as headers
+  if (headers.length === 0 && rows.length > 0) {
+    headers.push(...rows.shift()!);
+  }
+
+  return { headers, rows };
 }
 
 /**
@@ -287,6 +449,16 @@ function nodeToBlock(
     case 'blockquote':
       blockType = 'callout';
       break;
+    case 'table':
+      blockType = 'table';
+      // Store table structure in properties for markdown conversion
+      properties.tableData = extractTableData(node);
+      break;
+    case 'tableRow':
+    case 'tableHeader':
+    case 'tableCell':
+      // These are handled by the table parent
+      return null;
     case 'listItem':
       // List items are handled by their parent
       return null;
@@ -498,6 +670,17 @@ export function BlockEditor({
   const [loadError, setLoadError] = useState<string | null>(null);
   const isInitialLoad = useRef(true);
 
+  // Context for slash commands that need kernel access
+  const slashCommandContextRef = useRef<SlashCommandContext>({
+    kernelRequest,
+    actId,
+  });
+
+  // Keep context ref up to date
+  useEffect(() => {
+    slashCommandContextRef.current = { kernelRequest, actId };
+  }, [kernelRequest, actId]);
+
   // Load blocks from backend
   useEffect(() => {
     async function loadBlocks() {
@@ -620,7 +803,8 @@ export function BlockEditor({
     [actId, pageId, kernelRequest, onSaveStatusChange],
   );
 
-  const debouncedSave = useDebounce(saveBlocks, 500);
+  // Debounced save with flush-on-unmount to prevent data loss
+  const debouncedSave = useDebounce(saveBlocks, 500, true);
 
   const editor = useEditor(
     {
@@ -648,6 +832,16 @@ export function BlockEditor({
         TaskItem.configure({
           nested: true,
         }),
+        Table.configure({
+          resizable: true,
+          handleWidth: 5,
+          cellMinWidth: 50,
+          lastColumnResizable: true,
+        }),
+        TableRow,
+        TableHeader,
+        TableCell,
+        DocumentNode,
         SlashCommand.configure({
           suggestion: {
             items: ({ query }: { query: string }) => {
@@ -668,6 +862,8 @@ export function BlockEditor({
                         popup?.[0]?.hide();
                       },
                       position: { top: 0, left: 0 },
+                      // Pass context for commands that need kernel access
+                      context: slashCommandContextRef.current,
                     },
                     editor: editorInstance,
                   });
@@ -689,7 +885,11 @@ export function BlockEditor({
                 },
 
                 onUpdate(props) {
-                  component?.updateProps(props);
+                  // Update with latest context
+                  component?.updateProps({
+                    ...props,
+                    context: slashCommandContextRef.current,
+                  });
 
                   if (!props.clientRect) {
                     return;
@@ -727,6 +927,13 @@ export function BlockEditor({
         const json = editor.getJSON();
         debouncedSave(json);
       },
+      onBlur: ({ editor }) => {
+        // Save immediately when editor loses focus (user clicked away)
+        if (!isInitialLoad.current) {
+          const json = editor.getJSON();
+          void saveBlocks(json);
+        }
+      },
       editorProps: {
         attributes: {
           class: 'ProseMirror',
@@ -743,6 +950,38 @@ export function BlockEditor({
       isInitialLoad.current = true;
     }
   }, [editor, initialContent]);
+
+  // Save immediately on window close (beforeunload) to prevent data loss
+  useEffect(() => {
+    if (!editor || !actId) return;
+
+    const handleBeforeUnload = () => {
+      // Save synchronously-ish by firing the save (can't truly await in beforeunload)
+      // The flush-on-unmount in useDebounce handles most cases, but this is a safety net
+      const json = editor.getJSON();
+      if (json && !isInitialLoad.current) {
+        // Fire and forget - we can't await here
+        void saveBlocks(json);
+      }
+    };
+
+    // Also save when page becomes hidden (tab switch, minimize, etc.)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        const json = editor.getJSON();
+        if (json && !isInitialLoad.current) {
+          void saveBlocks(json);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [editor, actId, saveBlocks]);
 
   if (loading) {
     return (
@@ -774,6 +1013,7 @@ export function BlockEditor({
         {saveStatus === 'error' && 'Error saving'}
         {saveStatus === 'idle' && <span style={{ opacity: 0.5 }}>Type / for commands</span>}
       </div>
+      <TableContextMenu editor={editor} />
     </>
   );
 }
@@ -849,6 +1089,25 @@ function blocksToMarkdown(blocks: Block[]): string {
       case 'callout':
         lines.push(`> ${text}`);
         lines.push('');
+        break;
+      case 'table':
+        const tableData = block.properties.tableData as TableData | undefined;
+        if (tableData && tableData.headers.length > 0) {
+          // Header row
+          lines.push('| ' + tableData.headers.join(' | ') + ' |');
+          // Separator row
+          lines.push('| ' + tableData.headers.map(() => '---').join(' | ') + ' |');
+          // Data rows
+          for (const row of tableData.rows) {
+            // Pad row to match header length
+            const paddedRow = [...row];
+            while (paddedRow.length < tableData.headers.length) {
+              paddedRow.push('');
+            }
+            lines.push('| ' + paddedRow.join(' | ') + ' |');
+          }
+          lines.push('');
+        }
         break;
     }
   }
@@ -983,6 +1242,66 @@ function markdownToTiptap(markdown: string): Record<string, unknown> {
         content: [{ type: 'paragraph', content: [{ type: 'text', text: line.slice(2) }] }],
       });
       i++;
+      continue;
+    }
+
+    // Table (starts with |)
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      const tableRows: string[][] = [];
+      let hasHeaderSeparator = false;
+
+      // Collect all table lines
+      while (i < lines.length) {
+        const tableLine = lines[i].trim();
+        if (!tableLine.startsWith('|') || !tableLine.endsWith('|')) {
+          break;
+        }
+
+        // Parse cells from line (remove leading/trailing |, split by |)
+        const cells = tableLine.slice(1, -1).split('|').map(c => c.trim());
+
+        // Check if this is the separator row (e.g., |---|---|)
+        if (cells.every(c => /^[-:]+$/.test(c))) {
+          hasHeaderSeparator = true;
+          i++;
+          continue;
+        }
+
+        tableRows.push(cells);
+        i++;
+      }
+
+      if (tableRows.length > 0) {
+        // Convert to TipTap table format
+        const headerRow = tableRows[0];
+        const dataRows = tableRows.slice(1);
+
+        const tiptapRows: Array<Record<string, unknown>> = [];
+
+        // Header row
+        tiptapRows.push({
+          type: 'tableRow',
+          content: headerRow.map(cellText => ({
+            type: 'tableHeader',
+            attrs: { colspan: 1, rowspan: 1 },
+            content: [{ type: 'paragraph', content: cellText ? [{ type: 'text', text: cellText }] : [] }],
+          })),
+        });
+
+        // Data rows
+        for (const row of dataRows) {
+          tiptapRows.push({
+            type: 'tableRow',
+            content: row.map(cellText => ({
+              type: 'tableCell',
+              attrs: { colspan: 1, rowspan: 1 },
+              content: [{ type: 'paragraph', content: cellText ? [{ type: 'text', text: cellText }] : [] }],
+            })),
+          });
+        }
+
+        content.push({ type: 'table', content: tiptapRows });
+      }
       continue;
     }
 

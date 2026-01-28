@@ -73,6 +73,7 @@ The atomic units of content within Pages. Blocks form a tree structure where cer
 | `divider` | Horizontal line separator | No |
 | `callout` | Highlighted note with icon | Yes |
 | `scene` | Embedded calendar event | No |
+| `document_chunk` | Indexed document text for RAG | No |
 
 **Rich Text Formatting:**
 Block content supports rich text spans with:
@@ -233,6 +234,8 @@ Type `/` anywhere to insert new blocks:
 - `/code` - Code block
 - `/divider` - Horizontal rule
 - `/quote` - Callout/blockquote
+- `/table` - Data table with rows and columns
+- `/document` - Insert document into knowledge base (PDF, DOCX, TXT, MD, CSV, XLSX)
 
 **Rich Text Formatting:**
 - `Cmd+B` - Bold
@@ -442,5 +445,7 @@ See `docs/cairn_architecture.md` for full tool documentation.
 - [Foundation](./FOUNDATION.md) - Core philosophy and architecture
 - [Atomic Operations](./atomic-operations.md) - Operation classification
 - [Blocks API](./blocks-api.md) - Detailed blocks API documentation
+- [Documents](./documents.md) - Document ingestion for RAG
+- [Memory System](./memory-system.md) - Semantic search and retrieval
 - [CAIRN Architecture](./cairn_architecture.md) - CAIRN attention minder design
 - [Testing Strategy](./testing-strategy.md) - Testing approach

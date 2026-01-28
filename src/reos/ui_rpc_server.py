@@ -251,6 +251,15 @@ from .rpc_handlers.memory import (
     handle_memory_stats as _handle_memory_stats,
 )
 
+# Documents RPC handlers (knowledge base document management)
+from .rpc_handlers.documents import (
+    handle_documents_insert as _handle_documents_insert,
+    handle_documents_list as _handle_documents_list,
+    handle_documents_get as _handle_documents_get,
+    handle_documents_delete as _handle_documents_delete,
+    handle_documents_get_chunks as _handle_documents_get_chunks,
+)
+
 _JSON = dict[str, Any]
 
 
@@ -1843,6 +1852,62 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             return _jsonrpc_result(
                 req_id=req_id,
                 result=_handle_memory_stats(db, act_id=act_id),
+            )
+
+        # --- Documents (Knowledge Base Document Management) ---
+
+        if method == "documents/insert":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            file_path = params.get("file_path")
+            if not isinstance(file_path, str) or not file_path:
+                raise RpcError(code=-32602, message="file_path is required")
+            act_id = params.get("act_id")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_documents_insert(db, file_path=file_path, act_id=act_id),
+            )
+
+        if method == "documents/list":
+            if not isinstance(params, dict):
+                params = {}
+            act_id = params.get("act_id")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_documents_list(db, act_id=act_id),
+            )
+
+        if method == "documents/get":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            document_id = params.get("document_id")
+            if not isinstance(document_id, str) or not document_id:
+                raise RpcError(code=-32602, message="document_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_documents_get(db, document_id=document_id),
+            )
+
+        if method == "documents/delete":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            document_id = params.get("document_id")
+            if not isinstance(document_id, str) or not document_id:
+                raise RpcError(code=-32602, message="document_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_documents_delete(db, document_id=document_id),
+            )
+
+        if method == "documents/chunks":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            document_id = params.get("document_id")
+            if not isinstance(document_id, str) or not document_id:
+                raise RpcError(code=-32602, message="document_id is required")
+            return _jsonrpc_result(
+                req_id=req_id,
+                result=_handle_documents_get_chunks(db, document_id=document_id),
             )
 
         # --- Context Meter & Knowledge Management ---

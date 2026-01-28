@@ -44,6 +44,7 @@ Supported block types:
 | `callout` | Highlighted note | Yes | `icon?: string`, `color?: string` |
 | `scene` | Calendar event embed | No | - |
 | `atomic_operation` | Classified operation | Yes | See below |
+| `document_chunk` | Indexed document text for RAG | No | See below |
 
 **Nestable types** can have children blocks nested under them.
 
@@ -97,6 +98,41 @@ Operations can have child operations when decomposed:
 ```
 
 See [Atomic Operations](./atomic-operations.md) for the complete taxonomy and [RLHF Learning](./rlhf-learning.md) for feedback collection on operations.
+
+### Document Chunk Block Type
+
+The `document_chunk` block type represents a segment of extracted document text for RAG (Retrieval-Augmented Generation). Document chunks are created when users insert documents via the `/document` slash command.
+
+**Properties:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `source_document_id` | `string` | UUID of the parent document |
+| `chunk_index` | `number` | 0-based position in document |
+| `page_number` | `number \| null` | Source page (for PDFs) |
+| `section_title` | `string \| null` | Section header if detected |
+| `total_chunks` | `number` | Total chunks in parent document |
+
+**Example:**
+
+```json
+{
+  "id": "chunk-abc123",
+  "type": "document_chunk",
+  "rich_text": [{"content": "The extracted text content from the document..."}],
+  "properties": {
+    "source_document_id": "doc-xyz789",
+    "chunk_index": 0,
+    "page_number": 1,
+    "section_title": "Introduction",
+    "total_chunks": 15
+  }
+}
+```
+
+Document chunks are automatically indexed for semantic search via the memory system. When CAIRN retrieves relevant context, document chunks appear alongside other memory sources.
+
+See [Documents](./documents.md) for the complete document processing system and [Memory System](./memory-system.md) for semantic search integration.
 
 ### RichTextSpan
 
@@ -889,8 +925,60 @@ See [Memory System](./memory-system.md) for full documentation.
 
 ---
 
+## Document Knowledge Base
+
+Documents can be inserted into the knowledge base via the `/document` slash command. The system extracts text, chunks it for RAG, and indexes chunks for semantic search.
+
+### Supported Formats
+
+| Format | Extensions | Extraction Method |
+|--------|------------|-------------------|
+| PDF | `.pdf` | pypdf |
+| Word | `.docx`, `.doc` | python-docx |
+| Excel | `.xlsx`, `.xls` | openpyxl |
+| Text | `.txt` | Direct read |
+| Markdown | `.md` | Direct read |
+| CSV | `.csv` | csv module |
+
+### RPC Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `documents/insert` | Insert document into knowledge base |
+| `documents/list` | List documents (optionally by act) |
+| `documents/get` | Get document metadata |
+| `documents/delete` | Delete document and its chunks |
+| `documents/chunks` | Get all chunks for a document |
+
+### Example: Insert Document
+
+```json
+// Request
+{
+  "method": "documents/insert",
+  "params": {
+    "file_path": "/home/user/resume.pdf",
+    "act_id": "act-career"
+  }
+}
+
+// Response
+{
+  "documentId": "doc-abc123",
+  "fileName": "resume.pdf",
+  "fileType": "pdf",
+  "fileSize": 245760,
+  "chunkCount": 12
+}
+```
+
+See [Documents](./documents.md) for complete documentation.
+
+---
+
 ## Related Documentation
 
 - [The Play](./the-play.md) - Overview of the Play system
 - [CAIRN Architecture](./cairn_architecture.md) - AI assistant integration
 - [Memory System](./memory-system.md) - Relationship graph and semantic search
+- [Documents](./documents.md) - Document ingestion and RAG

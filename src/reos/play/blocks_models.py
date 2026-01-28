@@ -42,6 +42,9 @@ class BlockType(str, Enum):
     CONSCIOUSNESS_EVENT = "consciousness_event"  # Individual thinking step
     LLM_RESPONSE = "llm_response"            # Final LLM response
 
+    # Document knowledge base blocks
+    DOCUMENT_CHUNK = "document_chunk"        # Chunk of extracted document text for RAG
+
 
 # Block types that support nesting children
 NESTABLE_TYPES = frozenset({

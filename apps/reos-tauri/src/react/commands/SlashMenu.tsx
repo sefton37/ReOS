@@ -5,13 +5,15 @@
 import { useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import type { Editor } from '@tiptap/react';
 import { SlashMenuItem } from './SlashMenuItem';
-import { filterCommands, type SlashCommand } from './slashCommands';
+import { filterCommands, type SlashCommand, type SlashCommandContext } from './slashCommands';
 
 interface SlashMenuProps {
   editor: Editor;
   query: string;
   onClose: () => void;
   position: { top: number; left: number };
+  /** Context for commands that require kernel access */
+  context?: SlashCommandContext;
 }
 
 export interface SlashMenuHandle {
@@ -19,7 +21,7 @@ export interface SlashMenuHandle {
 }
 
 export const SlashMenu = forwardRef<SlashMenuHandle, SlashMenuProps>(
-  function SlashMenu({ editor, query, onClose, position }, ref) {
+  function SlashMenu({ editor, query, onClose, position, context }, ref) {
     const [selectedIndex, setSelectedIndex] = useState(0);
     const commands = filterCommands(query);
 
@@ -29,11 +31,18 @@ export const SlashMenu = forwardRef<SlashMenuHandle, SlashMenuProps>(
     }, [query]);
 
     const executeCommand = useCallback(
-      (command: SlashCommand) => {
-        command.action(editor);
+      async (command: SlashCommand) => {
+        // Close menu first for better UX
         onClose();
+
+        // Execute command with context if needed
+        if (command.requiresContext && context) {
+          await command.action(editor, context);
+        } else {
+          await command.action(editor);
+        }
       },
-      [editor, onClose],
+      [editor, onClose, context],
     );
 
     // Expose keyboard handler to parent
