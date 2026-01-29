@@ -668,7 +668,10 @@ export function BlockEditor({
   const [initialContent, setInitialContent] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const isInitialLoad = useRef(true);
+  // Track the hash of the last loaded/saved content to detect actual changes
+  const lastSavedHashRef = useRef<string | null>(null);
+  // Track whether we've received the first update after setting content
+  const skipNextUpdateRef = useRef(false);
 
   // Context for slash commands that need kernel access
   const slashCommandContextRef = useRef<SlashCommandContext>({
@@ -694,16 +697,19 @@ export function BlockEditor({
       // If no pageId, try to load the Act's kb.md content
       if (!pageId) {
         try {
+          console.log(`[BlockEditor] Loading kb.md for act: ${actId}`);
           const result = (await kernelRequest('play/kb/read', {
             act_id: actId,
             path: 'kb.md',
           })) as { text: string };
 
           const markdown = result.text || '';
+          console.log(`[BlockEditor] Loaded ${markdown.length} chars from kb.md`);
           const content = markdownToTiptap(markdown);
           setInitialContent(content);
-        } catch {
+        } catch (e) {
           // Fail gracefully - just show empty editor
+          console.error('[BlockEditor] Failed to load kb.md:', e);
           setInitialContent({ type: 'doc', content: [{ type: 'paragraph' }] });
         } finally {
           setLoading(false);
@@ -730,7 +736,8 @@ export function BlockEditor({
 
     setLoading(true);
     setLoadError(null);
-    isInitialLoad.current = true;
+    // Reset saved hash on new load - will be set properly in the setContent useEffect
+    lastSavedHashRef.current = null;
 
     // Timeout to prevent infinite loading - fail gracefully after 5s
     const timeout = setTimeout(() => {
@@ -751,10 +758,23 @@ export function BlockEditor({
     return () => clearTimeout(timeout);
   }, [actId, pageId, kernelRequest]);
 
+  // Simple hash function for change detection
+  const hashContent = useCallback((json: Record<string, unknown>): string => {
+    return JSON.stringify(json);
+  }, []);
+
   // Save blocks to backend
   const saveBlocks = useCallback(
     async (json: Record<string, unknown>) => {
-      if (!actId || isInitialLoad.current) {
+      if (!actId) {
+        console.warn('[BlockEditor] saveBlocks called without actId');
+        return;
+      }
+
+      // Check if content actually changed by comparing hashes
+      const currentHash = hashContent(json);
+      if (currentHash === lastSavedHashRef.current) {
+        // Content hasn't changed, skip save
         return;
       }
 
@@ -789,18 +809,21 @@ export function BlockEditor({
           });
         }
 
+        // Update the saved hash after successful save
+        lastSavedHashRef.current = currentHash;
+
         setSaveStatus('saved');
         onSaveStatusChange?.(false);
 
         // Reset to idle after a short delay
         setTimeout(() => setSaveStatus('idle'), 2000);
       } catch (e) {
-        console.error('Failed to save blocks:', e);
+        console.error('[BlockEditor] Failed to save blocks:', e);
         setSaveStatus('error');
         onSaveStatusChange?.(false);
       }
     },
-    [actId, pageId, kernelRequest, onSaveStatusChange],
+    [actId, pageId, kernelRequest, onSaveStatusChange, hashContent],
   );
 
   // Debounced save with flush-on-unmount to prevent data loss
@@ -920,8 +943,9 @@ export function BlockEditor({
       ],
       content: initialContent ?? { type: 'doc', content: [{ type: 'paragraph' }] },
       onUpdate: ({ editor }) => {
-        if (isInitialLoad.current) {
-          isInitialLoad.current = false;
+        // Skip the update triggered by setContent (loading content)
+        if (skipNextUpdateRef.current) {
+          skipNextUpdateRef.current = false;
           return;
         }
         const json = editor.getJSON();
@@ -929,10 +953,8 @@ export function BlockEditor({
       },
       onBlur: ({ editor }) => {
         // Save immediately when editor loses focus (user clicked away)
-        if (!isInitialLoad.current) {
-          const json = editor.getJSON();
-          void saveBlocks(json);
-        }
+        const json = editor.getJSON();
+        void saveBlocks(json);
       },
       editorProps: {
         attributes: {
@@ -946,8 +968,11 @@ export function BlockEditor({
   // Update content when initialContent changes
   useEffect(() => {
     if (editor && initialContent) {
+      // Set flag to skip the onUpdate triggered by setContent
+      skipNextUpdateRef.current = true;
       editor.commands.setContent(initialContent);
-      isInitialLoad.current = true;
+      // Update the saved hash to match the loaded content
+      lastSavedHashRef.current = JSON.stringify(initialContent);
     }
   }, [editor, initialContent]);
 
@@ -959,8 +984,9 @@ export function BlockEditor({
       // Save synchronously-ish by firing the save (can't truly await in beforeunload)
       // The flush-on-unmount in useDebounce handles most cases, but this is a safety net
       const json = editor.getJSON();
-      if (json && !isInitialLoad.current) {
+      if (json) {
         // Fire and forget - we can't await here
+        // The hash check in saveBlocks will prevent saving if content hasn't changed
         void saveBlocks(json);
       }
     };
@@ -969,7 +995,8 @@ export function BlockEditor({
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         const json = editor.getJSON();
-        if (json && !isInitialLoad.current) {
+        if (json) {
+          // The hash check in saveBlocks will prevent saving if content hasn't changed
           void saveBlocks(json);
         }
       }
