@@ -587,10 +587,11 @@ def handle_play_kb_write_preview(
     beat_id: str | None = None,
     path: str,
     text: str,
+    _debug_source: str | None = None,
 ) -> dict[str, Any]:
     """Preview KB write (get current hash for conflict detection)."""
     try:
-        res = play_kb_write_preview(act_id=act_id, scene_id=scene_id, beat_id=beat_id, path=path, text=text)
+        res = play_kb_write_preview(act_id=act_id, scene_id=scene_id, beat_id=beat_id, path=path, text=text, _debug_source=_debug_source)
     except ValueError as exc:
         raise RpcError(code=-32602, message=str(exc)) from exc
     return {
@@ -609,6 +610,7 @@ def handle_play_kb_write_apply(
     path: str,
     text: str,
     expected_sha256_current: str,
+    _debug_source: str | None = None,
 ) -> dict[str, Any]:
     """Apply KB write with conflict detection."""
     if not isinstance(expected_sha256_current, str) or not expected_sha256_current:
@@ -621,6 +623,7 @@ def handle_play_kb_write_apply(
             path=path,
             text=text,
             expected_sha256_current=expected_sha256_current,
+            _debug_source=_debug_source,
         )
     except ValueError as exc:
         # Surface conflicts as a deterministic JSON-RPC error.

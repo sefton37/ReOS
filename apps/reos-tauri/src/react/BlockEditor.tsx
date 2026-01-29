@@ -375,6 +375,7 @@ function extractTableData(tableNode: Record<string, unknown>): TableData {
   return { headers, rows };
 }
 
+
 /**
  * Convert TipTap JSON to blocks format for backend storage.
  */
@@ -390,6 +391,29 @@ function tiptapToBlocks(
 
   let position = 0;
   for (const node of content) {
+    const nodeType = node.type as string;
+
+    // Handle lists specially - extract each list item as a separate block
+    if (nodeType === 'bulletList' || nodeType === 'orderedList' || nodeType === 'taskList') {
+      const listItems = node.content as Array<Record<string, unknown>> | undefined;
+      //(`[tiptapToBlocks] Found ${nodeType} with ${listItems?.length ?? 0} items`);
+      if (listItems) {
+        for (let idx = 0; idx < listItems.length; idx++) {
+          const item = listItems[idx];
+          //(`[tiptapToBlocks] Item ${idx}: ${JSON.stringify(item).substring(0, 300)}`);
+          const block = listItemToBlock(item, nodeType, actId, pageId, position);
+          if (block) {
+            //(`[tiptapToBlocks] Block rich_text: ${JSON.stringify(block.rich_text).substring(0, 200)}`);
+            blocks.push(block);
+            position++;
+          } else {
+            //(`[tiptapToBlocks] listItemToBlock returned null for item ${idx}`);
+          }
+        }
+      }
+      continue;
+    }
+
     const block = nodeToBlock(node, actId, pageId, null, position);
     if (block) {
       blocks.push(block);
@@ -398,6 +422,111 @@ function tiptapToBlocks(
   }
 
   return blocks;
+}
+
+/**
+ * Recursively extract text nodes from any TipTap content structure.
+ */
+function extractTextFromContent(
+  content: Array<Record<string, unknown>> | undefined,
+  blockId: string,
+  richText: RichTextSpan[],
+  spanPositionRef: { value: number },
+): void {
+  if (!content) return;
+
+  for (const node of content) {
+    const nodeType = node.type as string;
+
+    if (nodeType === 'text') {
+      // Direct text node
+      const text = node.text as string;
+      if (text) {
+        const marks = (node.marks || []) as Array<{ type: string; attrs?: Record<string, unknown> }>;
+
+        const span: RichTextSpan = {
+          id: crypto.randomUUID(),
+          block_id: blockId,
+          position: spanPositionRef.value,
+          content: text,
+          bold: marks.some((m) => m.type === 'bold'),
+          italic: marks.some((m) => m.type === 'italic'),
+          strikethrough: marks.some((m) => m.type === 'strike'),
+          code: marks.some((m) => m.type === 'code'),
+          underline: marks.some((m) => m.type === 'underline'),
+          color: null,
+          background_color: null,
+          link_url: marks.find((m) => m.type === 'link')?.attrs?.href as string | null ?? null,
+        };
+
+        richText.push(span);
+        spanPositionRef.value++;
+      }
+    } else if (node.content) {
+      // Recurse into nested content (paragraph, etc.)
+      extractTextFromContent(
+        node.content as Array<Record<string, unknown>>,
+        blockId,
+        richText,
+        spanPositionRef,
+      );
+    }
+  }
+}
+
+/**
+ * Convert a list item (listItem or taskItem) to a Block.
+ */
+function listItemToBlock(
+  item: Record<string, unknown>,
+  listType: string,
+  actId: string,
+  pageId: string | null,
+  position: number,
+): Block | null {
+  const itemType = item.type as string;
+  const itemAttrs = (item.attrs || {}) as Record<string, unknown>;
+  const itemContent = item.content as Array<Record<string, unknown>> | undefined;
+
+  // Log the item structure for debugging
+  //(`[listItemToBlock] item structure: ${JSON.stringify(item).substring(0, 500)}`);
+
+  // Determine block type based on list type
+  let blockType: Block['type'];
+  const properties: Record<string, unknown> = {};
+
+  if (listType === 'taskList' || itemType === 'taskItem') {
+    blockType = 'to_do';
+    properties.checked = itemAttrs.checked ?? false;
+  } else if (listType === 'orderedList') {
+    blockType = 'numbered_list';
+  } else {
+    blockType = 'bulleted_list';
+  }
+
+  const blockId = crypto.randomUUID();
+  const richText: RichTextSpan[] = [];
+
+  // Recursively extract all text from the list item content
+  const spanPositionRef = { value: 0 };
+  extractTextFromContent(itemContent, blockId, richText, spanPositionRef);
+
+  //(`[listItemToBlock] extracted ${richText.length} spans: ${richText.map(s => s.content).join('|')}`);
+
+  return {
+    id: blockId,
+    type: blockType,
+    act_id: actId,
+    parent_id: null,
+    page_id: pageId,
+    scene_id: null,
+    position,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    rich_text: richText,
+    properties,
+    children: [],
+  };
 }
 
 /**
@@ -427,18 +556,12 @@ function nodeToBlock(
       blockType = level === 1 ? 'heading_1' : level === 2 ? 'heading_2' : 'heading_3';
       break;
     case 'bulletList':
-      blockType = 'bulleted_list';
-      break;
     case 'orderedList':
-      blockType = 'numbered_list';
-      break;
     case 'taskList':
-      blockType = 'to_do';
-      break;
     case 'taskItem':
-      blockType = 'to_do';
-      properties.checked = nodeAttrs.checked ?? false;
-      break;
+    case 'listItem':
+      // Lists are handled specially in tiptapToBlocks
+      return null;
     case 'codeBlock':
       blockType = 'code';
       properties.language = nodeAttrs.language ?? 'text';
@@ -459,9 +582,6 @@ function nodeToBlock(
     case 'tableCell':
       // These are handled by the table parent
       return null;
-    case 'listItem':
-      // List items are handled by their parent
-      return null;
     default:
       // Skip unknown node types
       return null;
@@ -469,34 +589,9 @@ function nodeToBlock(
 
   const blockId = crypto.randomUUID();
 
-  // Extract text content into rich text spans
-  if (nodeContent) {
-    let spanPosition = 0;
-    for (const child of nodeContent) {
-      if (child.type === 'text') {
-        const text = child.text as string;
-        const marks = (child.marks || []) as Array<{ type: string; attrs?: Record<string, unknown> }>;
-
-        const span: RichTextSpan = {
-          id: crypto.randomUUID(),
-          block_id: blockId,
-          position: spanPosition,
-          content: text,
-          bold: marks.some((m) => m.type === 'bold'),
-          italic: marks.some((m) => m.type === 'italic'),
-          strikethrough: marks.some((m) => m.type === 'strike'),
-          code: marks.some((m) => m.type === 'code'),
-          underline: marks.some((m) => m.type === 'underline'),
-          color: null,
-          background_color: null,
-          link_url: marks.find((m) => m.type === 'link')?.attrs?.href as string | null ?? null,
-        };
-
-        richText.push(span);
-        spanPosition++;
-      }
-    }
-  }
+  // Extract text content into rich text spans (recursively handles nested structures)
+  const spanPositionRef = { value: 0 };
+  extractTextFromContent(nodeContent, blockId, richText, spanPositionRef);
 
   return {
     id: blockId,
@@ -664,6 +759,7 @@ export function BlockEditor({
   kernelRequest,
   onSaveStatusChange,
 }: BlockEditorProps) {
+  console.log(`[BlockEditor] RENDER: actId=${actId}`);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [initialContent, setInitialContent] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -672,6 +768,10 @@ export function BlockEditor({
   const lastSavedHashRef = useRef<string | null>(null);
   // Track whether we've received the first update after setting content
   const skipNextUpdateRef = useRef(false);
+  // Track whether initial content has been loaded - BLOCK ALL SAVES until this is true
+  const hasLoadedContentRef = useRef(false);
+  // Track the length of originally loaded content - used as safety check against accidental overwrites
+  const loadedContentLengthRef = useRef<number>(0);
 
   // Context for slash commands that need kernel access
   const slashCommandContextRef = useRef<SlashCommandContext>({
@@ -684,8 +784,19 @@ export function BlockEditor({
     slashCommandContextRef.current = { kernelRequest, actId };
   }, [kernelRequest, actId]);
 
+  // Track if load has been initiated to prevent StrictMode double-load
+  const loadInitiatedRef = useRef<string | null>(null);
+
   // Load blocks from backend
   useEffect(() => {
+    // Prevent StrictMode double-execution for the same actId
+    const loadKey = `${actId}-${pageId}`;
+    if (loadInitiatedRef.current === loadKey) {
+      void kernelRequest('debug/log', { msg: `LOAD SKIPPED: already initiated for ${loadKey}` }).catch(() => {});
+      return;
+    }
+    loadInitiatedRef.current = loadKey;
+
     async function loadBlocks() {
       // If no actId, show empty editor for The Play overview
       if (!actId) {
@@ -697,19 +808,47 @@ export function BlockEditor({
       // If no pageId, try to load the Act's kb.md content
       if (!pageId) {
         try {
-          console.log(`[BlockEditor] Loading kb.md for act: ${actId}`);
+          console.log(`[BlockEditor] ========== LOADING ==========`);
+          console.log(`[BlockEditor] Loading kb.md for act: "${actId}"`);
           const result = (await kernelRequest('play/kb/read', {
             act_id: actId,
             path: 'kb.md',
           })) as { text: string };
 
           const markdown = result.text || '';
-          console.log(`[BlockEditor] Loaded ${markdown.length} chars from kb.md`);
+          // Send diagnostic to backend so we can see it in terminal
+          void kernelRequest('debug/log', {
+            msg: `LOADED MARKDOWN: ${markdown.length} chars`
+          }).catch(() => {});
+          void kernelRequest('debug/log', {
+            msg: `FIRST 300 CHARS: ${markdown.substring(0, 300).replace(/\n/g, '\\n')}`
+          }).catch(() => {});
+          void kernelRequest('debug/log', {
+            msg: `LINE COUNT: ${markdown.split('\n').length}, empty lines: ${markdown.split('\n').filter(l => !l.trim()).length}`
+          }).catch(() => {});
+
+          // Track loaded content length for safety checks
+          loadedContentLengthRef.current = markdown.length;
           const content = markdownToTiptap(markdown);
+          // Log parsed content structure
+          const contentNodes = (content.content as Array<unknown>)?.length || 0;
+          void kernelRequest('debug/log', {
+            msg: `PARSED TO: ${contentNodes} TipTap nodes`
+          }).catch(() => {});
+
+          // Log first 3 nodes in detail
+          const nodes = (content.content as Array<Record<string, unknown>>) || [];
+          for (let i = 0; i < Math.min(3, nodes.length); i++) {
+            void kernelRequest('debug/log', {
+              msg: `NODE[${i}]: ${JSON.stringify(nodes[i]).substring(0, 200)}`
+            }).catch(() => {});
+          }
+
+          console.log(`[BlockEditor] Parsed to TipTap, content nodes: ${JSON.stringify(content).substring(0, 300)}`);
           setInitialContent(content);
         } catch (e) {
           // Fail gracefully - just show empty editor
-          console.error('[BlockEditor] Failed to load kb.md:', e);
+          console.error('[BlockEditor] FAILED to load kb.md:', e);
           setInitialContent({ type: 'doc', content: [{ type: 'paragraph' }] });
         } finally {
           setLoading(false);
@@ -738,6 +877,11 @@ export function BlockEditor({
     setLoadError(null);
     // Reset saved hash on new load - will be set properly in the setContent useEffect
     lastSavedHashRef.current = null;
+    // Block saves until content is loaded
+    hasLoadedContentRef.current = false;
+    // Reset loaded content length
+    loadedContentLengthRef.current = 0;
+    console.log(`[BlockEditor] LOAD EFFECT START: actId=${actId}, reset hasLoaded=false, loadedLen=0`);
 
     // Timeout to prevent infinite loading - fail gracefully after 5s
     const timeout = setTimeout(() => {
@@ -755,7 +899,11 @@ export function BlockEditor({
         setLoading(false);
       });
 
-    return () => clearTimeout(timeout);
+    return () => {
+      clearTimeout(timeout);
+      // Reset so a new mount with different actId can load
+      loadInitiatedRef.current = null;
+    };
   }, [actId, pageId, kernelRequest]);
 
   // Simple hash function for change detection
@@ -765,16 +913,38 @@ export function BlockEditor({
 
   // Save blocks to backend
   const saveBlocks = useCallback(
-    async (json: Record<string, unknown>) => {
+    async (json: Record<string, unknown>, source: string = 'unknown') => {
+      console.log(`[BlockEditor] ========== SAVE ATTEMPT (source: ${source}) ==========`);
+      console.log(`[BlockEditor] actId: "${actId}", pageId: "${pageId}"`);
+      console.log(`[BlockEditor] hasLoadedContent: ${hasLoadedContentRef.current}`);
+      console.log(`[BlockEditor] loadedContentLength: ${loadedContentLengthRef.current}`);
+
       if (!actId) {
-        console.warn('[BlockEditor] saveBlocks called without actId');
+        console.warn('[BlockEditor] SKIPPED: saveBlocks called without actId');
+        return;
+      }
+
+      // CRITICAL: Don't save until initial content has been loaded
+      // This prevents the empty editor from overwriting real content
+      if (!hasLoadedContentRef.current) {
+        console.log(`[BlockEditor] SKIPPED (source: ${source}): Content not yet loaded, blocking save`);
+        return;
+      }
+
+      // CRITICAL: Don't save if we haven't tracked a loaded content length yet
+      // This catches edge cases where hasLoadedContentRef got set but loadedContentLengthRef didn't
+      if (loadedContentLengthRef.current === 0) {
+        console.log(`[BlockEditor] SKIPPED (source: ${source}): loadedContentLength is 0, blocking save`);
         return;
       }
 
       // Check if content actually changed by comparing hashes
       const currentHash = hashContent(json);
+      console.log(`[BlockEditor] currentHash length: ${currentHash.length}, lastSavedHash length: ${lastSavedHashRef.current?.length ?? 'null'}`);
+      console.log(`[BlockEditor] hashes match: ${currentHash === lastSavedHashRef.current}`);
+
       if (currentHash === lastSavedHashRef.current) {
-        // Content hasn't changed, skip save
+        console.log('[BlockEditor] SKIPPED: Content unchanged (hash match)');
         return;
       }
 
@@ -783,30 +953,47 @@ export function BlockEditor({
 
       try {
         const blocks = tiptapToBlocks(json, actId, pageId);
-
-        // Save as markdown for now (simpler integration with existing system)
         const markdown = blocksToMarkdown(blocks);
 
+        console.log(`[BlockEditor] Saving ${markdown.length} chars to act: "${actId}"`);
+        console.log(`[BlockEditor] First 200 chars: ${markdown.substring(0, 200)}`);
+
+        // SAFETY CHECK: Refuse to overwrite ANY content with essentially empty content
+        // This prevents race conditions where stale empty content overwrites real content
+        if (markdown.length <= 2 && loadedContentLengthRef.current > markdown.length) {
+          console.error(`[BlockEditor] SAFETY BLOCK (source: ${source}): Refusing to overwrite ${loadedContentLengthRef.current} chars with ${markdown.length} chars (empty content)`);
+          setSaveStatus('idle');
+          onSaveStatusChange?.(false);
+          return;
+        }
+
         if (pageId) {
+          console.log(`[BlockEditor] Saving to page: ${pageId}`);
           await kernelRequest('play/pages/content/write', {
             act_id: actId,
             page_id: pageId,
             text: markdown,
+            _debug_source: source,
           });
         } else {
-          // Save to act-level KB
+          console.log(`[BlockEditor] Saving to kb.md via preview/apply`);
           const preview = await kernelRequest('play/kb/write_preview', {
             act_id: actId,
             path: 'kb.md',
             text: markdown,
-          }) as { expected_sha256_current: string };
+            _debug_source: source,
+          }) as { sha256_current: string; sha256_new: string; diff: string };
+
+          console.log(`[BlockEditor] Preview result - current sha: ${preview.sha256_current?.substring(0, 16)}..., new sha: ${preview.sha256_new?.substring(0, 16)}...`);
 
           await kernelRequest('play/kb/write_apply', {
             act_id: actId,
             path: 'kb.md',
             text: markdown,
-            expected_sha256_current: preview.expected_sha256_current,
+            expected_sha256_current: preview.sha256_current,
+            _debug_source: source,
           });
+          console.log(`[BlockEditor] Write apply completed successfully`);
         }
 
         // Update the saved hash after successful save
@@ -814,11 +1001,12 @@ export function BlockEditor({
 
         setSaveStatus('saved');
         onSaveStatusChange?.(false);
+        console.log(`[BlockEditor] ========== SAVE SUCCESS ==========`);
 
         // Reset to idle after a short delay
         setTimeout(() => setSaveStatus('idle'), 2000);
       } catch (e) {
-        console.error('[BlockEditor] Failed to save blocks:', e);
+        console.error('[BlockEditor] ========== SAVE FAILED ==========', e);
         setSaveStatus('error');
         onSaveStatusChange?.(false);
       }
@@ -826,8 +1014,9 @@ export function BlockEditor({
     [actId, pageId, kernelRequest, onSaveStatusChange, hashContent],
   );
 
-  // Debounced save with flush-on-unmount to prevent data loss
-  const debouncedSave = useDebounce(saveBlocks, 500, true);
+  // Debounced save - flush-on-unmount disabled to prevent race conditions
+  // Explicit save handlers (onBlur, visibilitychange, beforeunload) handle save-on-close
+  const debouncedSave = useDebounce(saveBlocks, 500, false);
 
   const editor = useEditor(
     {
@@ -943,18 +1132,32 @@ export function BlockEditor({
       ],
       content: initialContent ?? { type: 'doc', content: [{ type: 'paragraph' }] },
       onUpdate: ({ editor }) => {
+        // CRITICAL: Don't start any saves until content has been loaded
+        // This prevents empty editor from triggering saves that overwrite real content
+        if (!hasLoadedContentRef.current) {
+          console.log(`[BlockEditor] onUpdate BLOCKED: hasLoadedContent=false`);
+          return;
+        }
         // Skip the update triggered by setContent (loading content)
         if (skipNextUpdateRef.current) {
           skipNextUpdateRef.current = false;
+          console.log(`[BlockEditor] onUpdate SKIPPED: skipNextUpdate was true`);
           return;
         }
+        console.log(`[BlockEditor] onUpdate: scheduling debounced save`);
         const json = editor.getJSON();
-        debouncedSave(json);
+        debouncedSave(json, 'onUpdate');
       },
       onBlur: ({ editor }) => {
+        // CRITICAL: Don't save on blur until content has been loaded
+        if (!hasLoadedContentRef.current) {
+          console.log(`[BlockEditor] onBlur BLOCKED: hasLoadedContent=false`);
+          return;
+        }
         // Save immediately when editor loses focus (user clicked away)
+        console.log(`[BlockEditor] onBlur: saving immediately`);
         const json = editor.getJSON();
-        void saveBlocks(json);
+        void saveBlocks(json, 'onBlur');
       },
       editorProps: {
         attributes: {
@@ -962,42 +1165,159 @@ export function BlockEditor({
         },
       },
     },
-    [initialContent],
+    // Empty deps - create editor once, use setContent to update
+    [],
   );
 
   // Update content when initialContent changes
   useEffect(() => {
     if (editor && initialContent) {
-      // Set flag to skip the onUpdate triggered by setContent
+      const contentArray = (initialContent.content as Array<Record<string, unknown>>) || [];
+      const contentNodes = contentArray.length;
+      void kernelRequest('debug/log', {
+        msg: `CONTENT EFFECT: actId=${actId}, nodes=${contentNodes}, loadedLen=${loadedContentLengthRef.current}`
+      }).catch(() => {});
+
+      // Log first 3 nodes for debugging
+      for (let i = 0; i < Math.min(3, contentArray.length); i++) {
+        void kernelRequest('debug/log', {
+          msg: `NODE[${i}]: ${JSON.stringify(contentArray[i]).substring(0, 300)}`
+        }).catch(() => {});
+      }
+
+      // Set the content
       skipNextUpdateRef.current = true;
-      editor.commands.setContent(initialContent);
-      // Update the saved hash to match the loaded content
-      lastSavedHashRef.current = JSON.stringify(initialContent);
+      let success = false;
+      let setContentError: string | null = null;
+      try {
+        success = editor.commands.setContent(initialContent);
+      } catch (e) {
+        setContentError = String(e);
+        void kernelRequest('debug/log', {
+          msg: `setContent THREW: ${setContentError}`
+        }).catch(() => {});
+      }
+
+      // Check what the editor actually has now
+      const actualJson = editor.getJSON();
+      const actualNodes = (actualJson.content as Array<unknown>)?.length || 0;
+      const actualText = editor.getText();
+      void kernelRequest('debug/log', {
+        msg: `AFTER setContent: success=${success}, error=${setContentError}, actualNodes=${actualNodes}, textLen=${actualText.length}`
+      }).catch(() => {});
+
+      // If content failed to load, do progressive testing to find the problem
+      if (actualText.length === 0 && contentNodes > 0) {
+        void kernelRequest('debug/log', {
+          msg: `CONTENT FAILED - starting progressive diagnostics`
+        }).catch(() => {});
+
+        // Helper to test setting content
+        const testContent = (nodes: Array<Record<string, unknown>>, label: string): boolean => {
+          const doc = { type: 'doc', content: nodes.length > 0 ? nodes : [{ type: 'paragraph' }] };
+          try {
+            editor.commands.setContent(doc);
+            const text = editor.getText();
+            void kernelRequest('debug/log', {
+              msg: `${label}: textLen=${text.length}`
+            }).catch(() => {});
+            return text.length > 0;
+          } catch (e) {
+            void kernelRequest('debug/log', {
+              msg: `${label}: THREW ${e}`
+            }).catch(() => {});
+            return false;
+          }
+        };
+
+        // Test with increasing sizes
+        const testSizes = [1, 5, 10, 50, 100];
+        let lastWorking = 0;
+        for (const size of testSizes) {
+          if (size > contentNodes) break;
+          if (testContent(contentArray.slice(0, size), `TEST ${size} nodes`)) {
+            lastWorking = size;
+          } else {
+            void kernelRequest('debug/log', {
+              msg: `BREAKS at ${size} nodes (last working: ${lastWorking})`
+            }).catch(() => {});
+            // Binary search to find exact problematic node
+            for (let i = lastWorking; i < size && i < contentNodes; i++) {
+              if (!testContent(contentArray.slice(0, i + 1), `TEST ${i + 1} nodes`)) {
+                void kernelRequest('debug/log', {
+                  msg: `BAD NODE[${i}]: ${JSON.stringify(contentArray[i]).substring(0, 500)}`
+                }).catch(() => {});
+                break;
+              }
+            }
+            break;
+          }
+        }
+
+        // If small content works, set it as fallback
+        if (lastWorking > 0) {
+          void kernelRequest('debug/log', {
+            msg: `FALLBACK: Setting ${lastWorking} nodes that worked`
+          }).catch(() => {});
+          const fallbackDoc = { type: 'doc', content: contentArray.slice(0, lastWorking) };
+          editor.commands.setContent(fallbackDoc);
+        }
+      }
+
+      // Update the saved hash to match what was actually loaded
+      const finalContent = editor.getJSON();
+      lastSavedHashRef.current = JSON.stringify(finalContent);
+      // NOW we can allow saves - content has been loaded (even if partially)
+      hasLoadedContentRef.current = true;
+
+      void kernelRequest('debug/log', {
+        msg: `CONTENT LOAD COMPLETE: finalTextLen=${editor.getText().length}`
+      }).catch(() => {});
     }
-  }, [editor, initialContent]);
+  }, [editor, initialContent, actId, kernelRequest]);
+
+  // Save on unmount (when navigating between acts)
+  // This uses the CURRENT editor content, not stale debounce args
+  useEffect(() => {
+    return () => {
+      console.log(`[BlockEditor] UNMOUNT cleanup: editor=${!!editor}, actId=${actId}, hasLoaded=${hasLoadedContentRef.current}, loadedLen=${loadedContentLengthRef.current}`);
+      if (!editor || !actId || !hasLoadedContentRef.current) {
+        console.log(`[BlockEditor] UNMOUNT BLOCKED: conditions not met`);
+        return;
+      }
+      const json = editor.getJSON();
+      if (json) {
+        console.log('[BlockEditor] UNMOUNT: saving');
+        void saveBlocks(json, 'unmount');
+      }
+    };
+  }, [editor, actId, saveBlocks]);
 
   // Save immediately on window close (beforeunload) to prevent data loss
   useEffect(() => {
     if (!editor || !actId) return;
 
     const handleBeforeUnload = () => {
+      console.log(`[BlockEditor] beforeunload: hasLoaded=${hasLoadedContentRef.current}`);
       // Save synchronously-ish by firing the save (can't truly await in beforeunload)
-      // The flush-on-unmount in useDebounce handles most cases, but this is a safety net
+      if (!hasLoadedContentRef.current) {
+        console.log(`[BlockEditor] beforeunload BLOCKED`);
+        return;
+      }
       const json = editor.getJSON();
       if (json) {
         // Fire and forget - we can't await here
-        // The hash check in saveBlocks will prevent saving if content hasn't changed
-        void saveBlocks(json);
+        void saveBlocks(json, 'beforeunload');
       }
     };
 
     // Also save when page becomes hidden (tab switch, minimize, etc.)
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
+      console.log(`[BlockEditor] visibilitychange: state=${document.visibilityState}, hasLoaded=${hasLoadedContentRef.current}`);
+      if (document.visibilityState === 'hidden' && hasLoadedContentRef.current) {
         const json = editor.getJSON();
         if (json) {
-          // The hash check in saveBlocks will prevent saving if content hasn't changed
-          void saveBlocks(json);
+          void saveBlocks(json, 'visibilitychange');
         }
       }
     };
@@ -1063,8 +1383,10 @@ function getPlaceholder(actId: string | null, pageId: string | null): string {
  */
 function blocksToMarkdown(blocks: Block[]): string {
   const lines: string[] = [];
+  //(`[blocksToMarkdown] Converting ${blocks.length} blocks`);
 
   for (const block of blocks) {
+    //(`[blocksToMarkdown] Block type=${block.type}, rich_text count=${block.rich_text.length}`);
     const text = block.rich_text.map((s) => {
       let content = s.content;
       if (s.bold) content = `**${content}**`;
@@ -1093,6 +1415,7 @@ function blocksToMarkdown(blocks: Block[]): string {
         lines.push('');
         break;
       case 'bulleted_list':
+        //(`[blocksToMarkdown] bulleted_list text="${text}"`);
         lines.push(`- ${text}`);
         break;
       case 'numbered_list':
@@ -1143,10 +1466,121 @@ function blocksToMarkdown(blocks: Block[]): string {
 }
 
 /**
+ * Sanitize text for TipTap - remove control characters that might break parsing.
+ */
+function sanitizeText(text: string): string {
+  // Remove null characters and other control characters (except tab and newline)
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
+/**
+ * Parse inline markdown formatting and return TipTap text nodes with marks.
+ * Handles: **bold**, __bold__, *italic*, _italic_, `code`, ~~strikethrough~~, [link](url)
+ */
+function parseInlineMarkdown(text: string): Array<Record<string, unknown>> {
+  if (!text) return [];
+
+  const nodes: Array<Record<string, unknown>> = [];
+
+  // Regex patterns for inline formatting (order matters - more specific first)
+  // Match: **bold**, __bold__, *italic*, _italic_, `code`, ~~strike~~, [text](url)
+  // Note: Double markers (**/__) must come before single (*/_) to match correctly
+  const inlinePattern = /(\*\*(.+?)\*\*|__(.+?)__|(?<!\*)\*([^*]+?)\*(?!\*)|(?<!_)_([^_]+?)_(?!_)|`([^`]+)`|~~(.+?)~~|\[([^\]]+)\]\(([^)]+)\))/g;
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = inlinePattern.exec(text)) !== null) {
+    // Add plain text before this match
+    if (match.index > lastIndex) {
+      const plainText = text.slice(lastIndex, match.index);
+      if (plainText) {
+        nodes.push({ type: 'text', text: plainText });
+      }
+    }
+
+    const fullMatch = match[1];
+
+    if (match[2]) {
+      // **bold**
+      nodes.push({
+        type: 'text',
+        text: match[2],
+        marks: [{ type: 'bold' }],
+      });
+    } else if (match[3]) {
+      // __bold__
+      nodes.push({
+        type: 'text',
+        text: match[3],
+        marks: [{ type: 'bold' }],
+      });
+    } else if (match[4]) {
+      // *italic*
+      nodes.push({
+        type: 'text',
+        text: match[4],
+        marks: [{ type: 'italic' }],
+      });
+    } else if (match[5]) {
+      // _italic_
+      nodes.push({
+        type: 'text',
+        text: match[5],
+        marks: [{ type: 'italic' }],
+      });
+    } else if (match[6]) {
+      // `code`
+      nodes.push({
+        type: 'text',
+        text: match[6],
+        marks: [{ type: 'code' }],
+      });
+    } else if (match[7]) {
+      // ~~strikethrough~~
+      nodes.push({
+        type: 'text',
+        text: match[7],
+        marks: [{ type: 'strike' }],
+      });
+    } else if (match[8] && match[9]) {
+      // [link text](url)
+      nodes.push({
+        type: 'text',
+        text: match[8],
+        marks: [{ type: 'link', attrs: { href: match[9] } }],
+      });
+    }
+
+    lastIndex = match.index + fullMatch.length;
+  }
+
+  // Add remaining plain text after last match
+  if (lastIndex < text.length) {
+    const remainingText = text.slice(lastIndex);
+    if (remainingText) {
+      nodes.push({ type: 'text', text: remainingText });
+    }
+  }
+
+  // If no formatting found, return single text node
+  if (nodes.length === 0 && text) {
+    return [{ type: 'text', text }];
+  }
+
+  return nodes;
+}
+
+/**
  * Parse simple markdown into TipTap JSON format.
  */
 function markdownToTiptap(markdown: string): Record<string, unknown> {
-  const lines = markdown.split('\n');
+  // Normalize line endings (handle Windows \r\n and old Mac \r)
+  const normalizedMarkdown = markdown.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Sanitize control characters
+  const sanitizedMarkdown = sanitizeText(normalizedMarkdown);
+  const lines = sanitizedMarkdown.split('\n');
   const content: Array<Record<string, unknown>> = [];
 
   let i = 0;
@@ -1161,33 +1595,42 @@ function markdownToTiptap(markdown: string): Record<string, unknown> {
 
     // Heading 1
     if (line.startsWith('# ')) {
-      content.push({
-        type: 'heading',
-        attrs: { level: 1 },
-        content: [{ type: 'text', text: line.slice(2) }],
-      });
+      const text = line.slice(2).trim();
+      if (text) {
+        content.push({
+          type: 'heading',
+          attrs: { level: 1 },
+          content: parseInlineMarkdown(text),
+        });
+      }
       i++;
       continue;
     }
 
     // Heading 2
     if (line.startsWith('## ')) {
-      content.push({
-        type: 'heading',
-        attrs: { level: 2 },
-        content: [{ type: 'text', text: line.slice(3) }],
-      });
+      const text = line.slice(3).trim();
+      if (text) {
+        content.push({
+          type: 'heading',
+          attrs: { level: 2 },
+          content: parseInlineMarkdown(text),
+        });
+      }
       i++;
       continue;
     }
 
     // Heading 3
     if (line.startsWith('### ')) {
-      content.push({
-        type: 'heading',
-        attrs: { level: 3 },
-        content: [{ type: 'text', text: line.slice(4) }],
-      });
+      const text = line.slice(4).trim();
+      if (text) {
+        content.push({
+          type: 'heading',
+          attrs: { level: 3 },
+          content: parseInlineMarkdown(text),
+        });
+      }
       i++;
       continue;
     }
@@ -1203,28 +1646,41 @@ function markdownToTiptap(markdown: string): Record<string, unknown> {
     if (line.startsWith('- ') || line.startsWith('* ')) {
       const items: Array<Record<string, unknown>> = [];
       while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('* '))) {
-        const text = lines[i].slice(2);
+        const rawText = lines[i].slice(2);
         // Check for todo
-        if (text.startsWith('[ ] ') || text.startsWith('[x] ')) {
-          const checked = text.startsWith('[x]');
+        if (rawText.startsWith('[ ] ') || rawText.startsWith('[x] ')) {
+          const checked = rawText.startsWith('[x]');
+          const text = rawText.slice(4).trim();
+          // Always create task items (even empty ones - TipTap allows this)
+          const inlineContent = parseInlineMarkdown(text);
           items.push({
             type: 'taskItem',
             attrs: { checked },
-            content: [{ type: 'paragraph', content: [{ type: 'text', text: text.slice(4) }] }],
+            content: inlineContent.length > 0
+              ? [{ type: 'paragraph', content: inlineContent }]
+              : [{ type: 'paragraph' }],
           });
         } else {
+          const text = rawText.trim();
+          // Always create list items (even empty ones)
+          const inlineContent = parseInlineMarkdown(text);
           items.push({
             type: 'listItem',
-            content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+            content: inlineContent.length > 0
+              ? [{ type: 'paragraph', content: inlineContent }]
+              : [{ type: 'paragraph' }],
           });
         }
         i++;
       }
-      // Check if this was a task list
-      if (items.length > 0 && items[0].type === 'taskItem') {
-        content.push({ type: 'taskList', content: items });
-      } else {
-        content.push({ type: 'bulletList', content: items });
+      // Only add list if we have items
+      if (items.length > 0) {
+        // Check if this was a task list
+        if (items[0].type === 'taskItem') {
+          content.push({ type: 'taskList', content: items });
+        } else {
+          content.push({ type: 'bulletList', content: items });
+        }
       }
       continue;
     }
@@ -1233,14 +1689,21 @@ function markdownToTiptap(markdown: string): Record<string, unknown> {
     if (/^\d+\. /.test(line)) {
       const items: Array<Record<string, unknown>> = [];
       while (i < lines.length && /^\d+\. /.test(lines[i])) {
-        const text = lines[i].replace(/^\d+\. /, '');
+        const text = lines[i].replace(/^\d+\. /, '').trim();
+        // Always create list items (even empty ones)
+        const inlineContent = parseInlineMarkdown(text);
         items.push({
           type: 'listItem',
-          content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+          content: inlineContent.length > 0
+            ? [{ type: 'paragraph', content: inlineContent }]
+            : [{ type: 'paragraph' }],
         });
         i++;
       }
-      content.push({ type: 'orderedList', content: items });
+      // Only add list if we have items
+      if (items.length > 0) {
+        content.push({ type: 'orderedList', content: items });
+      }
       continue;
     }
 
@@ -1264,9 +1727,14 @@ function markdownToTiptap(markdown: string): Record<string, unknown> {
 
     // Blockquote
     if (line.startsWith('> ')) {
+      const text = line.slice(2).trim();
+      // Always create blockquote (even with empty paragraph inside)
+      const inlineContent = parseInlineMarkdown(text);
       content.push({
         type: 'blockquote',
-        content: [{ type: 'paragraph', content: [{ type: 'text', text: line.slice(2) }] }],
+        content: inlineContent.length > 0
+          ? [{ type: 'paragraph', content: inlineContent }]
+          : [{ type: 'paragraph' }],
       });
       i++;
       continue;
@@ -1308,22 +1776,28 @@ function markdownToTiptap(markdown: string): Record<string, unknown> {
         // Header row
         tiptapRows.push({
           type: 'tableRow',
-          content: headerRow.map(cellText => ({
-            type: 'tableHeader',
-            attrs: { colspan: 1, rowspan: 1 },
-            content: [{ type: 'paragraph', content: cellText ? [{ type: 'text', text: cellText }] : [] }],
-          })),
+          content: headerRow.map(cellText => {
+            const inlineContent = parseInlineMarkdown(cellText);
+            return {
+              type: 'tableHeader',
+              attrs: { colspan: 1, rowspan: 1 },
+              content: [{ type: 'paragraph', content: inlineContent.length > 0 ? inlineContent : [] }],
+            };
+          }),
         });
 
         // Data rows
         for (const row of dataRows) {
           tiptapRows.push({
             type: 'tableRow',
-            content: row.map(cellText => ({
-              type: 'tableCell',
-              attrs: { colspan: 1, rowspan: 1 },
-              content: [{ type: 'paragraph', content: cellText ? [{ type: 'text', text: cellText }] : [] }],
-            })),
+            content: row.map(cellText => {
+              const inlineContent = parseInlineMarkdown(cellText);
+              return {
+                type: 'tableCell',
+                attrs: { colspan: 1, rowspan: 1 },
+                content: [{ type: 'paragraph', content: inlineContent.length > 0 ? inlineContent : [] }],
+              };
+            }),
           });
         }
 
@@ -1332,17 +1806,32 @@ function markdownToTiptap(markdown: string): Record<string, unknown> {
       continue;
     }
 
-    // Default: paragraph
-    content.push({
-      type: 'paragraph',
-      content: line.trim() ? [{ type: 'text', text: line }] : undefined,
-    });
+    // Default: paragraph - parse inline markdown formatting
+    const trimmedLine = line.trim();
+    if (trimmedLine) {
+      const inlineContent = parseInlineMarkdown(trimmedLine);
+      if (inlineContent.length > 0) {
+        content.push({
+          type: 'paragraph',
+          content: inlineContent,
+        });
+      }
+    }
+    // Skip lines that are only whitespace (shouldn't reach here due to earlier check, but be safe)
     i++;
+  }
+
+  // Ensure we always return valid content - at least one paragraph
+  if (content.length === 0) {
+    return {
+      type: 'doc',
+      content: [{ type: 'paragraph' }],
+    };
   }
 
   return {
     type: 'doc',
-    content: content.length > 0 ? content : [{ type: 'paragraph' }],
+    content,
   };
 }
 

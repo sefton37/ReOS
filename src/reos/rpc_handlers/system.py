@@ -432,3 +432,15 @@ def handle_cairn_attention(
             for item in items
         ],
     }
+
+
+# =============================================================================
+# Debug Log Handler
+# =============================================================================
+
+
+def handle_debug_log(_db: Database, *, msg: str) -> dict[str, Any]:
+    """Log a debug message from the frontend to stderr."""
+    import sys
+    print(f"[JS] {msg}", file=sys.stderr, flush=True)
+    return {"ok": True}

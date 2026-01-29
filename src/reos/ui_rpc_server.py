@@ -553,6 +553,15 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                 raise RpcError(code=-32602, message=f"{param_name} must be an integer")
             return _jsonrpc_result(req_id=req_id, result=handler(db, **{param_name: value}))
 
+        # Debug logging from frontend
+        if method == "debug/log":
+            if not isinstance(params, dict):
+                raise RpcError(code=-32602, message="params must be an object")
+            msg = params.get("msg", "")
+            import sys
+            print(f"[JS] {msg}", file=sys.stderr, flush=True)
+            return _jsonrpc_result(req_id=req_id, result={"ok": True})
+
         if method == "tools/call":
             if not isinstance(params, dict):
                 raise RpcError(code=-32602, message="params must be an object")
@@ -1071,6 +1080,7 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             for k, v in {"scene_id": scene_id, "beat_id": beat_id}.items():
                 if v is not None and not isinstance(v, str):
                     raise RpcError(code=-32602, message=f"{k} must be a string or null")
+            _debug_source = params.get("_debug_source")
             return _jsonrpc_result(
                 req_id=req_id,
                 result=_handle_play_kb_write_preview(
@@ -1080,6 +1090,7 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                     beat_id=beat_id,
                     path=path,
                     text=text,
+                    _debug_source=_debug_source,
                 ),
             )
 
@@ -1103,6 +1114,7 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                     raise RpcError(code=-32602, message=f"{k} must be a string or null")
             if not isinstance(expected_sha256_current, str) or not expected_sha256_current:
                 raise RpcError(code=-32602, message="expected_sha256_current is required")
+            _debug_source = params.get("_debug_source")
             return _jsonrpc_result(
                 req_id=req_id,
                 result=_handle_play_kb_write_apply(
@@ -1113,6 +1125,7 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                     path=path,
                     text=text,
                     expected_sha256_current=expected_sha256_current,
+                    _debug_source=_debug_source,
                 ),
             )
 
@@ -2405,12 +2418,14 @@ def _load_persisted_safety_settings(db: Database) -> None:
 
 def run_stdio_server() -> None:
     """Run the UI kernel server over stdio."""
+    print("[ui_rpc_server] ========== PYTHON BACKEND STARTING ==========", file=sys.stderr, flush=True)
 
     db = get_db()
     db.migrate()
 
     # Load persisted safety settings
     _load_persisted_safety_settings(db)
+    print("[ui_rpc_server] Backend ready, waiting for requests...", file=sys.stderr, flush=True)
 
     while True:
         line = _readline()

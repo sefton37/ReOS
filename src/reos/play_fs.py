@@ -871,10 +871,15 @@ def kb_list_files(*, act_id: str, scene_id: str | None = None, beat_id: str | No
 
 
 def kb_read(*, act_id: str, scene_id: str | None = None, beat_id: str | None = None, path: str = "kb.md") -> str:
+    import sys
+    print(f"[kb_read] ========== READING ==========", file=sys.stderr, flush=True)
+    print(f"[kb_read] act_id={act_id}, scene_id={scene_id}, beat_id={beat_id}, path={path}", file=sys.stderr, flush=True)
     ensure_play_skeleton()
     kb_root = _kb_root_for(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
+    print(f"[kb_read] kb_root={kb_root}", file=sys.stderr, flush=True)
     kb_root.mkdir(parents=True, exist_ok=True)
     target = _resolve_kb_file(kb_root=kb_root, rel_path=path)
+    print(f"[kb_read] target={target}, exists={target.exists()}", file=sys.stderr, flush=True)
     if not target.exists():
         if Path(path).as_posix() == "kb.md":
             # Use special welcome content for Your Story
@@ -900,7 +905,9 @@ Select an Act from the sidebar to focus on a specific narrative, or start writin
                 target.write_text("# KB\n\n", encoding="utf-8")
         else:
             raise FileNotFoundError(path)
-    return target.read_text(encoding="utf-8", errors="replace")
+    content = target.read_text(encoding="utf-8", errors="replace")
+    print(f"[kb_read] Read {len(content)} chars, first 100: {content[:100]!r}", file=sys.stderr, flush=True)
+    return content
 
 
 def _sha256_text(text: str) -> str:
@@ -916,16 +923,22 @@ def kb_write_preview(
     beat_id: str | None = None,
     path: str,
     text: str,
+    _debug_source: str | None = None,
 ) -> dict[str, Any]:
+    import sys
+    print(f"[kb_write_preview] ========== PREVIEW (source={_debug_source}) ==========", file=sys.stderr, flush=True)
+    print(f"[kb_write_preview] act_id={act_id}, path={path}, text_len={len(text)}", file=sys.stderr, flush=True)
     ensure_play_skeleton()
     kb_root = _kb_root_for(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
     kb_root.mkdir(parents=True, exist_ok=True)
     target = _resolve_kb_file(kb_root=kb_root, rel_path=path)
+    print(f"[kb_write_preview] target={target}", file=sys.stderr, flush=True)
 
     exists = target.exists() and target.is_file()
     current = target.read_text(encoding="utf-8", errors="replace") if exists else ""
     current_sha = _sha256_text(current)
     new_sha = _sha256_text(text)
+    print(f"[kb_write_preview] exists={exists}, current_len={len(current)}, current_sha={current_sha[:16]}..., new_sha={new_sha[:16]}...", file=sys.stderr, flush=True)
 
     diff_lines = difflib.unified_diff(
         current.splitlines(keepends=True),
@@ -952,20 +965,28 @@ def kb_write_apply(
     path: str,
     text: str,
     expected_sha256_current: str,
+    _debug_source: str | None = None,
 ) -> dict[str, Any]:
+    import sys
+    print(f"[kb_write_apply] ========== APPLY (source={_debug_source}) ==========", file=sys.stderr, flush=True)
+    print(f"[kb_write_apply] act_id={act_id}, path={path}, text_len={len(text)}, expected_sha={expected_sha256_current[:16]}...", file=sys.stderr, flush=True)
     ensure_play_skeleton()
     kb_root = _kb_root_for(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
     kb_root.mkdir(parents=True, exist_ok=True)
     target = _resolve_kb_file(kb_root=kb_root, rel_path=path)
+    print(f"[kb_write_apply] target={target}", file=sys.stderr, flush=True)
 
     exists = target.exists() and target.is_file()
     current = target.read_text(encoding="utf-8", errors="replace") if exists else ""
     current_sha = _sha256_text(current)
+    print(f"[kb_write_apply] current_sha={current_sha[:16]}..., match={current_sha == expected_sha256_current}", file=sys.stderr, flush=True)
     if current_sha != expected_sha256_current:
+        print(f"[kb_write_apply] CONFLICT! current_sha={current_sha}, expected={expected_sha256_current}", file=sys.stderr, flush=True)
         raise ValueError("conflict: file changed since preview")
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
+    print(f"[kb_write_apply] SUCCESS - wrote {len(text)} chars to {target}", file=sys.stderr, flush=True)
     after_sha = _sha256_text(text)
     return {"ok": True, "sha256_current": after_sha}
 

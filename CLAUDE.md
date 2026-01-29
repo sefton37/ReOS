@@ -170,6 +170,27 @@ You and the user are collaborating imperfectly:
 
 **Collaboration > Speed**
 
+### 6. Design for the Poor Sap Debugging at 2 AM
+
+Failures are expected and normal. Code that "works" but fails silently or mysteriously is worse than code that crashes loudly.
+
+**Write code for the person who has to diagnose it later (often future-you):**
+
+- **Fail loudly** — Throw errors with context, don't return `null` and hope someone notices
+- **Fail early** — Validate inputs at boundaries, don't let bad data propagate
+- **Fail visibly** — Log what happened, what was expected, what was received
+- **Fail gracefully** — Degrade functionality rather than crash entirely when possible
+- **Fail explicably** — Error messages should answer "what went wrong" AND "what was the code trying to do"
+
+**Silent failures are cruel.** A function that returns `success: true` while producing garbage output will waste hours of debugging time. If something goes wrong, make it obvious.
+
+```
+❌ Bad:  return { success: true, data: [] }  // Silently empty
+✅ Good: throw new Error(`Expected 165 items but parser produced 0. Input length: ${input.length}, first 100 chars: ${input.slice(0,100)}`)
+```
+
+**The test: If this fails in production, will the logs tell someone what happened?**
+
 ---
 
 ## Red Flags: When to Stop and Ask
@@ -184,6 +205,66 @@ Stop immediately and ask for clarification if:
 - 🚩 The plan would require changing core architecture or patterns
 - 🚩 You don't understand why something is needed
 - 🚩 The existing codebase uses patterns you don't fully understand
+
+---
+
+## Debugging: Diagnose Before Fixing
+
+When something isn't working, **understand before you fix**. The most common failure mode is attempting fixes at the wrong layer of abstraction.
+
+### The Diagnostic-First Rule
+
+**Before attempting ANY fix, add logging/diagnostics to understand:**
+1. What data goes into the problematic code?
+2. What data comes out?
+3. Does the output match expectations at each transformation step?
+
+One diagnostic showing "165 items in, 1 item out" is worth more than 10 attempted fixes.
+
+### Trace the Full Data Path
+
+Don't assume any layer is working correctly. For any data transformation pipeline:
+```
+Input → Transform A → Transform B → Transform C → Output
+```
+Verify the actual data at EACH stage. The bug is often not where you think it is.
+
+### Verify Results, Not Return Values
+
+**Silent failures are the enemy.** A function returning `success=true` while producing empty/wrong output is a silent failure. Always verify:
+- Not just "did it succeed?" but "what did it actually produce?"
+- Read the actual files, check the actual state
+- Compare expected vs actual output explicitly
+
+### Be Skeptical of Complex Fixes
+
+🚩 **Red flag: If your fix requires multiple workarounds, refs, flags, or timing hacks, you're probably fixing the wrong thing.**
+
+Signs you're at the wrong layer:
+- Adding ref after ref to "prevent race conditions"
+- Complex timing/ordering logic to "ensure correct sequence"
+- Multiple boolean flags to track state
+- Fixes that work sometimes but not always
+
+When this happens: **Stop. Add diagnostics. Find the real bug.**
+
+### Read Existing Code Carefully
+
+Before assuming existing code works correctly:
+- Trace through the actual logic with real data
+- Look for edge cases: empty inputs, undefined values, different data structures
+- Check that transformations are reversible if they need to be (e.g., serialize/deserialize round-trips)
+
+### The Debugging Workflow
+
+1. **Reproduce** — Confirm you can trigger the bug consistently
+2. **Diagnose** — Add logging to see actual data flow
+3. **Isolate** — Find the exact point where expected ≠ actual
+4. **Understand** — Know WHY it's failing before fixing
+5. **Fix** — Make the minimal change that addresses root cause
+6. **Verify** — Confirm the fix works AND doesn't break other cases
+
+**Never skip step 2.** Jumping from step 1 to step 5 is how you waste hours on wrong-layer fixes.
 
 ---
 
