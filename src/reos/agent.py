@@ -229,7 +229,7 @@ class ChatAgent:
         # This provides relevant memory from the block graph/embeddings
         self._memory_retriever = MemoryRetriever()
 
-    def _execute_tool_for_reasoning(self, tool_name: str, args: dict) -> Any:
+    def _execute_tool_for_reasoning(self, tool_name: str, args: dict) -> dict[str, Any]:
         """Callback for reasoning engine to execute tools."""
         try:
             return call_tool(self._db, name=tool_name, arguments=args)

@@ -14,8 +14,10 @@ Security-critical values have hard minimums that cannot be bypassed.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from typing import NamedTuple
+import sys
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
+from typing import Any, Generator, NamedTuple
 
 
 # =============================================================================
@@ -300,3 +302,68 @@ class AgentLimits:
 
 
 AGENTS = AgentLimits()
+
+
+# =============================================================================
+# Test Override Support
+# =============================================================================
+
+# Map of config instance names to their module-level variable names
+_CONFIG_INSTANCES = {
+    "SECURITY": "SECURITY",
+    "RATE_LIMITS": "RATE_LIMITS",
+    "TIMEOUTS": "TIMEOUTS",
+    "EXECUTION": "EXECUTION",
+    "CONTEXT": "CONTEXT",
+    "STALE": "STALE",
+    "QUERY": "QUERY",
+    "WEB_TOOLS": "WEB_TOOLS",
+    "MODELS": "MODELS",
+    "AGENTS": "AGENTS",
+}
+
+
+@contextmanager
+def override_config(**overrides: Any) -> Generator[None, None, None]:
+    """Temporarily replace config instances for testing.
+
+    Uses dataclasses.replace() to create modified frozen instances,
+    then patches the module-level globals for the duration of the context.
+
+    Usage::
+
+        from reos.config import override_config, TIMEOUTS
+
+        # Override specific fields on a config instance
+        with override_config(TIMEOUTS={"QUICK": 1, "STANDARD": 2}):
+            from reos.config import TIMEOUTS
+            assert TIMEOUTS.QUICK == 1
+
+        # Or pass a pre-built instance
+        with override_config(SECURITY=SecurityLimits(MAX_COMMAND_LEN=2048)):
+            ...
+
+    Args:
+        **overrides: Config name → dict of field overrides, or a replacement instance.
+    """
+    module = sys.modules[__name__]
+    saved: dict[str, Any] = {}
+
+    for name, value in overrides.items():
+        if name not in _CONFIG_INSTANCES:
+            raise ValueError(f"Unknown config: {name}. Valid: {sorted(_CONFIG_INSTANCES)}")
+
+        saved[name] = getattr(module, name)
+
+        if isinstance(value, dict):
+            # Create a modified copy of the existing instance
+            current = getattr(module, name)
+            value = replace(current, **value)
+
+        setattr(module, name, value)
+
+    try:
+        yield
+    finally:
+        for name, original in saved.items():
+            setattr(module, name, original)
