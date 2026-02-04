@@ -126,7 +126,12 @@ class EmbeddingService:
             embedding = self._model.encode(text, convert_to_numpy=True)
             return embedding.astype(np.float32).tobytes()
         except Exception as e:
-            logger.error("Failed to generate embedding: %s", e)
+            logger.error(
+                "Failed to generate embedding: %s (text_length=%d, text_preview=%s)",
+                e,
+                len(text),
+                text[:50] + "..." if len(text) > 50 else text,
+            )
             return None
 
     def embed_batch(self, texts: list[str]) -> list[bytes | None]:
@@ -153,7 +158,11 @@ class EmbeddingService:
             embeddings = self._model.encode(truncated, convert_to_numpy=True)
             return [emb.astype(np.float32).tobytes() for emb in embeddings]
         except Exception as e:
-            logger.error("Failed to generate batch embeddings: %s", e)
+            logger.error(
+                "Failed to generate batch embeddings: %s (batch_size=%d)",
+                e,
+                len(texts),
+            )
             return [None] * len(texts)
 
     def similarity(self, a: bytes, b: bytes) -> float:
@@ -184,7 +193,12 @@ class EmbeddingService:
 
             return float(dot / (norm_a * norm_b))
         except Exception as e:
-            logger.error("Failed to compute similarity: %s", e)
+            logger.warning(
+                "Failed to compute similarity: %s (embedding sizes: %d, %d)",
+                e,
+                len(a),
+                len(b),
+            )
             return 0.0
 
     def find_similar(
@@ -231,7 +245,12 @@ class EmbeddingService:
             return results[:top_k]
 
         except Exception as e:
-            logger.error("Failed to find similar embeddings: %s", e)
+            logger.warning(
+                "Failed to find similar embeddings: %s (candidates=%d, top_k=%d)",
+                e,
+                len(candidate_embeddings),
+                top_k,
+            )
             return []
 
 

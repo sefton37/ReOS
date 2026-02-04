@@ -170,7 +170,6 @@ class ProviderStatus(TypedDict, total=False):
     available_providers: list[dict[str, str]]
     keyring_available: bool
     ollama_available: bool
-    anthropic_configured: bool
 
 
 # =============================================================================

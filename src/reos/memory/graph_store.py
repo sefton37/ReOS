@@ -168,8 +168,22 @@ class MemoryGraphStore:
             return rel_id
         except Exception as e:
             conn.rollback()
-            # Likely a unique constraint violation (duplicate relationship)
-            logger.debug("Failed to create relationship: %s", e)
+            # May be a unique constraint violation (duplicate relationship) or other error
+            if "UNIQUE constraint" in str(e):
+                logger.debug(
+                    "Relationship already exists: %s -[%s]-> %s",
+                    source_id,
+                    rel_type.value,
+                    target_id,
+                )
+            else:
+                logger.warning(
+                    "Failed to create relationship %s -[%s]-> %s: %s",
+                    source_id,
+                    rel_type.value,
+                    target_id,
+                    e,
+                )
             return None
 
     def get_relationship(self, rel_id: str) -> GraphEdge | None:
@@ -282,7 +296,13 @@ class MemoryGraphStore:
             return cursor.rowcount > 0
         except Exception as e:
             conn.rollback()
-            logger.error("Failed to update relationship: %s", e)
+            logger.warning(
+                "Failed to update relationship %s (confidence=%s, weight=%s): %s",
+                rel_id,
+                confidence,
+                weight,
+                e,
+            )
             return False
 
     def delete_relationship(self, rel_id: str) -> bool:
@@ -305,7 +325,7 @@ class MemoryGraphStore:
             return cursor.rowcount > 0
         except Exception as e:
             conn.rollback()
-            logger.error("Failed to delete relationship: %s", e)
+            logger.warning("Failed to delete relationship %s: %s", rel_id, e)
             return False
 
     def delete_relationships_for_block(self, block_id: str) -> int:
@@ -331,7 +351,9 @@ class MemoryGraphStore:
             return cursor.rowcount
         except Exception as e:
             conn.rollback()
-            logger.error("Failed to delete relationships: %s", e)
+            logger.warning(
+                "Failed to delete relationships for block %s: %s", block_id, e
+            )
             return 0
 
     # =========================================================================
@@ -512,7 +534,12 @@ class MemoryGraphStore:
             return True
         except Exception as e:
             conn.rollback()
-            logger.error("Failed to store embedding: %s", e)
+            logger.warning(
+                "Failed to store embedding for block %s (model=%s): %s",
+                block_id,
+                model_name,
+                e,
+            )
             return False
 
     def get_embedding(self, block_id: str) -> tuple[bytes, str] | None:
@@ -585,7 +612,7 @@ class MemoryGraphStore:
             return cursor.rowcount > 0
         except Exception as e:
             conn.rollback()
-            logger.error("Failed to delete embedding: %s", e)
+            logger.warning("Failed to delete embedding for block %s: %s", block_id, e)
             return False
 
     def is_embedding_stale(self, block_id: str, current_hash: str) -> bool:

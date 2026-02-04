@@ -37,7 +37,7 @@ ReOS is a Linux desktop AI assistant with three core components:
 │         │                │                     │               │
 │         ▼                ▼                     ▼               │
 │  ┌─────────────────────────────────────────────────────────┐  │
-│  │              LLM Provider (Ollama/Anthropic)            │  │
+│  │              LLM Provider (Ollama)                       │  │
 │  └─────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -160,7 +160,7 @@ Stage 4: Generate Response
 
 **Key Files:**
 - `code_mode/` - Code mode implementation
-- `providers/` - LLM provider abstraction (Ollama, Anthropic)
+- `providers/` - LLM provider abstraction (Ollama)
 
 **Capabilities:**
 - Git operations (bounded to configured repos)

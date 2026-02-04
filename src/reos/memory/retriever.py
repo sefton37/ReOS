@@ -231,7 +231,12 @@ class MemoryRetriever:
             List of (block_id, similarity) tuples.
         """
         if not self._embedding_service.is_available:
-            logger.warning("Embedding service not available, skipping semantic search")
+            logger.warning(
+                "Embedding service not available for semantic search "
+                "(query_preview=%s, act_id=%s). Memory retrieval will be limited.",
+                query[:50] + "..." if len(query) > 50 else query,
+                act_id,
+            )
             return []
 
         # Embed the query
@@ -415,7 +420,12 @@ class MemoryRetriever:
                 "created_at": block.created_at,
             }
         except Exception as e:
-            logger.debug("Failed to get block data for %s: %s", block_id, e)
+            logger.warning(
+                "Failed to get block data for %s: %s (type=%s)",
+                block_id,
+                e,
+                type(e).__name__,
+            )
             return None
 
     def index_block(self, block_id: str) -> bool:

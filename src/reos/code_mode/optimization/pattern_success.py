@@ -133,7 +133,7 @@ class PatternSuccessTracker:
         """Initialize tracker.
 
         Args:
-            db: Database connection
+            db: Database instance (uses transaction() for raw SQL access)
             repo_path: Repository path (patterns are per-repo)
         """
         self.db = db
@@ -143,20 +143,21 @@ class PatternSuccessTracker:
 
     def _ensure_table(self) -> None:
         """Ensure the pattern_success table exists."""
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS pattern_success (
-                pattern_hash TEXT PRIMARY KEY,
-                repo_path TEXT NOT NULL,
-                description TEXT,
-                attempts INTEGER DEFAULT 0,
-                successes INTEGER DEFAULT 0,
-                failures INTEGER DEFAULT 0,
-                first_seen TEXT NOT NULL,
-                last_success TEXT,
-                last_failure TEXT,
-                UNIQUE(pattern_hash, repo_path)
-            )
-        """)
+        with self.db.transaction() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS pattern_success (
+                    pattern_hash TEXT PRIMARY KEY,
+                    repo_path TEXT NOT NULL,
+                    description TEXT,
+                    attempts INTEGER DEFAULT 0,
+                    successes INTEGER DEFAULT 0,
+                    failures INTEGER DEFAULT 0,
+                    first_seen TEXT NOT NULL,
+                    last_success TEXT,
+                    last_failure TEXT,
+                    UNIQUE(pattern_hash, repo_path)
+                )
+            """)
 
     def record_outcome(
         self,
@@ -266,13 +267,15 @@ class PatternSuccessTracker:
         if pattern_hash in self._cache:
             return self._cache[pattern_hash]
 
-        row = self.db.fetchone(
-            """
-            SELECT * FROM pattern_success
-            WHERE pattern_hash = ? AND repo_path = ?
-            """,
-            (pattern_hash, self.repo_path),
-        )
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM pattern_success
+                WHERE pattern_hash = ? AND repo_path = ?
+                """,
+                (pattern_hash, self.repo_path),
+            )
+            row = cursor.fetchone()
 
         if row:
             stats = PatternStats.from_dict(dict(row))
@@ -300,40 +303,43 @@ class PatternSuccessTracker:
 
     def _save(self, stats: PatternStats) -> None:
         """Save pattern stats to database."""
-        self.db.execute(
-            """
-            INSERT OR REPLACE INTO pattern_success (
-                pattern_hash, repo_path, description,
-                attempts, successes, failures,
-                first_seen, last_success, last_failure
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                stats.pattern_hash,
-                self.repo_path,
-                stats.description,
-                stats.attempts,
-                stats.successes,
-                stats.failures,
-                stats.first_seen.isoformat(),
-                stats.last_success.isoformat() if stats.last_success else None,
-                stats.last_failure.isoformat() if stats.last_failure else None,
-            ),
-        )
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO pattern_success (
+                    pattern_hash, repo_path, description,
+                    attempts, successes, failures,
+                    first_seen, last_success, last_failure
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    stats.pattern_hash,
+                    self.repo_path,
+                    stats.description,
+                    stats.attempts,
+                    stats.successes,
+                    stats.failures,
+                    stats.first_seen.isoformat(),
+                    stats.last_success.isoformat() if stats.last_success else None,
+                    stats.last_failure.isoformat() if stats.last_failure else None,
+                ),
+            )
 
     def get_top_patterns(self, limit: int = 10) -> list[PatternStats]:
         """Get the most trusted patterns.
 
         Useful for debugging and analysis.
         """
-        rows = self.db.fetchall(
-            """
-            SELECT * FROM pattern_success
-            WHERE repo_path = ?
-            ORDER BY (successes * 1.0 / MAX(attempts, 1)) DESC
-            LIMIT ?
-            """,
-            (self.repo_path, limit),
-        )
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                SELECT * FROM pattern_success
+                WHERE repo_path = ?
+                ORDER BY (successes * 1.0 / MAX(attempts, 1)) DESC
+                LIMIT ?
+                """,
+                (self.repo_path, limit),
+            )
+            rows = cursor.fetchall()
 
         return [PatternStats.from_dict(dict(row)) for row in rows]

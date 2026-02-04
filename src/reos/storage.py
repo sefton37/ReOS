@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
@@ -9,6 +10,8 @@ from .alignment import get_default_repo_path, get_review_context_budget, is_git_
 from .db import Database, get_db
 from .models import Event
 from .settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -86,7 +89,12 @@ def _maybe_emit_review_trigger(
                 continue
             try:
                 ts = datetime.fromisoformat(str(evt.get("ts")))
-            except Exception:
+            except Exception as e:
+                logger.debug(
+                    "Failed to parse timestamp for event %s: %s",
+                    evt.get("id", "unknown"),
+                    e,
+                )
                 continue
             if now - ts < cooldown:
                 return
@@ -121,8 +129,9 @@ def _maybe_emit_review_trigger(
             payload_metadata=json.dumps(payload),
             note="Review checkpoint suggested (context budget nearing limit)",
         )
-    except Exception:
+    except Exception as e:
         # Best-effort only; ingestion should not fail if budgeting fails.
+        logger.debug("Review trigger emission failed (non-critical): %s", e)
         return
 
 
@@ -152,5 +161,10 @@ def iter_events(limit: int | None = None) -> Iterable[tuple[str, Event]]:
             )
             event_id = str(row["id"])
             yield event_id, evt
-        except (json.JSONDecodeError, TypeError, ValueError):
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            logger.warning(
+                "Skipping malformed event (id=%s): %s",
+                row.get("id", "unknown"),
+                e,
+            )
             continue

@@ -100,16 +100,20 @@ export function createPlayActView(options: PlayActViewOptions): {
 
   async function loadActs() {
     try {
+      console.log(`[PlayActView] ========== LOADING ACTS ==========`);
       const result = await kernelRequest('play/acts/list', {}) as PlayActsListResult;
+      console.log(`[PlayActView] Server returned active_act_id: "${result.active_act_id}"`);
+      console.log(`[PlayActView] Server returned ${result.acts?.length ?? 0} acts`);
       state.actsCache = result.acts ?? [];
       state.activeActId = result.active_act_id;
+      console.log(`[PlayActView] Set state.activeActId to: "${state.activeActId}"`);
 
       // Auto-expand active act
       if (state.activeActId) {
         state.expandedActs.add(state.activeActId);
       }
     } catch (e) {
-      console.error('Failed to load acts:', e);
+      console.error('[PlayActView] Failed to load acts:', e);
     }
   }
 
@@ -374,8 +378,10 @@ export function createPlayActView(options: PlayActViewOptions): {
   function renderContent() {
     // Clean up previous React editor if exists
     if (state.editorCleanup) {
+      console.log(`[PlayActView] ========== CLEANING UP EDITOR ==========`);
       state.editorCleanup();
       state.editorCleanup = null;
+      console.log(`[PlayActView] Editor cleanup complete`);
     }
 
     content.innerHTML = '';
@@ -412,9 +418,14 @@ export function createPlayActView(options: PlayActViewOptions): {
     // Mount React BlockEditor
     // Use 'your-story' as the actId when The Play is selected without a specific Act
     // This is the autobiographical entry point for the whole knowledge base
+    const editorActId = state.activeActId ?? 'your-story';
+    console.log(`[PlayActView] ========== MOUNTING EDITOR ==========`);
+    console.log(`[PlayActView] state.activeActId: "${state.activeActId}"`);
+    console.log(`[PlayActView] editorActId (after fallback): "${editorActId}"`);
+    console.log(`[PlayActView] state.selectedPageId: "${state.selectedPageId}"`);
     state.editorContainer = editorWrap;
     state.editorCleanup = mountBlockEditor(editorWrap, {
-      actId: state.activeActId ?? 'your-story',
+      actId: editorActId,
       pageId: state.selectedPageId,
       kernelRequest,
     });
@@ -444,9 +455,12 @@ export function createPlayActView(options: PlayActViewOptions): {
   // --- Actions ---
 
   async function selectPlay() {
+    console.log(`[PlayActView] ========== SELECT PLAY ==========`);
+    console.log(`[PlayActView] Setting activeActId to null (was: "${state.activeActId}")`);
     state.activeActId = null;
     state.selectedPageId = null;
     await kernelRequest('play/acts/set_active', { act_id: null });
+    console.log(`[PlayActView] Calling render()`);
     render();
   }
 

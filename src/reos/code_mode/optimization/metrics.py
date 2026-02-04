@@ -33,8 +33,8 @@ class ExecutionMetrics:
     completed_at: datetime | None = None
 
     # LLM provider information (for model-specific learning)
-    llm_provider: str | None = None  # "ollama", "anthropic", "openai", etc.
-    llm_model: str | None = None     # "claude-sonnet-4", "gpt-4-turbo", "llama3-70b", etc.
+    llm_provider: str | None = None  # "ollama", etc.
+    llm_model: str | None = None     # "llama3.2", "mistral", etc.
 
     # Repository context (for repo-specific learning)
     repo_path: str | None = None     # Absolute path to repository
@@ -107,8 +107,8 @@ class ExecutionMetrics:
         """Set LLM provider and model information.
 
         Args:
-            provider: Provider type (ollama, anthropic, openai, etc.)
-            model: Model name (claude-sonnet-4, gpt-4-turbo, llama3-70b, etc.)
+            provider: Provider type (ollama, etc.)
+            model: Model name (llama3.2, mistral, etc.)
         """
         self.llm_provider = provider
         self.llm_model = model
@@ -489,14 +489,33 @@ class MetricsStore:
         """Initialize metrics store.
 
         Args:
-            db: Database connection with execute/fetchall methods
+            db: Database-like object with execute/fetchall methods,
+                or a Database instance (uses transaction() for raw SQL access)
         """
         self.db = db
         self._ensure_table()
 
+    def _execute(self, sql: str, params: tuple = ()) -> Any:
+        """Execute SQL, handling both raw connections and Database instances."""
+        # If db has transaction() method (Database class), use it
+        if hasattr(self.db, 'transaction'):
+            with self.db.transaction() as conn:
+                return conn.execute(sql, params)
+        # Otherwise assume it's a raw connection or wrapper with execute()
+        return self.db.execute(sql, params)
+
+    def _fetchall(self, sql: str, params: tuple = ()) -> list:
+        """Execute SQL and fetch all results."""
+        if hasattr(self.db, 'transaction'):
+            with self.db.transaction() as conn:
+                cursor = conn.execute(sql, params)
+                return cursor.fetchall()
+        # Otherwise assume it has fetchall method
+        return self.db.fetchall(sql, params)
+
     def _ensure_table(self) -> None:
         """Create metrics table if it doesn't exist."""
-        self.db.execute("""
+        self._execute("""
             CREATE TABLE IF NOT EXISTS riva_metrics (
                 session_id TEXT PRIMARY KEY,
                 started_at TEXT NOT NULL,
@@ -520,7 +539,7 @@ class MetricsStore:
             )
         """)
         # Create index for repo-specific queries
-        self.db.execute("""
+        self._execute("""
             CREATE INDEX IF NOT EXISTS idx_repo_model
             ON riva_metrics(repo_path, llm_model)
         """)
@@ -529,7 +548,7 @@ class MetricsStore:
         """Save metrics to database."""
         import json
 
-        self.db.execute(
+        self._execute(
             """
             INSERT OR REPLACE INTO riva_metrics (
                 session_id, started_at, completed_at,
@@ -569,7 +588,7 @@ class MetricsStore:
 
         Returns aggregate stats useful for optimization decisions.
         """
-        rows = self.db.fetchall(
+        rows = self._fetchall(
             """
             SELECT
                 COUNT(*) as total_sessions,

@@ -76,7 +76,7 @@ def show_example_analysis():
         },
         {
             "name": "src/reos/providers",
-            "purpose": "LLM provider integrations (Anthropic, Ollama, OpenAI)",
+            "purpose": "LLM provider integrations (Ollama)",
             "path": "src/reos/providers"
         },
         {

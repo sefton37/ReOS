@@ -42,7 +42,7 @@ def test_metrics_store_save_and_load():
 
         # Create metrics
         metrics = create_metrics("test_session_123")
-        metrics.set_llm_info(provider="anthropic", model="claude-sonnet-4")
+        metrics.set_llm_info(provider="ollama", model="llama3.2")
         metrics.record_llm_call(purpose="action", duration_ms=500, tokens_in=100, tokens_out=50)
         metrics.record_verification(risk_level="medium")
         metrics.complete(success=True)
@@ -61,8 +61,8 @@ def test_metrics_store_save_and_load():
 
         assert row is not None, "Metrics should be saved"
         assert row[0] == "test_session_123"
-        assert row[1] == "anthropic", "LLM provider should be saved"
-        assert row[2] == "claude-sonnet-4", "LLM model should be saved"
+        assert row[1] == "ollama", "LLM provider should be saved"
+        assert row[2] == "llama3.2", "LLM model should be saved"
         assert row[3] == 1  # success = True
         assert row[4] == 1  # first_try_success = True (no retries)
         assert row[5] is not None  # completed_at is set
