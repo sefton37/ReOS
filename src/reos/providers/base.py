@@ -1,6 +1,6 @@
 """Base LLM Provider Protocol - Abstract interface for LLM backends.
 
-All LLM providers (Ollama, Anthropic, OpenAI, etc.) implement this protocol
+All LLM providers (Ollama, etc.) implement this protocol
 to provide a unified interface for chat completions.
 """
 
@@ -74,7 +74,7 @@ class LLMProvider(Protocol):
 
     @property
     def provider_type(self) -> str:
-        """Provider identifier (e.g., "ollama", "anthropic")."""
+        """Provider identifier (e.g., "ollama")."""
         ...
 
     def chat_text(

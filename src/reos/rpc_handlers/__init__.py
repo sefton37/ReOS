@@ -2,7 +2,7 @@
 
 This package contains handler functions organized by domain:
 - play: Play (Acts/Scenes) operations
-- providers: LLM provider management (Ollama, Anthropic)
+- providers: LLM provider management (Ollama)
 - chat: Chat and conversation handlers
 - planning: Code planning and execution handlers
 """

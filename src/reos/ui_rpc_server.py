@@ -106,10 +106,6 @@ from .rpc_handlers.providers import (
     handle_ollama_check_installed as _handle_ollama_check_installed,
     handle_providers_list as _handle_providers_list,
     handle_providers_set as _handle_providers_set,
-    handle_anthropic_set_key as _handle_anthropic_set_key,
-    handle_anthropic_delete_key as _handle_anthropic_delete_key,
-    handle_anthropic_set_model as _handle_anthropic_set_model,
-    handle_anthropic_status as _handle_anthropic_status,
 )
 
 # Archive RPC handlers (extracted to separate module)
@@ -406,8 +402,6 @@ _SIMPLE_HANDLERS: dict[str, Callable[[Database], Any]] = {
     "system/open-terminal": _handle_system_open_terminal,
     "ollama/check_installed": _handle_ollama_check_installed,
     "providers/list": _handle_providers_list,
-    "anthropic/status": _handle_anthropic_status,
-    "anthropic/delete_key": _handle_anthropic_delete_key,
     "play/acts/list": _handle_play_acts_list,
     "safety/settings": _handle_safety_settings,
     "cairn/thunderbird/status": _handle_cairn_thunderbird_status,
@@ -424,8 +418,6 @@ _STRING_PARAM_HANDLERS: dict[str, tuple[Callable, str]] = {
     "ollama/set_model": (_handle_ollama_set_model, "model"),
     "ollama/model_info": (_handle_ollama_model_info, "model"),
     "ollama/pull_start": (_handle_ollama_pull_start, "model"),
-    "anthropic/set_key": (_handle_anthropic_set_key, "key"),
-    "anthropic/set_model": (_handle_anthropic_set_model, "model"),
     "thunderbird/configure": (_handle_thunderbird_configure, "db_path"),
     "code/diff/apply": (_handle_code_diff_apply, "preview_id"),
     "code/diff/reject": (_handle_code_diff_reject, "preview_id"),

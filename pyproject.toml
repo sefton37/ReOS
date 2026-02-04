@@ -19,7 +19,6 @@ dependencies = [
   # LLM Providers
   "keyring>=24.0.0,<26.0.0",        # System keyring for API keys
   "secretstorage>=3.3.0,<4.0.0",    # Linux D-Bus SecretService backend
-  "anthropic>=0.40.0,<1.0.0",       # Anthropic Claude API
   # Resilience
   "tenacity>=8.2.0,<10.0.0",        # Retry with exponential backoff
   # Markdown parsing for block editor

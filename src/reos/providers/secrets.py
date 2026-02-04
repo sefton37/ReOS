@@ -21,7 +21,7 @@ def store_api_key(provider: str, api_key: str) -> None:
     """Store an API key in the system keyring.
 
     Args:
-        provider: Provider identifier (e.g., "anthropic", "openai").
+        provider: Provider identifier (e.g., "ollama").
         api_key: The API key to store.
 
     Raises:
@@ -44,7 +44,7 @@ def get_api_key(provider: str) -> str | None:
     """Retrieve an API key from the system keyring.
 
     Args:
-        provider: Provider identifier (e.g., "anthropic", "openai").
+        provider: Provider identifier (e.g., "ollama").
 
     Returns:
         The API key if found, None otherwise.
@@ -159,7 +159,7 @@ def list_stored_providers() -> list[str]:
     Returns:
         List of provider names with stored keys.
     """
-    known_providers = ["anthropic", "openai", "google", "cohere"]
+    known_providers = ["openai", "google", "cohere"]
     stored = []
 
     for provider in known_providers:

@@ -1,9 +1,7 @@
-"""LLM Providers - Pluggable backend support for multiple LLM services.
+"""LLM Providers - Pluggable backend support for LLM services.
 
-This package provides a unified interface for different LLM providers:
-- Ollama: Local inference, runs on your machine
-- Anthropic: Claude API (cloud)
-- Future: OpenAI, local llama.cpp, etc.
+This package provides a unified interface for LLM providers:
+- Ollama: Local inference, runs on your machine (privacy-first)
 
 Usage:
     from reos.providers import get_provider, LLMProvider
@@ -36,11 +34,6 @@ from reos.providers.ollama import (
     OllamaProvider,
     check_ollama_installed,
     get_ollama_install_command,
-)
-from reos.providers.anthropic import (
-    AnthropicProvider,
-    check_anthropic_available,
-    CLAUDE_MODELS,
 )
 
 # Factory functions
@@ -75,11 +68,8 @@ __all__ = [
     "ProviderHealth",
     # Providers
     "OllamaProvider",
-    "AnthropicProvider",
     "check_ollama_installed",
     "get_ollama_install_command",
-    "check_anthropic_available",
-    "CLAUDE_MODELS",
     # Factory
     "get_provider",
     "get_provider_or_none",

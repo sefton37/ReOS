@@ -28,7 +28,7 @@ class ProviderInfo:
     """Information about an available provider.
 
     Attributes:
-        id: Provider identifier (e.g., "ollama", "anthropic").
+        id: Provider identifier (e.g., "ollama").
         name: Human-readable name.
         description: Short description.
         is_local: Whether the provider runs locally.
@@ -42,7 +42,7 @@ class ProviderInfo:
     requires_api_key: bool = False
 
 
-# Available providers
+# Available providers (Ollama-only for local-first privacy)
 AVAILABLE_PROVIDERS: list[ProviderInfo] = [
     ProviderInfo(
         id="ollama",
@@ -50,13 +50,6 @@ AVAILABLE_PROVIDERS: list[ProviderInfo] = [
         description="Private, runs on your machine. No data leaves your computer.",
         is_local=True,
         requires_api_key=False,
-    ),
-    ProviderInfo(
-        id="anthropic",
-        name="Anthropic (Claude)",
-        description="Cloud API powered by Claude. Requires API key.",
-        is_local=False,
-        requires_api_key=True,
     ),
 ]
 
@@ -109,10 +102,10 @@ def get_provider(db: "Database") -> LLMProvider:
 
     if provider_type == "ollama":
         return _create_ollama_provider(db)
-    elif provider_type == "anthropic":
-        return _create_anthropic_provider(db)
     else:
-        raise LLMError(f"Unknown provider type: {provider_type}")
+        # Default to Ollama for any unknown provider type
+        logger.warning("Unknown provider type '%s', falling back to Ollama", provider_type)
+        return _create_ollama_provider(db)
 
 
 def get_provider_or_none(db: "Database") -> LLMProvider | None:
@@ -140,7 +133,7 @@ def get_current_provider_type(db: "Database") -> str:
         db: Database instance.
 
     Returns:
-        Provider type string (e.g., "ollama", "anthropic").
+        Provider type string (e.g., "ollama").
     """
     return db.get_state(key="provider") or "ollama"
 
@@ -195,25 +188,5 @@ def _create_ollama_provider(db: "Database") -> LLMProvider:
 
     return OllamaProvider(
         url=url if url else None,
-        model=model if model else None,
-    )
-
-
-def _create_anthropic_provider(db: "Database") -> LLMProvider:
-    """Create an Anthropic provider from database config."""
-    from .anthropic import AnthropicProvider
-    from .secrets import get_api_key
-
-    api_key = get_api_key("anthropic")
-    model = db.get_state(key="anthropic_model")
-
-    if not api_key:
-        raise LLMError(
-            "No Anthropic API key configured. "
-            "Add your key in Settings > LLM Provider."
-        )
-
-    return AnthropicProvider(
-        api_key=api_key,
         model=model if model else None,
     )

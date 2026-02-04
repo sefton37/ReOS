@@ -268,9 +268,6 @@ WEB_TOOLS = WebToolsConfig()
 class ModelDefaults:
     """Default model configurations."""
 
-    # Anthropic default model
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
-
     # Default temperature for code operations
     CODE_TEMPERATURE: float = 0.3
 

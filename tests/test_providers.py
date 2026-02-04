@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 from reos.providers.base import LLMError, LLMProvider, ModelInfo, ProviderHealth
 from reos.providers.ollama import OllamaProvider, check_ollama_installed, get_ollama_install_command
-from reos.providers.anthropic import AnthropicProvider, check_anthropic_available, CLAUDE_MODELS
 from reos.providers.factory import (
     get_provider,
     get_provider_or_none,
@@ -136,84 +135,6 @@ class TestOllamaInstallation:
 
 
 # =============================================================================
-# AnthropicProvider Tests
-# =============================================================================
-
-
-class TestAnthropicProvider:
-    """Tests for AnthropicProvider."""
-
-    def test_provider_type(self) -> None:
-        """Should have correct provider type."""
-        provider = AnthropicProvider(api_key="test-key")
-        assert provider.provider_type == "anthropic"
-
-    def test_default_model(self) -> None:
-        """Should use default model."""
-        provider = AnthropicProvider(api_key="test-key")
-        assert provider._model == "claude-sonnet-4-20250514"
-
-    def test_custom_model(self) -> None:
-        """Should use custom model."""
-        provider = AnthropicProvider(api_key="test-key", model="claude-opus-4-5-20251101")
-        assert provider._model == "claude-opus-4-5-20251101"
-
-    def test_list_models(self) -> None:
-        """Should return list of Claude models."""
-        provider = AnthropicProvider(api_key="test-key")
-        models = provider.list_models()
-        assert len(models) >= 3
-        model_names = [m.name for m in models]
-        assert "claude-sonnet-4-20250514" in model_names
-        assert "claude-opus-4-5-20251101" in model_names
-
-
-class TestAnthropicAvailability:
-    """Tests for Anthropic availability check - checks if library is installed."""
-
-    def test_check_available_library_installed(self) -> None:
-        """Should return True if anthropic library is installed."""
-        # Since anthropic is in our deps, this should be True
-        assert check_anthropic_available() is True
-
-    def test_check_available_library_not_installed(self) -> None:
-        """Should return False if anthropic library is not installed."""
-        import sys
-
-        # Save original module
-        original = sys.modules.get("anthropic")
-
-        # Remove the module temporarily
-        if "anthropic" in sys.modules:
-            del sys.modules["anthropic"]
-
-        # Patch the import
-        with patch.dict(sys.modules, {"anthropic": None}):
-            # Import the function fresh to bypass caching
-            from importlib import reload
-            import reos.providers.anthropic as anth_module
-            # Just verify the function exists - can't easily test import failure
-            assert callable(check_anthropic_available)
-
-        # Restore
-        if original is not None:
-            sys.modules["anthropic"] = original
-
-
-class TestClaudeModels:
-    """Tests for Claude model list."""
-
-    def test_claude_models_not_empty(self) -> None:
-        """Should have at least one model."""
-        assert len(CLAUDE_MODELS) >= 1
-
-    def test_models_are_model_info(self) -> None:
-        """All models should be ModelInfo instances."""
-        for model in CLAUDE_MODELS:
-            assert isinstance(model, ModelInfo)
-
-
-# =============================================================================
 # Factory Tests
 # =============================================================================
 
@@ -224,10 +145,9 @@ class TestProviderFactory:
     def test_list_providers(self) -> None:
         """Should list available providers."""
         providers = list_providers()
-        assert len(providers) >= 2
+        assert len(providers) >= 1
         ids = [p.id for p in providers]
         assert "ollama" in ids
-        assert "anthropic" in ids
 
     def test_get_provider_info_ollama(self) -> None:
         """Should get Ollama provider info."""
@@ -236,14 +156,6 @@ class TestProviderFactory:
         assert info.id == "ollama"
         assert info.is_local is True
         assert info.requires_api_key is False
-
-    def test_get_provider_info_anthropic(self) -> None:
-        """Should get Anthropic provider info."""
-        info = get_provider_info("anthropic")
-        assert info is not None
-        assert info.id == "anthropic"
-        assert info.is_local is False
-        assert info.requires_api_key is True
 
     def test_get_provider_info_unknown(self) -> None:
         """Should return None for unknown provider."""
@@ -273,8 +185,8 @@ class TestFactoryGetProvider:
 
     def test_set_provider_type(self, isolated_db: MagicMock) -> None:
         """Should set provider type in database."""
-        set_provider_type(isolated_db, "anthropic")
-        isolated_db.set_state.assert_called_with(key="provider", value="anthropic")
+        set_provider_type(isolated_db, "ollama")
+        isolated_db.set_state.assert_called_with(key="provider", value="ollama")
 
     def test_set_invalid_provider_type(self, isolated_db: MagicMock) -> None:
         """Should raise error for invalid provider."""
