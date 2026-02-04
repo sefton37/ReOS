@@ -355,12 +355,19 @@ def update_block(
     now = _now_iso()
 
     with _transaction() as conn:
+        # SAFETY: updates list MUST only contain hardcoded "column = ?" strings.
+        # Never add user-controlled column names here.
         updates = ["updated_at = ?"]
         params: list[Any] = [now]
 
         if position is not None:
             updates.append("position = ?")
             params.append(position)
+
+        _ALLOWED_COLUMNS = {"updated_at", "position"}
+        assert all(u.split(" = ?")[0] in _ALLOWED_COLUMNS for u in updates), (
+            f"SQL injection guard: unexpected column in updates: {updates}"
+        )
 
         params.append(block_id)
         conn.execute(f"UPDATE blocks SET {', '.join(updates)} WHERE id = ?", params)

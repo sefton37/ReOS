@@ -14,6 +14,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable
 
+from reos.security import is_command_safe
 from .planner import TaskPlan, TaskStep, StepStatus, StepType
 from .safety import SafetyManager, RiskLevel
 
@@ -273,6 +274,16 @@ class ExecutionEngine:
             self.safety.record_action(
                 description=step.title,
                 rollback_command=step.rollback_command,
+            )
+
+        # Validate command safety before execution
+        is_safe, warning = is_command_safe(command)
+        if not is_safe:
+            return StepResult(
+                step_id=step.id,
+                success=False,
+                output="",
+                error=warning or "Command blocked for safety",
             )
 
         # Check if we're running in terminal mode (from shell_cli)

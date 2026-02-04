@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
+from reos.security import is_command_safe
+
 logger = logging.getLogger(__name__)
 
 from .models import (
@@ -437,6 +439,14 @@ class OperationExecutor:
                 stdout=f"[DRY RUN] Would execute: {command}",
             )
 
+        # Validate command safety before execution
+        is_safe, warning = is_command_safe(command)
+        if not is_safe:
+            return ExecutionResult(
+                success=False,
+                stderr=warning or "Command blocked for safety",
+            )
+
         try:
             # Run process
             proc = subprocess.Popen(
@@ -517,17 +527,21 @@ class OperationExecutor:
         )
 
     def _extract_paths(self, request: str) -> list[str]:
-        """Extract file paths from request."""
+        """Extract file paths from request, filtering out traversal attempts."""
         import re
         # Match Unix-style paths
         paths = re.findall(r'(?:^|[\s"\'])([/~][\w./-]+)', request)
-        # Expand ~ to home directory
+        # Expand ~ and validate
         expanded = []
         for p in paths:
             if p.startswith('~'):
-                expanded.append(os.path.expanduser(p))
-            else:
-                expanded.append(p)
+                p = os.path.expanduser(p)
+            # Reject path traversal attempts
+            resolved = os.path.realpath(p)
+            if '..' in p or resolved.startswith(('/proc/', '/sys/', '/dev/')):
+                logger.warning("Rejected suspicious path: %s (resolved: %s)", p, resolved)
+                continue
+            expanded.append(p)
         return expanded
 
     def _determine_reversibility(
@@ -636,6 +650,13 @@ class OperationExecutor:
 
         results = []
         for cmd in operation.reversibility.undo_commands:
+            # Validate undo command safety
+            is_safe, warning = is_command_safe(cmd)
+            if not is_safe:
+                logger.warning("Undo command blocked for safety: %s", cmd)
+                results.append((cmd, False))
+                continue
+
             try:
                 proc = subprocess.run(
                     cmd,

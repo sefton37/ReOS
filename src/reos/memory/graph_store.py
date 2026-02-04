@@ -271,6 +271,8 @@ class MemoryGraphStore:
         """
         conn = self._get_connection()
 
+        # SAFETY: updates list MUST only contain hardcoded "column = ?" strings.
+        # Never add user-controlled column names here.
         updates = []
         params: list[Any] = []
 
@@ -284,6 +286,11 @@ class MemoryGraphStore:
 
         if not updates:
             return False
+
+        _ALLOWED_COLUMNS = {"confidence", "weight"}
+        assert all(u.split(" = ?")[0] in _ALLOWED_COLUMNS for u in updates), (
+            f"SQL injection guard: unexpected column in updates: {updates}"
+        )
 
         params.append(rel_id)
 

@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
+from reos.security import is_command_safe
+
 
 @dataclass
 class StreamingExecution:
@@ -89,6 +91,17 @@ class StreamingExecutor:
         )
 
         try:
+            # Validate command safety before execution
+            is_safe, warning = is_command_safe(command)
+            if not is_safe:
+                execution.is_complete = True
+                execution.error = warning or "Command blocked for safety"
+                execution.completed_at = datetime.now()
+                # Store the blocked execution before returning
+                with self._lock:
+                    self._executions[execution_id] = execution
+                return execution_id
+
             process = subprocess.Popen(
                 command,
                 shell=True,

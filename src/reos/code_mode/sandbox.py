@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from reos.security import is_command_safe
+
 
 class CodeSandboxError(RuntimeError):
     """Error raised when a sandboxed operation fails or is disallowed."""
@@ -712,6 +714,11 @@ class CodeSandbox:
         Returns:
             Tuple of (return_code, stdout, stderr).
         """
+        # Validate command safety before execution
+        is_safe, warning = is_command_safe(command)
+        if not is_safe:
+            return -1, "", warning or "Command blocked for safety"
+
         try:
             result = subprocess.run(
                 command,
