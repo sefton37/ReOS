@@ -23,6 +23,7 @@ Stage 4: Response Generation
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -30,6 +31,8 @@ from typing import Any
 
 from reos.providers.base import LLMProvider
 from reos.cairn.consciousness_stream import ConsciousnessObserver, ConsciousnessEventType
+
+logger = logging.getLogger(__name__)
 
 
 class IntentCategory(Enum):
@@ -230,8 +233,6 @@ class CairnIntentEngine:
         Returns:
             IntentResult with the final response
         """
-        import sys
-
         # Get consciousness observer for streaming events to UI
         observer = ConsciousnessObserver.get_instance()
 
@@ -241,7 +242,7 @@ class CairnIntentEngine:
             "Stage 1: Intent Extraction",
             f"Analyzing: \"{user_input[:100]}{'...' if len(user_input) > 100 else ''}\"",
         )
-        print(f"[INTENT] Stage 1: Extracting intent from: {user_input[:100]!r}", file=sys.stderr)
+        logger.debug("Stage 1: Extracting intent from: %r", user_input[:100])
         intent = self._extract_intent(user_input)
         observer.emit(
             ConsciousnessEventType.INTENT_EXTRACTED,
@@ -255,7 +256,7 @@ class CairnIntentEngine:
             action=intent.action.name,
             confidence=intent.confidence,
         )
-        print(f"[INTENT] Stage 1 result: category={intent.category.name}, action={intent.action.name}, confidence={intent.confidence:.2f}", file=sys.stderr)
+        logger.debug("Stage 1 result: category=%s, action=%s, confidence=%.2f", intent.category.name, intent.action.name, intent.confidence)
 
         # Stage 2: Verify intent
         observer.emit(
@@ -263,7 +264,7 @@ class CairnIntentEngine:
             "Stage 2: Intent Verification",
             "Checking if intent is actionable and selecting appropriate tool...",
         )
-        print(f"[INTENT] Stage 2: Verifying intent", file=sys.stderr)
+        logger.debug("Stage 2: Verifying intent")
         verified = self._verify_intent(intent)
         observer.emit(
             ConsciousnessEventType.INTENT_VERIFIED,
@@ -275,7 +276,7 @@ class CairnIntentEngine:
             verified=verified.verified,
             tool=verified.tool_name,
         )
-        print(f"[INTENT] Stage 2 result: verified={verified.verified}, tool={verified.tool_name}", file=sys.stderr)
+        logger.debug("Stage 2 result: verified=%s, tool=%s", verified.verified, verified.tool_name)
 
         # Stage 3: Execute tool if verified
         tool_result = None
@@ -288,7 +289,7 @@ class CairnIntentEngine:
                 f"Arguments: {json.dumps(verified.tool_args, indent=2, default=str)}",
                 tool=verified.tool_name,
             )
-            print(f"[INTENT] Stage 3: Executing tool {verified.tool_name} with args {verified.tool_args}", file=sys.stderr)
+            logger.debug("Stage 3: Executing tool %s with args %s", verified.tool_name, verified.tool_args)
             try:
                 tool_result = execute_tool(verified.tool_name, verified.tool_args)
                 all_tool_results.append({"tool": verified.tool_name, "result": tool_result})
@@ -299,7 +300,7 @@ class CairnIntentEngine:
                     tool=verified.tool_name,
                     success=not tool_result.get("error"),
                 )
-                print(f"[INTENT] Stage 3 result: {json.dumps(tool_result, default=str)[:500]}", file=sys.stderr)
+                logger.debug("Stage 3 result: %s", json.dumps(tool_result, default=str)[:500])
 
                 # Stage 3.5: Recovery - if tool failed or returned error, try to recover
                 if tool_result and tool_result.get("error"):
@@ -308,7 +309,7 @@ class CairnIntentEngine:
                         "Stage 3.5: Attempting Recovery",
                         f"Tool returned error: {tool_result.get('error')}\nAttempting alternative approach...",
                     )
-                    print(f"[INTENT] Stage 3.5: Tool returned error, attempting recovery", file=sys.stderr)
+                    logger.debug("Stage 3.5: Tool returned error, attempting recovery")
                     recovery_result = self._attempt_recovery(
                         user_input=user_input,
                         intent=intent,
@@ -334,7 +335,7 @@ class CairnIntentEngine:
                     success=False,
                     error=str(e),
                 )
-                print(f"[INTENT] Stage 3 error: {e}", file=sys.stderr)
+                logger.warning("Stage 3 error: %s", e)
                 tool_result = {"error": str(e)}
 
         # Stage 4: Generate response
@@ -343,7 +344,7 @@ class CairnIntentEngine:
             "Stage 4: Response Generation",
             "Synthesizing response from collected data...",
         )
-        print(f"[INTENT] Stage 4: Generating response", file=sys.stderr)
+        logger.debug("Stage 4: Generating response")
         response, thinking = self._generate_response(
             verified_intent=verified,
             tool_result=tool_result,
@@ -351,7 +352,7 @@ class CairnIntentEngine:
             user_input=user_input,
             execute_tool=execute_tool,
         )
-        print(f"[INTENT] Stage 4 response: {response[:200]}...", file=sys.stderr)
+        logger.debug("Stage 4 response: %s...", response[:200])
 
         # Emit final response ready event
         observer.emit(
@@ -382,11 +383,9 @@ class CairnIntentEngine:
         1. For beat operations: search for the beat first
         2. For missing data: gather more context
         """
-        import sys
-
         # For beat move failures, try to find the beat first
         if failed_tool == "cairn_move_beat_to_act" and "not found" in error.lower():
-            print(f"[INTENT] Recovery: Beat not found, searching...", file=sys.stderr)
+            logger.debug("Recovery: Beat not found, searching...")
             try:
                 # List all beats to find the one the user mentioned
                 beats_result = execute_tool("cairn_list_beats", {})
@@ -398,7 +397,7 @@ class CairnIntentEngine:
                         "original_error": error,
                     }
             except Exception as e:
-                print(f"[INTENT] Recovery failed: {e}", file=sys.stderr)
+                logger.warning("Recovery failed: %s", e)
 
         return None
 
@@ -873,17 +872,15 @@ Be precise. Output ONLY valid JSON."""
         Uses LLM-based extraction with Play context as the primary method.
         Falls back to regex only if LLM extraction fails.
         """
-        import sys
-
         # PRIMARY: LLM-based extraction using Play context
         # This is the preferred method because it understands context
         if self.play_data and (self.play_data.get("acts") or self.play_data.get("all_beats")):
-            print(f"[INTENT] Using LLM extraction with Play context", file=sys.stderr)
+            logger.debug("Using LLM extraction with Play context")
             llm_args = self._llm_extract_beat_move_args(user_input)
             if llm_args.get("beat_name") and llm_args.get("target_act_name"):
-                print(f"[INTENT] LLM extracted: beat={llm_args.get('beat_name')!r}, act={llm_args.get('target_act_name')!r}", file=sys.stderr)
+                logger.debug("LLM extracted: beat=%r, act=%r", llm_args.get('beat_name'), llm_args.get('target_act_name'))
                 return llm_args
-            print(f"[INTENT] LLM extraction incomplete, trying regex fallback", file=sys.stderr)
+            logger.debug("LLM extraction incomplete, trying regex fallback")
 
         # FALLBACK: Regex-based extraction (only if LLM fails or no play_data)
         return self._regex_extract_beat_move_args(user_input)
@@ -933,8 +930,7 @@ IMPORTANT:
                 "target_act_name": data.get("target_act_name", "").strip(),
             }
         except (json.JSONDecodeError, Exception) as e:
-            import sys
-            print(f"[INTENT] LLM extraction failed: {e}", file=sys.stderr)
+            logger.warning("LLM extraction failed: %s", e)
             return {}
 
     def _regex_extract_beat_move_args(self, user_input: str) -> dict[str, Any]:
@@ -1017,17 +1013,14 @@ IMPORTANT:
         Uses LLM-based extraction with Play context to understand natural language
         like "The X scene should be moved to Y" or "Move X to the Y act".
         """
-        import sys
-
         # PRIMARY: LLM-based extraction using Play context
         if self.play_data and (self.play_data.get("acts") or self.play_data.get("all_scenes")):
-            print(f"[INTENT] Using LLM extraction for scene move", file=sys.stderr)
+            logger.debug("Using LLM extraction for scene move")
             llm_args = self._llm_extract_scene_move_args(user_input)
             if llm_args.get("scene_name") and llm_args.get("new_act_name"):
-                print(f"[INTENT] LLM extracted scene move: scene={llm_args.get('scene_name')!r}, "
-                      f"from={llm_args.get('act_name')!r}, to={llm_args.get('new_act_name')!r}", file=sys.stderr)
+                logger.debug("LLM extracted scene move: scene=%r, from=%r, to=%r", llm_args.get('scene_name'), llm_args.get('act_name'), llm_args.get('new_act_name'))
                 return llm_args
-            print(f"[INTENT] LLM extraction incomplete, trying regex fallback", file=sys.stderr)
+            logger.debug("LLM extraction incomplete, trying regex fallback")
 
         # FALLBACK: Regex-based extraction
         return self._regex_extract_scene_move_args(user_input)
@@ -1078,8 +1071,7 @@ IMPORTANT:
                 result["act_name"] = data.get("act_name", "").strip()
             return result
         except (json.JSONDecodeError, Exception) as e:
-            import sys
-            print(f"[INTENT] LLM scene move extraction failed: {e}", file=sys.stderr)
+            logger.warning("LLM scene move extraction failed: %s", e)
             return {}
 
     def _regex_extract_scene_move_args(self, user_input: str) -> dict[str, Any]:
@@ -1210,8 +1202,6 @@ IMPORTANT:
         2. Ask for clarification if needed
         3. Never just give up silently
         """
-        import sys
-
         # If not verified, return fallback
         if not verified_intent.verified:
             return verified_intent.fallback_message or "I couldn't process that request.", []
@@ -1235,19 +1225,15 @@ TARGET: {verified_intent.intent.target}
 """
 
         # Build user message with actual data
-        # DIAGNOSTIC: Log to file
-        import os
-        log_path = os.path.expanduser("~/.reos-data/cairn_debug.log")
-        with open(log_path, "a") as f:
-            f.write(f"\n--- INTENT ENGINE ---\n")
-            f.write(f"category={verified_intent.intent.category.name}\n")
-            f.write(f"persona_context length={len(persona_context)}\n")
+        logger.debug(
+            "Intent engine: category=%s, persona_context_length=%d",
+            verified_intent.intent.category.name,
+            len(persona_context),
+        )
 
         if verified_intent.intent.category == IntentCategory.PERSONAL:
             # Personal questions - use persona context directly
-            with open(log_path, "a") as f:
-                f.write(f"PERSONAL branch - using persona_context\n")
-                f.write(f"preview: {persona_context[:300] if persona_context else 'EMPTY'}...\n")
+            logger.debug("PERSONAL branch - using persona_context")
             user = f"""USER QUESTION: {verified_intent.intent.raw_input}
 
 YOUR KNOWLEDGE ABOUT THIS USER:
@@ -1313,7 +1299,7 @@ No data was retrieved. Explain that you couldn't get the requested information."
                 "Stage 5: Hallucination Check",
                 "Verifying response is grounded in actual data...",
             )
-            print(f"[INTENT] Stage 5: Verifying response for hallucination", file=sys.stderr)
+            logger.debug("Stage 5: Verifying response for hallucination")
 
             is_valid, rejection_reason = self._verify_no_hallucination(
                 response=response,
@@ -1329,11 +1315,11 @@ No data was retrieved. Explain that you couldn't get the requested information."
                     valid=False,
                     reason=rejection_reason,
                 )
-                print(f"[INTENT] Stage 5: REJECTED - {rejection_reason}", file=sys.stderr)
+                logger.warning("Stage 5: REJECTED - %s", rejection_reason)
 
                 # Stage 5.5: Recovery - try to get more data instead of giving up
                 if execute_tool and verified_intent.intent.category == IntentCategory.PLAY:
-                    print(f"[INTENT] Stage 5.5: Attempting recovery for PLAY category", file=sys.stderr)
+                    logger.debug("Stage 5.5: Attempting recovery for PLAY category")
                     recovery_response = self._recover_with_clarification(
                         user_input=user_input or verified_intent.intent.raw_input,
                         intent=verified_intent.intent,
@@ -1357,7 +1343,7 @@ No data was retrieved. Explain that you couldn't get the requested information."
                 "Response is grounded in actual data - no hallucination detected.",
                 valid=True,
             )
-            print(f"[INTENT] Stage 5: Response verified OK", file=sys.stderr)
+            logger.debug("Stage 5: Response verified OK")
 
             # Stage 6: Check for repetition
             observer.emit(
@@ -1372,7 +1358,7 @@ No data was retrieved. Explain that you couldn't get the requested information."
                     "Response was too similar to a recent response. Adjusting to avoid repetition.",
                     repetitive=True,
                 )
-                print(f"[INTENT] Stage 6: Detected repetitive response, adjusting", file=sys.stderr)
+                logger.debug("Stage 6: Detected repetitive response, adjusting")
                 # Instead of repeating, acknowledge and offer alternatives
                 response = (
                     "I realize I may be covering similar ground. "
@@ -1404,12 +1390,10 @@ No data was retrieved. Explain that you couldn't get the requested information."
         execute_tool: Any,
     ) -> str | None:
         """Try to recover by gathering more data."""
-        import sys
-
         # For beat operations, try to list all beats to help the user
         if "beat" in user_input.lower() or intent.action == IntentAction.UPDATE:
             try:
-                print(f"[INTENT] Recovery: Searching for beats...", file=sys.stderr)
+                logger.debug("Recovery: Searching for beats...")
                 beats_result = execute_tool("cairn_list_beats", {})
                 if beats_result and not beats_result.get("error"):
                     beats = beats_result.get("beats", [])
@@ -1423,7 +1407,7 @@ No data was retrieved. Explain that you couldn't get the requested information."
                             f"Please use the exact name from the list above."
                         )
             except Exception as e:
-                print(f"[INTENT] Recovery search failed: {e}", file=sys.stderr)
+                logger.warning("Recovery search failed: %s", e)
 
         return None
 

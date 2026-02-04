@@ -369,8 +369,8 @@ class SteadyStateCollector:
                 if "=" in line:
                     key, value = line.split("=", 1)
                     data[key] = value.strip('"')
-        except (FileNotFoundError, PermissionError):
-            pass
+        except (FileNotFoundError, PermissionError) as e:
+            logger.debug("Cannot read /etc/os-release: %s", e)
         return data
 
     def _get_os_name(self) -> str:
@@ -391,14 +391,15 @@ class SteadyStateCollector:
                 for line in f:
                     if line.startswith("model name"):
                         return line.split(":", 1)[1].strip()
-        except (FileNotFoundError, PermissionError):
-            pass
+        except (FileNotFoundError, PermissionError) as e:
+            logger.debug("Cannot read /proc/cpuinfo for CPU model: %s", e)
         return platform.processor() or "Unknown CPU"
 
     def _get_cpu_cores(self) -> int:
         try:
             return os.cpu_count() or 1
-        except Exception:
+        except (NotImplementedError, OSError) as e:
+            logger.debug("Cannot determine CPU core count: %s", e)
             return 1
 
     def _get_cpu_threads(self) -> int:
@@ -415,8 +416,8 @@ class SteadyStateCollector:
                     if line.startswith("MemTotal:"):
                         kb = int(line.split()[1])
                         return kb / (1024 * 1024)
-        except (FileNotFoundError, PermissionError):
-            pass
+        except (FileNotFoundError, PermissionError) as e:
+            logger.debug("Cannot read /proc/meminfo: %s", e)
         return 0.0
 
     def _get_disks(self) -> list[DiskInfo]:
@@ -562,8 +563,8 @@ class SteadyStateCollector:
                             shell=parts[6],
                             is_system=uid < 1000,
                         ))
-        except (FileNotFoundError, PermissionError):
-            pass
+        except (FileNotFoundError, PermissionError) as e:
+            logger.debug("Cannot read /etc/passwd: %s", e)
         return users
 
     def _check_docker_installed(self) -> bool:
