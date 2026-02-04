@@ -100,6 +100,13 @@ from reos.errors import (
     error_response,
     get_error_code,
     ErrorResponse,
+    # New additions
+    Result,
+    handle_errors,
+    MemoryError,
+    StorageError,
+    AtomicOpError,
+    CAIRNError,
 )
 
 
@@ -345,3 +352,210 @@ class TestErrorHierarchy:
         """SandboxError is an ExecutionError."""
         err = SandboxError("Failed")
         assert isinstance(err, ExecutionError)
+
+
+# =============================================================================
+# Result Type Tests
+# =============================================================================
+
+
+class TestResult:
+    """Tests for the Result type."""
+
+    def test_ok_creates_successful_result(self):
+        """Result.ok() creates a successful result with value."""
+        result = Result.ok(42)
+        assert result.success is True
+        assert result.value == 42
+        assert result.error is None
+
+    def test_fail_creates_failed_result(self):
+        """Result.fail() creates a failed result with error."""
+        error = ValidationError("Invalid input")
+        result = Result.fail(error)
+        assert result.success is False
+        assert result.value is None
+        assert result.error is error
+
+    def test_unwrap_returns_value_on_success(self):
+        """unwrap() returns the value for successful results."""
+        result = Result.ok("hello")
+        assert result.unwrap() == "hello"
+
+    def test_unwrap_raises_on_failure(self):
+        """unwrap() raises the error for failed results."""
+        error = ValidationError("Bad input")
+        result = Result.fail(error)
+        with pytest.raises(ValidationError) as exc_info:
+            result.unwrap()
+        assert exc_info.value is error
+
+    def test_unwrap_or_returns_value_on_success(self):
+        """unwrap_or() returns the value for successful results."""
+        result = Result.ok(42)
+        assert result.unwrap_or(0) == 42
+
+    def test_unwrap_or_returns_default_on_failure(self):
+        """unwrap_or() returns the default for failed results."""
+        result = Result.fail(ValidationError("Error"))
+        assert result.unwrap_or("default") == "default"
+
+    def test_result_with_none_value(self):
+        """Result can wrap None as a successful value."""
+        result = Result.ok(None)
+        assert result.success is True
+        assert result.value is None
+
+    def test_result_with_complex_type(self):
+        """Result can wrap complex types."""
+        data = {"users": [{"id": 1, "name": "Alice"}]}
+        result = Result.ok(data)
+        assert result.success is True
+        assert result.value == data
+
+
+# =============================================================================
+# handle_errors Decorator Tests
+# =============================================================================
+
+
+class TestHandleErrorsDecorator:
+    """Tests for the handle_errors decorator."""
+
+    def test_returns_value_on_success(self):
+        """Decorator returns function result on success."""
+
+        @handle_errors("test operation")
+        def successful_func() -> str:
+            return "success"
+
+        assert successful_func() == "success"
+
+    def test_returns_default_on_exception(self):
+        """Decorator returns default value when exception occurs."""
+
+        @handle_errors("test operation", default="fallback")
+        def failing_func() -> str:
+            raise ValueError("boom")
+
+        assert failing_func() == "fallback"
+
+    def test_returns_none_by_default(self):
+        """Decorator returns None by default when exception occurs."""
+
+        @handle_errors("test operation")
+        def failing_func() -> str | None:
+            raise ValueError("boom")
+
+        assert failing_func() is None
+
+    def test_propagates_talking_rock_error(self):
+        """Decorator propagates TalkingRockError unchanged."""
+
+        @handle_errors("test operation", default="fallback")
+        def func_raising_domain_error() -> str:
+            raise ValidationError("Invalid input")
+
+        with pytest.raises(ValidationError):
+            func_raising_domain_error()
+
+    def test_reraise_converts_to_talking_rock_error(self):
+        """Decorator can re-raise as TalkingRockError."""
+
+        @handle_errors("test operation", reraise=True)
+        def failing_func() -> str:
+            raise ValueError("original error")
+
+        with pytest.raises(TalkingRockError) as exc_info:
+            failing_func()
+
+        assert "Failed to test operation" in str(exc_info.value)
+        assert exc_info.value.context["original_error"] == "original error"
+
+    def test_preserves_function_name(self):
+        """Decorator preserves the wrapped function's name."""
+
+        @handle_errors("my operation")
+        def my_function() -> None:
+            pass
+
+        assert my_function.__name__ == "my_function"
+
+    def test_handles_function_with_args(self):
+        """Decorator works with functions that have arguments."""
+
+        @handle_errors("division", default=0)
+        def divide(a: int, b: int) -> int:
+            return a // b
+
+        assert divide(10, 2) == 5
+        assert divide(10, 0) == 0  # ZeroDivisionError caught
+
+    def test_handles_function_with_kwargs(self):
+        """Decorator works with functions that have keyword arguments."""
+
+        @handle_errors("processing", default={})
+        def process(*, items: list[str], prefix: str = "") -> dict:
+            return {prefix + item: len(item) for item in items}
+
+        result = process(items=["a", "bb"], prefix="len_")
+        assert result == {"len_a": 1, "len_bb": 2}
+
+
+# =============================================================================
+# Domain-Specific Error Tests
+# =============================================================================
+
+
+class TestDomainSpecificErrors:
+    """Tests for domain-specific error types."""
+
+    def test_memory_error(self):
+        """MemoryError includes operation and block_id."""
+        err = MemoryError(
+            "Embedding failed",
+            operation="embed",
+            block_id="block-123",
+        )
+        assert err.context["operation"] == "embed"
+        assert err.context["block_id"] == "block-123"
+        assert err.recoverable is True
+
+    def test_storage_error(self):
+        """StorageError includes operation and path."""
+        err = StorageError(
+            "Write failed",
+            operation="append_event",
+            path="/data/events.jsonl",
+        )
+        assert err.context["operation"] == "append_event"
+        assert "/data/events.jsonl" in err.context["path"]
+        assert err.recoverable is False
+
+    def test_atomic_op_error(self):
+        """AtomicOpError includes operation and phase."""
+        err = AtomicOpError(
+            "Backup failed",
+            operation="file_backup",
+            phase="pre_execution",
+        )
+        assert err.context["operation"] == "file_backup"
+        assert err.context["phase"] == "pre_execution"
+
+    def test_cairn_error(self):
+        """CAIRNError includes stage and query."""
+        err = CAIRNError(
+            "Reasoning failed",
+            stage="context_building",
+            query="What are the pending tasks?",
+        )
+        assert err.context["stage"] == "context_building"
+        assert "pending tasks" in err.context["query"]
+        assert err.recoverable is True
+
+    def test_domain_errors_have_error_codes(self):
+        """Domain-specific errors have mapped error codes."""
+        assert get_error_code(MemoryError("test")) == -32050
+        assert get_error_code(StorageError("test")) == -32051
+        assert get_error_code(AtomicOpError("test")) == -32052
+        assert get_error_code(CAIRNError("test")) == -32053

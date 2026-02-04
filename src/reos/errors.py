@@ -32,9 +32,77 @@ import logging
 import traceback
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from functools import wraps
+from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar
+
+if TYPE_CHECKING:
+    from .db import Database
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+# =============================================================================
+# Result Type for Explicit Success/Failure
+# =============================================================================
+
+
+@dataclass
+class Result(Generic[T]):
+    """Structured result that makes success/failure explicit.
+
+    Use when callers need to distinguish between "not found" and "error".
+    For simpler cases, prefer raising exceptions or returning Optional[T].
+
+    Usage:
+        def find_user(id: str) -> Result[User]:
+            try:
+                user = db.get_user(id)
+                if user is None:
+                    return Result.fail(NotFoundError(f"User {id} not found"))
+                return Result.ok(user)
+            except DatabaseError as e:
+                return Result.fail(e)
+
+        result = find_user("123")
+        if result.success:
+            print(result.value.name)
+        else:
+            logger.error(result.error.message)
+    """
+
+    success: bool
+    value: T | None = None
+    error: "TalkingRockError | None" = None
+
+    @classmethod
+    def ok(cls, value: T) -> "Result[T]":
+        """Create a successful result."""
+        return cls(success=True, value=value)
+
+    @classmethod
+    def fail(cls, error: "TalkingRockError") -> "Result[T]":
+        """Create a failed result."""
+        return cls(success=False, error=error)
+
+    def unwrap(self) -> T:
+        """Get value or raise the error.
+
+        Raises:
+            TalkingRockError: If this is a failed result.
+        """
+        if self.success:
+            return self.value  # type: ignore
+        if self.error:
+            raise self.error
+        raise TalkingRockError("Result failed with no error")
+
+    def unwrap_or(self, default: T) -> T:
+        """Get value or return default."""
+        if self.success:
+            return self.value  # type: ignore
+        return default
 
 
 # =============================================================================
@@ -491,6 +559,183 @@ class SandboxError(ExecutionError):
 
 
 # =============================================================================
+# Domain-Specific Errors
+# =============================================================================
+
+
+class MemoryError(TalkingRockError):
+    """Errors in memory/embedding system.
+
+    Used for embedding generation failures, retrieval issues, etc.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str | None = None,
+        block_id: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        context = kwargs.pop("context", {})
+        if operation:
+            context["operation"] = operation
+        if block_id:
+            context["block_id"] = block_id
+        super().__init__(message, recoverable=True, context=context, **kwargs)
+
+
+class StorageError(TalkingRockError):
+    """Errors in persistence layer.
+
+    Used for event storage failures, file I/O issues, etc.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str | None = None,
+        path: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        context = kwargs.pop("context", {})
+        if operation:
+            context["operation"] = operation
+        if path:
+            context["path"] = _truncate(path, 200)
+        super().__init__(message, recoverable=False, context=context, **kwargs)
+
+
+class AtomicOpError(TalkingRockError):
+    """Errors in atomic operation execution.
+
+    Used for state capture, backup, and execution failures.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str | None = None,
+        phase: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        context = kwargs.pop("context", {})
+        if operation:
+            context["operation"] = operation
+        if phase:
+            context["phase"] = phase
+        super().__init__(message, recoverable=False, context=context, **kwargs)
+
+
+class CAIRNError(TalkingRockError):
+    """Errors in CAIRN reasoning system.
+
+    Used for reasoning failures, context building issues, etc.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stage: str | None = None,
+        query: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        context = kwargs.pop("context", {})
+        if stage:
+            context["stage"] = stage
+        if query:
+            context["query"] = _truncate(query, 200)
+        super().__init__(message, recoverable=True, context=context, **kwargs)
+
+
+# =============================================================================
+# Error Handling Decorator
+# =============================================================================
+
+
+def handle_errors(
+    operation: str,
+    *,
+    log_level: str = "error",
+    reraise: bool = False,
+    default: Any = None,
+    record: bool = True,
+) -> Callable:
+    """Decorator that standardizes exception handling.
+
+    Catches exceptions, logs them with context, and either re-raises or
+    returns a default value. TalkingRockError exceptions are propagated
+    as-is since they're already structured.
+
+    Args:
+        operation: Human-readable description of what the function does.
+        log_level: Logging level for caught exceptions ("error", "warning", "debug").
+        reraise: If True, re-raise as TalkingRockError. If False, return default.
+        default: Value to return when exception caught and reraise=False.
+        record: If True, call record_error() for unexpected exceptions.
+
+    Usage:
+        @handle_errors("embedding generation", default=None)
+        def embed(text: str) -> list[float] | None:
+            return model.encode(text).tolist()
+
+        @handle_errors("state capture", log_level="warning", default={})
+        def capture_state() -> dict:
+            return {"memory": get_memory_info()}
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except TalkingRockError:
+                # Already structured, let it propagate
+                raise
+            except Exception as e:
+                # Log at appropriate level
+                log_fn = getattr(logger, log_level, logger.error)
+                log_fn(
+                    "Failed to %s: %s (function=%s, args_preview=%s)",
+                    operation,
+                    e,
+                    func.__name__,
+                    str(args)[:100],
+                )
+
+                # Record for persistence if enabled
+                if record:
+                    try:
+                        record_error(
+                            source=func.__module__ or "unknown",
+                            operation=operation,
+                            exc=e,
+                            context={
+                                "function": func.__name__,
+                                "args_preview": str(args)[:200],
+                                "kwargs_keys": list(kwargs.keys()),
+                            },
+                        )
+                    except Exception:
+                        pass  # Don't fail on error recording
+
+                if reraise:
+                    raise TalkingRockError(
+                        message=f"Failed to {operation}: {e}",
+                        context={"original_error": str(e), "error_type": type(e).__name__},
+                    ) from e
+
+                return default
+
+        return wrapper
+
+    return decorator
+
+
+# =============================================================================
 # Helpers
 # =============================================================================
 
@@ -695,6 +940,11 @@ ERROR_CODES: dict[type[TalkingRockError], int] = {
     ConfigurationError: -32030,
     ExecutionError: -32040,
     SandboxError: -32041,
+    # Domain-specific errors
+    MemoryError: -32050,
+    StorageError: -32051,
+    AtomicOpError: -32052,
+    CAIRNError: -32053,
 }
 
 
