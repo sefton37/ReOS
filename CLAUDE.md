@@ -1,408 +1,369 @@
-# Claude Code: Global Instructions
+# ReOS (Talking Rock) Project Guide
 
-## Core Philosophy
-
-**Certainty before action. Understanding before planning. Planning before code.**
-
-You are working on a codebase that exists in a specific context with its own patterns, conventions, and documentation. Your effectiveness depends on deep understanding of that context, not speed of output.
+> **See `~/.claude/CLAUDE.md` for the comprehensive workflow (Comprehension → Clarification → Planning → Execution).** This document provides ReOS-specific context only.
 
 ---
 
-## Workflow: Every Prompt, Every Time
+## What This Is
 
-### Phase 1: Comprehension (Search & Understand)
+**Talking Rock** is a local-first AI assistant with three specialized agents:
+- **CAIRN** (Priority 1) - Attention minder and life organizer (1B models)
+- **ReOS** (Priority 2) - Natural language Linux system control (1-3B models)
+- **RIVA** (Frozen) - Code verification engine (7-8B+ models, future work)
 
-**Before doing anything else, gather context:**
-
-1. **Search all project documentation**
-   - Read relevant specs, READMEs, architecture docs
-   - Search for related concepts, components, and patterns
-   - Understand the architectural context and conventions
-   - Identify dependencies and relationships
-   - Check `/mnt/project/` for project-specific documentation if present
-
-2. **Embrace uncertainty as strength**
-   - You are imperfect. The user is imperfect. This is normal.
-   - If something is unclear, say so immediately
-   - Don't make assumptions about intent
-   - Don't guess at technical details when documentation exists
-
-3. **Decompose the prompt**
-   - What is the user literally asking for?
-   - What is the underlying intent?
-   - How does this fit into the larger project architecture?
-   - What context from documentation is relevant?
-   - What existing code patterns should be followed?
-
-**Spend tokens liberally during this phase.** It's better to read 10 documentation files and understand deeply than to rush ahead with partial knowledge.
-
-### Phase 2: Clarification (Before Planning)
-
-**Once you've gathered context, verify understanding:**
-
-1. **State your understanding back to the user**
-   - "Based on [documentation X, Y, Z], I understand you want to..."
-   - "This connects to [existing component] in these ways..."
-   - "I'm uncertain about [specific aspect], could you clarify..."
-
-2. **Ask clarifying questions**
-   - About technical requirements
-   - About integration points
-   - About expected behavior
-   - About priorities if multiple interpretations exist
-
-3. **Wait for confirmation**
-   - Don't proceed until the user confirms your understanding
-   - This is not a delay—it's preventing wasted work
-
-### Phase 3: Planning (Your Contract)
-
-**Only after certainty about intent and context, create a plan:**
-
-1. **Extensive planning always happens before code**
-   - Break down the work into clear, discrete steps
-   - Identify what files will be created/modified
-   - Specify what each component will do
-   - Map out integration points
-   - Anticipate edge cases and how they'll be handled
-
-2. **The plan is your contract with the user**
-   - Be specific about deliverables
-   - State what will be implemented
-   - State what won't be implemented (if scope requires narrowing)
-   - Include acceptance criteria
-
-3. **Present the plan clearly**
-   - Use structure (numbered steps, sections)
-   - Highlight any assumptions being made
-   - Note any risks or uncertainties that remain
-   - Ask: "Does this plan accomplish what you need?"
-
-4. **Get explicit approval**
-   - Wait for user to confirm the plan
-   - Make adjustments based on feedback
-   - Don't write a single line of code until plan is approved
-
-### Phase 4: Execution (Implementation)
-
-**Only after plan approval:**
-
-1. **Follow the approved plan**
-   - Implement exactly what was agreed upon
-   - If you discover issues during implementation, stop and discuss
-   - Don't silently deviate from the plan
-
-2. **Write clean, documented code**
-   - Follow project conventions from documentation
-   - Add comments explaining non-obvious decisions
-   - Reference relevant documentation in code comments when appropriate
-
-3. **Communicate progress**
-   - If implementation is complex, provide updates
-   - If you encounter blockers, say so immediately
-   - If something takes longer than expected, explain why
+**Core philosophy:** Local inference is essentially free, enabling verification and analysis at scale that cloud services can't afford. Zero trust, local only, encrypted at rest, never phones home.
 
 ---
 
-## Key Principles
+## Architecture Quick Reference
 
-### 1. Documentation is Truth
+Read these first when working on the project:
+- **[ARCHITECTURE.md](src/reos/architecture/ARCHITECTURE.md)** - System overview, data models, component architecture
+- **[README.md](README.md)** - Mission statement, agent descriptions, development priorities
+- **[CAIRN_SIMPLIFICATION_PLAN.md](docs/CAIRN_SIMPLIFICATION_PLAN.md)** - Recent optimization work
 
-Every project has documentation that contains essential context:
-- Architecture and design decisions
-- Core philosophy and principles  
-- Component specifications
-- Integration patterns
-- Conventions and standards
+### Key Architectural Patterns
 
-**Always search and reference project documentation before making architectural decisions.**
+#### 1. Atomic Operations (3x2x3 Taxonomy)
 
-Check for documentation in:
-- `/mnt/project/` - Project-specific docs (if present)
-- `README.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`
-- `docs/` directory
-- Inline code comments and docstrings
-- Existing code patterns as implicit documentation
+Every user request is classified and recorded as an atomic operation:
 
-*Example: In the Talking Rock project, documentation includes PROJECT_ETHOS.md (philosophy), TALKING_ROCK_WHITEPAPER.md (architecture), and component-specific specs that must be consulted before implementation.*
+```python
+# Classification dimensions
+destination_type: "stream" | "file" | "process"  # Where output goes
+consumer_type: "human" | "machine"               # Who consumes result
+execution_semantics: "read" | "interpret" | "execute"  # What action
 
-### 2. Uncertainty is Information
-
-When you don't know something:
-- It reveals what needs clarification
-- It prevents wrong assumptions
-- It builds shared understanding
-- It's faster than fixing mistakes later
-
-**Say "I don't know" freely. Then ask.**
-
-### 3. Planning is Not Overhead
-
-Extensive planning:
-- Catches problems before they're coded
-- Ensures alignment on goals
-- Creates a shared reference point
-- Makes implementation faster and cleaner
-
-**Never apologize for thorough planning. It's the work.**
-
-### 4. Token Efficiency ≠ Understanding Efficiency
-
-Don't optimize for:
-- ❌ Fewer searches
-- ❌ Shorter responses
-- ❌ Faster answers
-
-Optimize for:
-- ✅ Deeper understanding
-- ✅ Clearer communication
-- ✅ Correct implementation
-
-**Use as many tokens as needed to achieve certainty.**
-
-### 5. The User is Your Partner
-
-You and the user are collaborating imperfectly:
-- You understand code structure but not full context
-- They understand intent but may not articulate clearly
-- Together you build shared understanding
-- This requires back-and-forth, and that's good
-
-**Collaboration > Speed**
-
-### 6. Design for the Poor Sap Debugging at 2 AM
-
-Failures are expected and normal. Code that "works" but fails silently or mysteriously is worse than code that crashes loudly.
-
-**Write code for the person who has to diagnose it later (often future-you):**
-
-- **Fail loudly** — Throw errors with context, don't return `null` and hope someone notices
-- **Fail early** — Validate inputs at boundaries, don't let bad data propagate
-- **Fail visibly** — Log what happened, what was expected, what was received
-- **Fail gracefully** — Degrade functionality rather than crash entirely when possible
-- **Fail explicably** — Error messages should answer "what went wrong" AND "what was the code trying to do"
-
-**Silent failures are cruel.** A function that returns `success: true` while producing garbage output will waste hours of debugging time. If something goes wrong, make it obvious.
-
-```
-❌ Bad:  return { success: true, data: [] }  // Silently empty
-✅ Good: throw new Error(`Expected 165 items but parser produced 0. Input length: ${input.length}, first 100 chars: ${input.slice(0,100)}`)
+# Examples
+"show memory usage"     → (stream, human, read)
+"save to notes.txt"     → (file, human, execute)
+"run pytest"            → (process, machine, execute)
+"what's next today?"    → (stream, human, interpret)
 ```
 
-**The test: If this fails in production, will the logs tell someone what happened?**
+**Location:** `src/reos/atomic_ops/` - processor, executor, cairn_integration
+
+#### 2. The Play (2-Tier Life Organization)
+
+```python
+Act        # Life narrative (Career, Health, Family) - months to years
+  └─ Scene # Calendar event or task within the narrative
+
+SceneStage = "planning" | "in_progress" | "awaiting_data" | "complete"
+```
+
+Philosophy: Two levels prevent obscuring responsibility in complexity. Acts answer "What narrative?" Scenes answer "When am I doing this?"
+
+**Location:** `src/reos/play_fs.py`, `src/reos/play_db.py`
+
+#### 3. CAIRN Intent Engine (4-Stage Pipeline)
+
+```
+Stage 1: Extract Intent    → Pattern matching → Category (CALENDAR, PLAY, SYSTEM)
+Stage 2: Verify Intent     → Check tool availability, build args
+Stage 3: Execute Tool      → Call MCP tool with extracted args
+Stage 4: Generate Response → Strictly from tool results (no hallucination)
+```
+
+**Location:** `src/reos/cairn/intent_engine.py`
+
+#### 4. MCP Tools System
+
+45+ tools organized by category:
+- `cairn_*` - The Play CRUD, calendar, contacts, knowledge (CairnToolHandler)
+- `linux_*` - System operations (linux_tools.py)
+- `reos_*` - Git/repo operations (git_tools.py)
+
+**Location:** `src/reos/mcp_tools.py`, `src/reos/cairn/mcp_tools.py`
 
 ---
 
-## Red Flags: When to Stop and Ask
+## Code Quality Standards
 
-Stop immediately and ask for clarification if:
+### Python Requirements
 
-- 🚩 The prompt conflicts with project documentation or conventions
-- 🚩 You're unsure how something integrates with existing components
-- 🚩 Multiple valid interpretations exist
-- 🚩 The scope seems very large and unclear
-- 🚩 You're making assumptions about technical details
-- 🚩 The plan would require changing core architecture or patterns
-- 🚩 You don't understand why something is needed
-- 🚩 The existing codebase uses patterns you don't fully understand
+```bash
+# Python version
+python >= 3.12
+
+# Formatting and linting
+ruff check .           # Lint (E, F, I, UP, B rules)
+ruff format .          # Format (100 char line length)
+
+# Type checking
+mypy src/              # Strict equality, warn return any
+
+# Testing
+pytest --cov           # Minimum 45% coverage required
+```
+
+### Configuration (pyproject.toml)
+
+```toml
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=reos --cov-report=term-missing --cov-fail-under=45"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_ignores = true
+strict_equality = true
+```
+
+### Code Conventions
+
+- **Type hints:** Use `|` for unions (e.g., `str | None`), not `Optional[]`
+- **Error handling:** Fail loudly with context. Use structured error types in `src/reos/errors.py`
+- **Dataclasses:** Prefer dataclasses over dicts for structured data
+- **Docstrings:** Required for public functions; explain WHY, not WHAT
+- **File organization:** Follow existing structure (`cairn/`, `atomic_ops/`, `providers/`, `rpc_handlers/`)
 
 ---
 
-## Debugging: Diagnose Before Fixing
+## Recent Design Decisions
 
-When something isn't working, **understand before you fix**. The most common failure mode is attempting fixes at the wrong layer of abstraction.
+### 1. CAIRN Simplification (2026-01)
+**Context:** Simple conversational queries were going through 11 processing layers.
 
-### The Diagnostic-First Rule
+**Changes:**
+- Intent-aware verification (FAST mode for READ/INTERPRET on STREAM destinations)
+- Removed redundant decomposition calls
+- Conditional intent enhancement (only when contextual references present)
 
-**Before attempting ANY fix, add logging/diagnostics to understand:**
-1. What data goes into the problematic code?
-2. What data comes out?
-3. Does the output match expectations at each transformation step?
+**Result:** Personal questions now ~6 layers instead of 11, preserving full verification for mutations.
 
-One diagnostic showing "165 items in, 1 item out" is worth more than 10 attempted fixes.
+See [CAIRN_SIMPLIFICATION_PLAN.md](docs/CAIRN_SIMPLIFICATION_PLAN.md)
 
-### Trace the Full Data Path
+### 2. Ollama-Only Provider Strategy
+**Decision:** ReOS uses Ollama exclusively for local inference. No cloud providers.
 
-Don't assume any layer is working correctly. For any data transformation pipeline:
-```
-Input → Transform A → Transform B → Transform C → Output
-```
-Verify the actual data at EACH stage. The bug is often not where you think it is.
+**Rationale:** Mission alignment (local-first), cost (free after download), privacy (no data leaves machine).
 
-### Verify Results, Not Return Values
+**Implementation:** `src/reos/providers/factory.py` creates Ollama provider only. Anthropic provider removed.
 
-**Silent failures are the enemy.** A function returning `success=true` while producing empty/wrong output is a silent failure. Always verify:
-- Not just "did it succeed?" but "what did it actually produce?"
-- Read the actual files, check the actual state
-- Compare expected vs actual output explicitly
+### 3. RIVA Development Frozen
+**Decision:** Code agent development paused until CAIRN and ReOS prove small-model (1-3B) viability.
 
-### Be Skeptical of Complex Fixes
+**Rationale:** Code generation with verification requires 7-8B+ models. Focus on what can ship on 8GB RAM today.
 
-🚩 **Red flag: If your fix requires multiple workarounds, refs, flags, or timing hacks, you're probably fixing the wrong thing.**
-
-Signs you're at the wrong layer:
-- Adding ref after ref to "prevent race conditions"
-- Complex timing/ordering logic to "ensure correct sequence"
-- Multiple boolean flags to track state
-- Fixes that work sometimes but not always
-
-When this happens: **Stop. Add diagnostics. Find the real bug.**
-
-### Read Existing Code Carefully
-
-Before assuming existing code works correctly:
-- Trace through the actual logic with real data
-- Look for edge cases: empty inputs, undefined values, different data structures
-- Check that transformations are reversible if they need to be (e.g., serialize/deserialize round-trips)
-
-### The Debugging Workflow
-
-1. **Reproduce** — Confirm you can trigger the bug consistently
-2. **Diagnose** — Add logging to see actual data flow
-3. **Isolate** — Find the exact point where expected ≠ actual
-4. **Understand** — Know WHY it's failing before fixing
-5. **Fix** — Make the minimal change that addresses root cause
-6. **Verify** — Confirm the fix works AND doesn't break other cases
-
-**Never skip step 2.** Jumping from step 1 to step 5 is how you waste hours on wrong-layer fixes.
+**Status:** Infrastructure complete (3-layer verification, pattern learning, fast paths), but intent verification layer incomplete.
 
 ---
 
-## Example: Good Workflow
+## Key Files by Use Case
 
-**User:** "Add OAuth to the system"
-
-**❌ Bad Response:**
+### Working on CAIRN (Attention Minder)
 ```
-I'll add OAuth authentication. Here's the code...
-[writes code immediately]
-```
-
-**✅ Good Response:**
-```
-Let me search the project documentation to understand the current 
-authentication approach and where OAuth would fit.
-
-[Searches README, architecture docs, existing auth code]
-
-Based on the documentation, I see [current authentication state]. 
-Before planning, I need to clarify:
-
-1. What should OAuth protect? (Specific endpoints? All routes? Admin only?)
-2. Which OAuth provider? (Google, GitHub, custom, or multiple?)
-3. Should this integrate with the existing auth system, or replace it?
-4. Is this for multi-user support, or just securing a single user's data?
-5. I see you're using [existing pattern] - should OAuth follow this?
-
-Could you clarify these points so I can create an appropriate plan?
+src/reos/cairn/intent_engine.py    # 4-stage pipeline
+src/reos/cairn/surfacing.py        # Smart surfacing algorithms
+src/reos/cairn/mcp_tools.py        # CAIRN tool implementations
+src/reos/cairn/store.py            # Knowledge storage (SQLite)
+src/reos/cairn/thunderbird.py      # Calendar/contacts bridge
+src/reos/atomic_ops/cairn_integration.py  # Bridge to atomic ops system
 ```
 
-[After user clarifies]
-
+### Working on The Play (Life Organization)
 ```
-Thank you. Here's my plan:
-
-1. Create OAuth2 authentication module using [provider]
-2. Integrate with existing [auth pattern] at [specific point]
-3. Protect [specific endpoints/operations]
-4. Store tokens in [location] following [security practice]
-5. Follow existing project patterns: [specific conventions noted]
-
-This will require:
-- New file: src/auth/oauth_handler.py (following project structure)
-- Modifications to: src/api/routes.py, [other files]
-- New dependencies: authlib, [others]
-
-Acceptance criteria:
-- User can authenticate via [provider]
-- [Specific operations] require valid token
-- Tokens refresh automatically
-- Logout clears session completely
-- Follows project's error handling patterns
-
-Does this plan meet your needs?
+src/reos/play_fs.py                # Play operations (create_act, create_scene)
+src/reos/play_db.py                # SQLite schema and CRUD
+src/reos/rpc_handlers/play.py      # RPC endpoints
+apps/reos-tauri/src/playOverlay.ts # Frontend UI
 ```
 
-[After approval, implements exactly what was planned]
+### Working on ReOS (System Helper)
+```
+src/reos/shell_cli.py              # Shell CLI entry point
+src/reos/linux_tools.py            # System operations
+src/reos/atomic_ops/executor.py    # Command execution safety
+```
+
+### Working on Atomic Operations
+```
+src/reos/atomic_ops/processor.py   # Classification and decomposition
+src/reos/atomic_ops/executor.py    # Execution with safety checks
+src/reos/atomic_ops/cairn_integration.py  # CAIRN bridge
+```
+
+### Working on Providers/LLM Integration
+```
+src/reos/providers/factory.py      # Provider creation (Ollama only)
+src/reos/providers/base.py         # Provider interface
+src/reos/providers/secrets.py      # Keyring integration
+```
+
+### Working on Frontend
+```
+apps/reos-tauri/src/main.ts        # App init, RPC bridge
+apps/reos-tauri/src/cairnView.ts   # CAIRN chat UI
+apps/reos-tauri/src/playOverlay.ts # The Play organization UI
+apps/reos-tauri/src/types.ts       # TypeScript types
+```
 
 ---
 
-## Understanding Project-Specific Context
+## Testing Strategy
 
-Every project has unique characteristics that must be understood before implementation:
+### Current State
+- **Coverage:** 45% minimum (enforced in CI)
+- **Framework:** pytest with pytest-cov
+- **Location:** `tests/`
 
-### 1. Architectural Patterns
+### Test Organization
+```
+tests/
+  test_agent.py                  # Agent routing
+  test_cairn_intent_engine.py    # Intent pipeline
+  test_atomic_ops.py             # Classification and execution
+  test_providers.py              # Ollama provider
+  test_play.py                   # The Play CRUD
+  test_rpc_handlers_base.py      # RPC base class
+```
 
-Projects often have core architectural decisions that everything else must conform to:
-- Understand the primary patterns (MVC, microservices, event-driven, etc.)
-- Identify how new code should integrate
-- Follow established conventions consistently
+### Running Tests
+```bash
+# All tests with coverage
+pytest --cov
 
-*Example: Talking Rock uses a block-based architecture where everything is represented as blocks with IDs, types, properties, and hierarchical relationships. Any new feature must understand how it maps to blocks and maintains block transparency.*
+# Specific test file
+pytest tests/test_cairn_intent_engine.py -v
 
-### 2. Domain-Specific Logic
-
-Projects have domain logic that shapes how features should work:
-- Understand the problem domain
-- Learn domain-specific terminology
-- Follow domain-driven design patterns if present
-
-*Example: Talking Rock decomposes operations into atomic units (stream/file/process × human/machine × read/interpret/execute). New features must understand how they create or consume these atomic operations.*
-
-### 3. Core Principles
-
-Projects often have philosophical principles that guide decisions:
-- Read stated principles in documentation
-- Observe principles in existing code
-- Ensure new code aligns with these principles
-
-*Example: Talking Rock follows a "local-first" philosophy - solutions must work offline without cloud dependencies. Any proposed feature requiring external APIs would conflict with this principle and need discussion.*
-
-### 4. Trust and Safety Models
-
-Projects have different approaches to user trust and system safety:
-- Understand what requires user approval vs. automatic execution
-- Learn the project's error handling philosophy
-- Follow security patterns consistently
-
-*Example: Talking Rock uses "progressive trust" - the system earns user trust through transparency, making reasoning visible, allowing user approval before execution, and maintaining audit trails.*
-
-### 5. Code Conventions
-
-Beyond architecture, projects have specific coding styles:
-- File organization patterns
-- Naming conventions
-- Comment and documentation standards
-- Testing approaches
-- Error handling patterns
-
-**Always identify and follow these conventions rather than imposing generic patterns.**
+# Watch mode (requires pytest-watch)
+ptw
+```
 
 ---
 
-## When This Document Conflicts with a Prompt
+## Commit Conventions
 
-If the user explicitly asks you to skip planning or act quickly:
-- Acknowledge their request
-- Briefly explain why the normal workflow exists
-- Offer a compromise: "I can give you a quick implementation, but let me first confirm I understand [key point] correctly"
-- If they insist, comply but state assumptions clearly
+Observed from git history (follows Conventional Commits):
 
-**The user can always override these instructions. But make deviations explicit.**
+```bash
+feat: Add new feature
+feat(cairn): Add calendar sync
+feat(documents): Add /document slash command
+
+fix: Bug fix without scope
+fix(block-editor): Fix content persistence
+
+refactor: Code restructuring
+refactor: Consolidate entry points
+
+docs: Documentation only
+docs(architecture): Update CAIRN description
+
+test: Testing only
+test(metrics): Add metrics DB test
+```
+
+**Scope examples:** `cairn`, `play`, `riva`, `atomic-ops`, `providers`, `rpc`, `ui`, `block-editor`, `documents`
 
 ---
 
-## Summary: Your Job
+## Dependencies
 
-You are not primarily a code generator.
+### Core Runtime
+```toml
+fastapi = ">=0.115.0,<1.0.0"       # RPC server
+uvicorn = ">=0.30.0,<0.32.0"       # ASGI server
+pydantic = ">=2.8.0,<3.0.0"        # Data validation
+httpx = ">=0.27.0,<1.0.0"          # HTTP client (Ollama)
+tenacity = ">=8.2.0,<10.0.0"       # Retry with backoff
+```
 
-**You are an uncertainty resolver who writes code after achieving certainty.**
+### Authentication & Security
+```toml
+python-pam = ">=2.0.0,<3.0.0"      # PAM authentication
+cryptography = ">=42.0.0,<44.0.0"  # AES-256-GCM encryption
+keyring = ">=24.0.0,<26.0.0"       # API key storage
+```
 
-1. Search documentation exhaustively
-2. Clarify user intent thoroughly  
-3. Plan implementation extensively
-4. Execute plan precisely
+### Optional (install with pip install -e ".[semantic]")
+```toml
+sentence-transformers  # Vector embeddings
+tree-sitter           # AST parsing (RIVA)
+pypdf                 # Document ingestion
+```
 
-This is not slow. This is efficient.
+---
 
-**Certainty is speed.**
+## Agent Delegation Notes
+
+When working with the 12-agent orchestration system from `~/.claude/CLAUDE.md`:
+
+### When to Invoke Agents for ReOS Work
+
+**scout** - Use for finding where features live in the codebase. Example: "Where is calendar sync implemented?"
+
+**planner** - Use for non-trivial features. Example: "Plan how to add recurring event expansion to CAIRN surfacing."
+
+**implementer** - Use after plan approval. Knows Python 3.12+, ruff, mypy, pytest conventions from this file.
+
+**tester** - Use for TDD workflow. Knows 45% coverage requirement, pytest conventions.
+
+**reviewer** - Use after implementation. Checks for type hints, error handling, docstrings.
+
+**state-fidelity** - Use after features that display backend state in Tauri UI. Example: After implementing new Play overlay features.
+
+**documenter** - Use for substantial doc updates. Knows ARCHITECTURE.md, README.md structure.
+
+**debugger** - Use for diagnosing issues. Add logging to atomic_ops pipeline, intent engine, or provider calls.
+
+**verifier** - Use as final checkpoint before declaring work complete.
+
+### This File's Role
+
+This CLAUDE.md provides project context that agents need but shouldn't spend tokens discovering:
+- Architecture patterns (atomic ops, The Play, intent engine)
+- Code quality standards (Python 3.12+, ruff, mypy, 45% coverage)
+- Recent design decisions (CAIRN simplification, Ollama-only, RIVA frozen)
+- Key file locations by use case
+- Commit conventions
+
+---
+
+## Common Patterns
+
+### Adding a New CAIRN Tool
+
+1. Define in `list_tools()` in `src/reos/mcp_tools.py`
+2. Implement in `CairnToolHandler.call_tool()` in `src/reos/cairn/mcp_tools.py`
+3. Add intent patterns to `INTENT_PATTERNS` in `intent_engine.py` (if natural language support needed)
+4. Add to category mapping in `CATEGORY_TOOLS` in `intent_engine.py`
+5. Write test in `tests/test_cairn_mcp_tools.py`
+
+### Adding a New Atomic Operation Classification
+
+Atomic ops use the 3x2x3 taxonomy. Most work involves tuning classification in `processor.py`, not adding new categories.
+
+If genuinely new semantics needed:
+1. Update `ExecutionSemantics` enum in `src/reos/types.py`
+2. Update classification logic in `src/reos/atomic_ops/processor.py`
+3. Update verification mode selection in `src/reos/atomic_ops/cairn_integration.py`
+4. Add tests in `tests/test_atomic_ops.py`
+
+### Adding a New RPC Handler
+
+1. Create handler in `src/reos/rpc_handlers/`
+2. Inherit from `BaseRPCHandler` (see `_base.py` for example)
+3. Register in `src/reos/ui_rpc_server.py`
+4. Add TypeScript types in `apps/reos-tauri/src/types.ts`
+5. Call from frontend via `invoke("rpc_call", { method, params })`
+
+---
+
+## Summary
+
+This is a local-first AI assistant focused on democratizing AI through small models (1-3B parameters) that run on accessible hardware (8GB RAM, no GPU). The architecture decomposes operations into atomic units, uses a 2-tier life organization system (Acts → Scenes), and prioritizes verification/safety because local inference is free.
+
+**When in doubt:**
+1. Read ARCHITECTURE.md for system overview
+2. Check this file for conventions and recent decisions
+3. Follow the global workflow from ~/.claude/CLAUDE.md
+4. Ask clarifying questions before implementing
+
+**Mission:** Build the best AI assistant in the world. Then give it away.

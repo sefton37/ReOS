@@ -293,8 +293,15 @@ class MemoryRetriever:
                 if d == 0:
                     continue  # Skip the seed itself
 
-                depth_score = 0.6 - (d * 0.2)  # 0.4 at depth 1, 0.2 at depth 2
-                depth_score = max(0.1, depth_score)
+                # Graph traversal scoring: closer nodes score higher.
+                # depth 1 → 0.4, depth 2 → 0.2, depth 3+ → 0.1 (floor)
+                _DEPTH_BASE_SCORE = 0.6
+                _DEPTH_DECAY_PER_HOP = 0.2
+                _DEPTH_MIN_SCORE = 0.1
+                depth_score = max(
+                    _DEPTH_MIN_SCORE,
+                    _DEPTH_BASE_SCORE - (d * _DEPTH_DECAY_PER_HOP),
+                )
 
                 for block_id in block_ids:
                     if block_id in existing:
