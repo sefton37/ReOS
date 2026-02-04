@@ -2331,16 +2331,42 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             exc.message,
         )
         return _jsonrpc_error(req_id=req_id, code=exc.code, message=exc.message, data=exc.data)
+    except (ValueError, TypeError) as exc:
+        # Parameter validation errors from handlers
+        logger.warning(
+            "RPC parameter error [%s] method=%s: %s",
+            correlation_id,
+            method,
+            exc,
+        )
+        return _jsonrpc_error(
+            req_id=req_id,
+            code=-32602,
+            message=str(exc),
+        )
     except Exception as exc:  # noqa: BLE001
-        # Log internal errors at error level with full traceback
+        # Convert domain errors to structured RPC errors
+        from .errors import TalkingRockError, get_error_code, record_error
+        if isinstance(exc, TalkingRockError):
+            logger.warning(
+                "RPC domain error [%s] method=%s: %s",
+                correlation_id,
+                method,
+                exc.message,
+            )
+            return _jsonrpc_error(
+                req_id=req_id,
+                code=get_error_code(exc),
+                message=exc.message,
+                data=exc.to_dict(),
+            )
+        # Unexpected internal errors — log with full traceback
         logger.exception(
             "RPC internal error [%s] method=%s: %s",
             correlation_id,
             method,
             exc,
         )
-        # Record for later analysis
-        from .errors import record_error
         record_error(
             source="ui_rpc_server",
             operation=f"rpc:{method}",
@@ -2350,9 +2376,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
         )
         return _jsonrpc_error(
             req_id=req_id,
-            code=-32099,
-            message="Internal error",
-            data={"error": str(exc), "correlation_id": correlation_id},
+            code=-32603,
+            message=f"Internal error in {method}",
+            data={"error_type": type(exc).__name__, "correlation_id": correlation_id},
         )
 
 
