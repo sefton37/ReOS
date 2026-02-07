@@ -64,29 +64,29 @@ class ShellContext:
     """Context gathered before proposing a command."""
 
     # Intent analysis
-    intent_verb: str | None = None          # "run", "install", "service_start", etc.
-    intent_target: str | None = None        # "gimp", "nginx", etc.
-    original_input: str = ""                # The raw natural language input
+    intent_verb: str | None = None  # "run", "install", "service_start", etc.
+    intent_target: str | None = None  # "gimp", "nginx", etc.
+    original_input: str = ""  # The raw natural language input
 
     # Executable context
-    executable_path: str | None = None      # Result of `which <target>`
+    executable_path: str | None = None  # Result of `which <target>`
 
     # Package context
-    package_installed: bool = False         # Is it in installed packages?
-    package_version: str | None = None      # Version if installed
-    package_available: bool = False         # Is it available in apt cache?
+    package_installed: bool = False  # Is it in installed packages?
+    package_version: str | None = None  # Version if installed
+    package_available: bool = False  # Is it available in apt cache?
     package_description: str | None = None  # Package description
 
     # Service context
-    is_service: bool = False                # Is it a systemd service?
-    service_status: str | None = None       # "active", "inactive", "failed"
-    service_enabled: bool = False           # Is it enabled at boot?
+    is_service: bool = False  # Is it a systemd service?
+    service_status: str | None = None  # "active", "inactive", "failed"
+    service_enabled: bool = False  # Is it enabled at boot?
 
     # FTS5 search results (for semantic matching)
     fts_matches: list[dict[str, str]] = field(default_factory=list)  # Matching packages/apps
 
     # Decision
-    can_verify: bool = False                # Do we have enough context?
+    can_verify: bool = False  # Do we have enough context?
 
     def to_context_string(self) -> str:
         """Format context for LLM prompt."""
@@ -196,7 +196,7 @@ class ShellContextGatherer:
 
                 # Also check if pattern appears anywhere (for "can you run X")
                 for i, _word in enumerate(words):
-                    if words[i:i + pattern_len] == pattern_words:
+                    if words[i : i + pattern_len] == pattern_words:
                         intent_verb = verb_type
                         target_start_idx = i + pattern_len
                         break
@@ -208,8 +208,9 @@ class ShellContextGatherer:
         if target_start_idx < len(words):
             target_words = words[target_start_idx:]
             # Remove common filler words
-            target_words = [w for w in target_words if w not in
-                           ["the", "a", "an", "my", "please", "for", "me"]]
+            target_words = [
+                w for w in target_words if w not in ["the", "a", "an", "my", "please", "for", "me"]
+            ]
             if target_words:
                 target = " ".join(target_words)
                 # Check for aliases (both multi-word and single-word)
@@ -222,10 +223,7 @@ class ShellContextGatherer:
         return intent_verb, None
 
     def gather_context(
-        self,
-        intent_verb: str | None,
-        intent_target: str | None,
-        original_input: str = ""
+        self, intent_verb: str | None, intent_target: str | None, original_input: str = ""
     ) -> ShellContext:
         """Gather all relevant context for the target.
 
@@ -267,19 +265,23 @@ class ShellContextGatherer:
         context.service_enabled = enabled
 
         # Level 5: FTS5 search (semantic matching when exact match fails)
-        if not (context.executable_path or context.package_installed or
-                context.package_available or context.is_service):
+        if not (
+            context.executable_path
+            or context.package_installed
+            or context.package_available
+            or context.is_service
+        ):
             # Try semantic search using FTS5
             fts_matches = self.search_fts5(original_input or intent_target)
             context.fts_matches = fts_matches
 
         # Determine if we can verify
         context.can_verify = bool(
-            context.executable_path or
-            context.package_installed or
-            context.package_available or
-            context.is_service or
-            context.fts_matches  # FTS5 matches also count as verifiable
+            context.executable_path
+            or context.package_installed
+            or context.package_available
+            or context.is_service
+            or context.fts_matches  # FTS5 matches also count as verifiable
         )
 
         return context
@@ -488,12 +490,14 @@ class ShellContextGatherer:
             # Convert to expected format
             combined: list[dict[str, str]] = []
             for item in results:
-                combined.append({
-                    "name": item["name"],
-                    "description": item.get("description", ""),
-                    "type": item.get("source", "package"),
-                    "match_type": item.get("match_type", "keyword"),
-                })
+                combined.append(
+                    {
+                        "name": item["name"],
+                        "description": item.get("description", ""),
+                        "type": item.get("source", "package"),
+                        "match_type": item.get("match_type", "keyword"),
+                    }
+                )
 
             return combined[:limit]
         except Exception as e:
@@ -513,9 +517,11 @@ def get_context_for_proposal(natural_language: str) -> ShellContext:
     # Try to use cached steady state
     try:
         from reos.system_state import SteadyStateCollector
+
         collector = SteadyStateCollector()
         steady_state = collector.refresh_if_stale(max_age_seconds=3600)
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to collect steady state for shell context: %s", e)
         steady_state = None
 
     gatherer = ShellContextGatherer(steady_state=steady_state)

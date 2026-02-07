@@ -253,7 +253,8 @@ def add_anti_pattern(pattern: str, reason: str | None = None) -> list[str]:
     if path.exists():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to load anti-patterns file: %s", e)
             data = {}
     else:
         data = {}
@@ -270,12 +271,15 @@ def add_anti_pattern(pattern: str, reason: str | None = None) -> list[str]:
 
     # Record history
     from datetime import datetime, timezone
-    history.append({
-        "action": "add",
-        "pattern": pattern,
-        "reason": reason,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
+
+    history.append(
+        {
+            "action": "add",
+            "pattern": pattern,
+            "reason": reason,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
 
     # Save
     data["anti_patterns"] = patterns
@@ -304,7 +308,8 @@ def remove_anti_pattern(pattern: str) -> list[str]:
 
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to load anti-patterns for removal: %s", e)
         return []
 
     patterns = data.get("anti_patterns", [])
@@ -318,11 +323,14 @@ def remove_anti_pattern(pattern: str) -> list[str]:
 
     # Record history
     from datetime import datetime, timezone
-    history.append({
-        "action": "remove",
-        "pattern": pattern,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
+
+    history.append(
+        {
+            "action": "remove",
+            "pattern": pattern,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    )
 
     # Save
     data["anti_patterns"] = patterns

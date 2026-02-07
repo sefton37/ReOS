@@ -245,14 +245,16 @@ def list_ollama_models_detailed(
             if not isinstance(details, dict):
                 details = {}
 
-            out.append(OllamaModelDetails(
-                name=name,
-                parameter_size=details.get("parameter_size"),
-                quantization_level=details.get("quantization_level"),
-                family=details.get("family"),
-                size_bytes=m.get("size"),
-                modified_at=m.get("modified_at"),
-            ))
+            out.append(
+                OllamaModelDetails(
+                    name=name,
+                    parameter_size=details.get("parameter_size"),
+                    quantization_level=details.get("quantization_level"),
+                    family=details.get("family"),
+                    size_bytes=m.get("size"),
+                    modified_at=m.get("modified_at"),
+                )
+            )
     return out
 
 
@@ -272,8 +274,10 @@ def _default_model(timeout_seconds: float = TIMEOUTS.OLLAMA_MODELS) -> str:
                 first = models[0]
                 if isinstance(first, dict) and isinstance(first.get("name"), str):
                     return first["name"]
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning("Failed to auto-detect Ollama model: %s", e)
 
     raise OllamaModelError(
         "No Ollama model configured. Set REOS_OLLAMA_MODEL or pull a model with 'ollama pull llama3.2:3b'"
@@ -316,9 +320,7 @@ class OllamaClient:
 
         Automatically retries on transient failures.
         """
-        payload = self._chat_payload(
-            system=system, user=user, temperature=temperature, top_p=top_p
-        )
+        payload = self._chat_payload(system=system, user=user, temperature=temperature, top_p=top_p)
         payload["format"] = ""  # plain text
         return self._post_chat(payload=payload, timeout_seconds=timeout_seconds)
 
@@ -336,9 +338,7 @@ class OllamaClient:
         Returns a raw string; callers should json.loads it.
         Automatically retries on transient failures.
         """
-        payload = self._chat_payload(
-            system=system, user=user, temperature=temperature, top_p=top_p
-        )
+        payload = self._chat_payload(system=system, user=user, temperature=temperature, top_p=top_p)
         payload["format"] = "json"
         return self._post_chat(payload=payload, timeout_seconds=timeout_seconds)
 
@@ -359,9 +359,7 @@ class OllamaClient:
         Yields:
             Individual tokens as strings
         """
-        payload = self._chat_payload(
-            system=system, user=user, temperature=temperature, top_p=top_p
-        )
+        payload = self._chat_payload(system=system, user=user, temperature=temperature, top_p=top_p)
         payload["stream"] = True
         payload["format"] = ""
 
@@ -392,9 +390,7 @@ class OllamaClient:
             ) from e
 
         except httpx.TimeoutException as e:
-            raise OllamaTimeoutError(
-                f"Ollama request timed out after {timeout_seconds}s"
-            ) from e
+            raise OllamaTimeoutError(f"Ollama request timed out after {timeout_seconds}s") from e
 
         except Exception as e:
             raise OllamaError(f"Streaming request failed: {e}") from e
@@ -495,9 +491,7 @@ class AsyncOllamaClient:
         top_p: float | None = None,
     ) -> str:
         """Chat and return assistant text asynchronously."""
-        payload = self._chat_payload(
-            system=system, user=user, temperature=temperature, top_p=top_p
-        )
+        payload = self._chat_payload(system=system, user=user, temperature=temperature, top_p=top_p)
         payload["format"] = ""
         return await self._post_chat(payload=payload, timeout_seconds=timeout_seconds)
 
@@ -511,9 +505,7 @@ class AsyncOllamaClient:
         top_p: float | None = None,
     ) -> str:
         """Chat and request JSON-formatted output asynchronously."""
-        payload = self._chat_payload(
-            system=system, user=user, temperature=temperature, top_p=top_p
-        )
+        payload = self._chat_payload(system=system, user=user, temperature=temperature, top_p=top_p)
         payload["format"] = "json"
         return await self._post_chat(payload=payload, timeout_seconds=timeout_seconds)
 
@@ -533,9 +525,7 @@ class AsyncOllamaClient:
         Yields:
             Individual tokens as strings
         """
-        payload = self._chat_payload(
-            system=system, user=user, temperature=temperature, top_p=top_p
-        )
+        payload = self._chat_payload(system=system, user=user, temperature=temperature, top_p=top_p)
         payload["stream"] = True
         payload["format"] = ""
 
@@ -559,14 +549,10 @@ class AsyncOllamaClient:
                             continue
 
         except httpx.ConnectError as e:
-            raise OllamaConnectionError(
-                f"Cannot connect to Ollama at {self._url}"
-            ) from e
+            raise OllamaConnectionError(f"Cannot connect to Ollama at {self._url}") from e
 
         except httpx.TimeoutException as e:
-            raise OllamaTimeoutError(
-                f"Ollama request timed out after {timeout_seconds}s"
-            ) from e
+            raise OllamaTimeoutError(f"Ollama request timed out after {timeout_seconds}s") from e
 
         except Exception as e:
             raise OllamaError(f"Async streaming request failed: {e}") from e
@@ -596,9 +582,7 @@ class AsyncOllamaClient:
             ],
         }
 
-    async def _post_chat(
-        self, *, payload: dict[str, Any], timeout_seconds: float
-    ) -> str:
+    async def _post_chat(self, *, payload: dict[str, Any], timeout_seconds: float) -> str:
         """Send async chat request to Ollama."""
         url = self._url + "/api/chat"
 
@@ -625,16 +609,15 @@ class AsyncOllamaClient:
                 last_error = e
                 if attempt < 2:
                     import asyncio
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+
+                    await asyncio.sleep(2**attempt)  # Exponential backoff
                     logger.debug("Retrying async Ollama request (attempt %d)", attempt + 2)
                     continue
                 break
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404:
-                    raise OllamaModelError(
-                        f"Model '{payload.get('model')}' not found"
-                    ) from e
+                    raise OllamaModelError(f"Model '{payload.get('model')}' not found") from e
                 raise OllamaError(f"Ollama HTTP error: {e}") from e
 
             except Exception as e:
@@ -646,9 +629,7 @@ class AsyncOllamaClient:
                 f"Cannot connect to Ollama at {self._url} after 3 attempts"
             ) from last_error
         elif isinstance(last_error, httpx.TimeoutException):
-            raise OllamaTimeoutError(
-                f"Ollama request timed out after 3 attempts"
-            ) from last_error
+            raise OllamaTimeoutError(f"Ollama request timed out after 3 attempts") from last_error
         else:
             raise OllamaError(f"Async request failed: {last_error}") from last_error
 
@@ -661,6 +642,7 @@ class AsyncOllamaClient:
 def check_ollama_installed() -> bool:
     """Check if Ollama binary is installed on the system."""
     import shutil
+
     return shutil.which("ollama") is not None
 
 

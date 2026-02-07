@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from reos.code_mode.sandbox import CodeSandbox
@@ -21,22 +24,22 @@ if TYPE_CHECKING:
 class ChangeType(Enum):
     """Type of file change."""
 
-    CREATE = "create"      # New file
-    MODIFY = "modify"      # Edit existing file
-    DELETE = "delete"      # Remove file
-    RENAME = "rename"      # Rename/move file
+    CREATE = "create"  # New file
+    MODIFY = "modify"  # Edit existing file
+    DELETE = "delete"  # Remove file
+    RENAME = "rename"  # Rename/move file
 
 
 @dataclass
 class Hunk:
     """A single diff hunk (a contiguous block of changes)."""
 
-    old_start: int       # Starting line in old file
-    old_count: int       # Number of lines from old file
-    new_start: int       # Starting line in new file
-    new_count: int       # Number of lines in new file
-    lines: list[str]     # Diff lines (prefixed with +, -, or space)
-    header: str = ""     # @@ -old_start,old_count +new_start,new_count @@
+    old_start: int  # Starting line in old file
+    old_count: int  # Number of lines from old file
+    new_start: int  # Starting line in new file
+    new_count: int  # Number of lines in new file
+    lines: list[str]  # Diff lines (prefixed with +, -, or space)
+    header: str = ""  # @@ -old_start,old_count +new_start,new_count @@
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -54,17 +57,17 @@ class Hunk:
 class FileChange:
     """A single file change with diff information."""
 
-    path: str                          # Relative path within repo
+    path: str  # Relative path within repo
     change_type: ChangeType
-    old_content: str | None = None     # Content before change (None for create)
-    new_content: str | None = None     # Content after change (None for delete)
+    old_content: str | None = None  # Content before change (None for create)
+    new_content: str | None = None  # Content after change (None for delete)
     hunks: list[Hunk] = field(default_factory=list)
-    diff_text: str = ""                # Full unified diff text
-    old_sha256: str | None = None      # Hash of old content
-    new_sha256: str | None = None      # Hash of new content
-    additions: int = 0                 # Lines added
-    deletions: int = 0                 # Lines removed
-    binary: bool = False               # Is this a binary file?
+    diff_text: str = ""  # Full unified diff text
+    old_sha256: str | None = None  # Hash of old content
+    new_sha256: str | None = None  # Hash of new content
+    additions: int = 0  # Lines added
+    deletions: int = 0  # Lines removed
+    binary: bool = False  # Is this a binary file?
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -220,13 +223,15 @@ def generate_diff(
     new_lines = (new_content or "").splitlines(keepends=True)
 
     # Generate unified diff
-    diff_lines = list(difflib.unified_diff(
-        old_lines,
-        new_lines,
-        fromfile=f"a/{path}",
-        tofile=f"b/{path}",
-        n=context_lines,
-    ))
+    diff_lines = list(
+        difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+            n=context_lines,
+        )
+    )
 
     # Count additions and deletions
     additions = sum(1 for line in diff_lines if line.startswith("+") and not line.startswith("+++"))
@@ -294,7 +299,8 @@ class DiffPreviewManager:
         # Get current content from sandbox
         try:
             old_content = self.sandbox.read_file(path)
-        except Exception:
+        except (FileNotFoundError, OSError) as e:
+            logger.debug("Could not read %s for edit diff, treating as empty: %s", path, e)
             old_content = ""
 
         change = generate_edit_diff(path, old_content, old_str, new_str)
@@ -306,7 +312,8 @@ class DiffPreviewManager:
         # Get current content from sandbox
         try:
             old_content = self.sandbox.read_file(path)
-        except Exception:
+        except (FileNotFoundError, OSError) as e:
+            logger.debug("Could not read %s for write diff, treating as new file: %s", path, e)
             old_content = None
 
         change = generate_diff(path, old_content, new_content)
@@ -317,7 +324,8 @@ class DiffPreviewManager:
         """Add a file deletion to the preview."""
         try:
             old_content = self.sandbox.read_file(path)
-        except Exception:
+        except (FileNotFoundError, OSError) as e:
+            logger.debug("Could not read %s for delete diff: %s", path, e)
             old_content = ""
 
         change = generate_diff(path, old_content, None)
@@ -333,6 +341,7 @@ class DiffPreviewManager:
 
         # Generate preview ID from content hashes
         import uuid
+
         self._preview_id = str(uuid.uuid4())[:8]
 
         return DiffPreview(

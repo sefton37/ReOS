@@ -14,10 +14,13 @@ Security Notes:
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -111,7 +114,9 @@ def setup_recovery_passphrase(
     RECOVERY_KEY_FILE.chmod(0o600)
 
     # Write metadata (non-sensitive)
-    recovery_id = hashlib.sha256(f"{username}-{datetime.now().isoformat()}".encode()).hexdigest()[:16]
+    recovery_id = hashlib.sha256(f"{username}-{datetime.now().isoformat()}".encode()).hexdigest()[
+        :16
+    ]
     meta = {
         "username": username,
         "recovery_id": recovery_id,
@@ -120,6 +125,7 @@ def setup_recovery_passphrase(
     }
 
     import json
+
     RECOVERY_META_FILE.write_text(json.dumps(meta, indent=2))
     RECOVERY_META_FILE.chmod(0o600)
 
@@ -178,9 +184,11 @@ def has_recovery_passphrase(username: str) -> bool:
 
     try:
         import json
+
         meta = json.loads(RECOVERY_META_FILE.read_text())
         return meta.get("username") == username
-    except Exception:
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to check recovery passphrase for %s: %s", username, e)
         return False
 
 
@@ -213,8 +221,7 @@ def setup_admin_escrow(username: str, master_key: bytes) -> dict[str, str]:
         ESCROW_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     except PermissionError:
         raise RecoveryError(
-            "Admin escrow requires root access. "
-            "Run with sudo to enable admin recovery."
+            "Admin escrow requires root access. Run with sudo to enable admin recovery."
         )
 
     # Load or generate RSA key pair
@@ -318,9 +325,7 @@ def recover_with_admin_escrow(username: str) -> bytes:
         return master_key
 
     except PermissionError:
-        raise RecoveryError(
-            "Permission denied. Admin escrow recovery requires root access."
-        )
+        raise RecoveryError("Permission denied. Admin escrow recovery requires root access.")
     except Exception as e:
         raise RecoveryError(f"Escrow recovery failed: {e}") from e
 
@@ -390,8 +395,10 @@ def rekey_user_data(
 
             try:
                 plaintext = old_cipher.decrypt(nonce, ciphertext, None)
-            except Exception:
-                # Not encrypted or wrong key, skip
+            except Exception as e:
+                logger.debug(
+                    "Skipping file %s during re-key (not encrypted or wrong key): %s", path, e
+                )
                 continue
 
             # Re-encrypt with new key

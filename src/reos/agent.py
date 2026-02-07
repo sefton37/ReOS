@@ -1486,7 +1486,8 @@ class ChatAgent:
             # Fallback to basic context
             try:
                 return get_system_context(self._db)
-            except Exception:
+            except Exception as e2:
+                logger.warning("Fallback system context also failed: %s", e2)
                 return ""
 
     def _get_system_snapshot_for_reasoning(self) -> dict[str, Any]:
@@ -1819,8 +1820,8 @@ class ChatAgent:
                 codebase_ctx = get_codebase_ctx()
                 if codebase_ctx.strip():
                     return f"CODEBASE_REFERENCE:\n{codebase_ctx}"
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.debug("Fallback codebase context also failed: %s", e2)
             return ""
 
     def _get_memory_context(self, user_text: str, act_id: str | None = None) -> str:

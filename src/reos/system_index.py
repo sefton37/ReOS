@@ -74,9 +74,7 @@ class SystemIndexer:
             )
             """
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_snapshots_date ON system_snapshots(date DESC)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_date ON system_snapshots(date DESC)")
 
         # FTS5 table for full-text package search
         # Enables queries like: "image editor" → finds "gimp"
@@ -248,8 +246,7 @@ class SystemIndexer:
         app_embed_count = self.index_desktop_embeddings()
         if pkg_embed_count or app_embed_count:
             logger.info(
-                "Embeddings created: %d packages, %d desktop apps",
-                pkg_embed_count, app_embed_count
+                "Embeddings created: %d packages, %d desktop apps", pkg_embed_count, app_embed_count
             )
         else:
             logger.info("Embeddings skipped (sentence-transformers not installed)")
@@ -335,8 +332,10 @@ class SystemIndexer:
         """Get the system hostname."""
         try:
             import socket
+
             return socket.gethostname()
-        except Exception:
+        except Exception as e:
+            logger.debug("socket.gethostname() failed, using fallback: %s", e)
             return os.environ.get("HOSTNAME", "unknown")
 
     def _get_os_info(self) -> dict[str, Any]:
@@ -406,9 +405,11 @@ class SystemIndexer:
             info["cpu_cores"] = sys_info.cpu_cores
             info["memory_total_gb"] = round(sys_info.memory_total_mb / 1024, 2)
             info["memory_used_gb"] = round(sys_info.memory_used_mb / 1024, 2)
-            info["memory_percent"] = round(
-                (sys_info.memory_used_mb / sys_info.memory_total_mb) * 100, 1
-            ) if sys_info.memory_total_mb > 0 else 0
+            info["memory_percent"] = (
+                round((sys_info.memory_used_mb / sys_info.memory_total_mb) * 100, 1)
+                if sys_info.memory_total_mb > 0
+                else 0
+            )
         except Exception as e:
             logger.debug("Could not get system info: %s", e)
 
@@ -819,6 +820,7 @@ class SystemIndexer:
 
         try:
             from sentence_transformers import SentenceTransformer
+
             logger.info("Loading embedding model (all-MiniLM-L6-v2)...")
             cls._embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
             logger.info("Embedding model loaded")
@@ -851,7 +853,8 @@ class SystemIndexer:
 
         # Filter to packages with meaningful descriptions
         items_to_embed = [
-            (name, desc) for name, desc in with_desc
+            (name, desc)
+            for name, desc in with_desc
             if desc and len(desc) > 10  # Skip empty/trivial descriptions
         ]
 
@@ -868,7 +871,7 @@ class SystemIndexer:
 
             # Process in batches for memory efficiency
             for i in range(0, len(items_to_embed), batch_size):
-                batch = items_to_embed[i:i + batch_size]
+                batch = items_to_embed[i : i + batch_size]
                 texts = [f"{name}: {desc}" for name, desc in batch]
 
                 # Generate embeddings for batch
@@ -999,13 +1002,15 @@ class SystemIndexer:
                     np.linalg.norm(query_embedding) * np.linalg.norm(stored_embedding)
                 )
 
-                results.append({
-                    "id": row["id"],
-                    "source_type": row["source_type"],
-                    "name": row["name"],
-                    "description": row["description"],
-                    "similarity": float(similarity),
-                })
+                results.append(
+                    {
+                        "id": row["id"],
+                        "source_type": row["source_type"],
+                        "name": row["name"],
+                        "description": row["description"],
+                        "similarity": float(similarity),
+                    }
+                )
 
             # Sort by similarity (highest first) and return top results
             results.sort(key=lambda x: x["similarity"], reverse=True)
@@ -1042,22 +1047,26 @@ class SystemIndexer:
             name_lower = pkg["name"].lower()
             # High quality if name contains any query word
             if any(word in name_lower for word in query_words):
-                high_quality_fts.append({
-                    "name": pkg["name"],
-                    "description": pkg.get("description", ""),
-                    "source": "package",
-                    "match_type": "keyword",
-                })
+                high_quality_fts.append(
+                    {
+                        "name": pkg["name"],
+                        "description": pkg.get("description", ""),
+                        "source": "package",
+                        "match_type": "keyword",
+                    }
+                )
 
         for app in fts_results.get("desktop_apps", []):
             name_lower = app["name"].lower()
             if any(word in name_lower for word in query_words):
-                high_quality_fts.append({
-                    "name": app["name"],
-                    "description": app.get("comment", app.get("generic_name", "")),
-                    "source": "desktop",
-                    "match_type": "keyword",
-                })
+                high_quality_fts.append(
+                    {
+                        "name": app["name"],
+                        "description": app.get("comment", app.get("generic_name", "")),
+                        "source": "desktop",
+                        "match_type": "keyword",
+                    }
+                )
 
         combined.extend(high_quality_fts)
 
@@ -1070,35 +1079,41 @@ class SystemIndexer:
             if similarity > 0.5:  # Only high-confidence semantic matches
                 # Avoid duplicates
                 if not any(r["name"] == item["name"] for r in combined):
-                    combined.append({
-                        "name": item["name"],
-                        "description": item.get("description", ""),
-                        "source": item["source_type"],
-                        "match_type": "semantic",
-                        "similarity": similarity,
-                    })
+                    combined.append(
+                        {
+                            "name": item["name"],
+                            "description": item.get("description", ""),
+                            "source": item["source_type"],
+                            "match_type": "semantic",
+                            "similarity": similarity,
+                        }
+                    )
 
         # If still not enough results, add lower-quality FTS5 matches
         if len(combined) < limit:
             for pkg in fts_results.get("packages", []):
                 if not any(r["name"] == pkg["name"] for r in combined):
-                    combined.append({
-                        "name": pkg["name"],
-                        "description": pkg.get("description", ""),
-                        "source": "package",
-                        "match_type": "keyword",
-                    })
+                    combined.append(
+                        {
+                            "name": pkg["name"],
+                            "description": pkg.get("description", ""),
+                            "source": "package",
+                            "match_type": "keyword",
+                        }
+                    )
                     if len(combined) >= limit:
                         break
 
             for app in fts_results.get("desktop_apps", []):
                 if not any(r["name"] == app["name"] for r in combined):
-                    combined.append({
-                        "name": app["name"],
-                        "description": app.get("comment", app.get("generic_name", "")),
-                        "source": "desktop",
-                        "match_type": "keyword",
-                    })
+                    combined.append(
+                        {
+                            "name": app["name"],
+                            "description": app.get("comment", app.get("generic_name", "")),
+                            "source": "desktop",
+                            "match_type": "keyword",
+                        }
+                    )
                     if len(combined) >= limit:
                         break
 
@@ -1124,8 +1139,7 @@ class SystemIndexer:
 
                 # Also track just running ones for quick reference
                 info["running_containers"] = [
-                    c for c in all_containers
-                    if c.get("status", "").lower().startswith("up")
+                    c for c in all_containers if c.get("status", "").lower().startswith("up")
                 ]
 
                 # Get ALL images
@@ -1176,13 +1190,15 @@ class SystemIndexer:
             if os.path.exists(path):
                 try:
                     info = linux_tools.get_disk_usage(path)
-                    storage.append({
-                        "path": path,
-                        "total_gb": info["total_gb"],
-                        "used_gb": info["used_gb"],
-                        "free_gb": info["free_gb"],
-                        "percent": info["percent"],
-                    })
+                    storage.append(
+                        {
+                            "path": path,
+                            "total_gb": info["total_gb"],
+                            "used_gb": info["used_gb"],
+                            "free_gb": info["free_gb"],
+                            "percent": info["percent"],
+                        }
+                    )
                 except Exception as e:
                     logger.debug("Could not get disk usage for %s: %s", path, e)
 
@@ -1208,8 +1224,8 @@ class SystemIndexer:
             failed = linux_tools.get_failed_services()
             for svc in failed[:5]:
                 if isinstance(svc, dict):
-                    name = svc.get('name', 'unknown')
-                    desc = svc.get('description', '')
+                    name = svc.get("name", "unknown")
+                    desc = svc.get("description", "")
                     logs.append(f"[failed] {name}: {desc}")
         except Exception as e:
             logger.debug("Could not get failed services: %s", e)
@@ -1234,9 +1250,11 @@ def build_rag_context(snapshot: SystemSnapshot) -> str:
     including ALL services, packages, and containers.
     """
     lines = []
-    lines.append("=== SYSTEM STATE (as of {}) ===".format(
-        snapshot.captured_at[:10] if snapshot.captured_at else "unknown"
-    ))
+    lines.append(
+        "=== SYSTEM STATE (as of {}) ===".format(
+            snapshot.captured_at[:10] if snapshot.captured_at else "unknown"
+        )
+    )
     lines.append("")
 
     # Hostname and OS
@@ -1327,7 +1345,7 @@ def build_rag_context(snapshot: SystemSnapshot) -> str:
             # Group into lines of ~10 packages each for readability
             chunk_size = 10
             for i in range(0, len(installed), chunk_size):
-                chunk = installed[i:i + chunk_size]
+                chunk = installed[i : i + chunk_size]
                 lines.append(f"  {', '.join(chunk)}")
 
     lines.append("")

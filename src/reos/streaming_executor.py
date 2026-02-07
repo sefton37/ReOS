@@ -6,12 +6,15 @@ for streaming to the UI via polling.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 from reos.security import is_command_safe
 
@@ -155,18 +158,18 @@ class StreamingExecutor:
         """Read from a stream line by line."""
         try:
             for line in stream:
-                line = line.rstrip('\n\r')
+                line = line.rstrip("\n\r")
                 with self._lock:
                     buffer.append(line)
                 if on_line:
                     on_line(line)
-        except Exception:
-            pass  # Stream closed
+        except Exception as e:
+            logger.debug("Stream read ended: %s", e)
         finally:
             try:
                 stream.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Error closing stream (non-critical): %s", e)
 
     def _wait_for_completion(
         self,

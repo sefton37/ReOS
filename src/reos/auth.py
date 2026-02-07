@@ -17,11 +17,14 @@ Security Notes:
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import secrets
 import subprocess
 import threading
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -151,12 +154,12 @@ def authenticate_polkit(username: str) -> bool:
 
         # These are required for the Polkit agent to show the dialog
         uid = os.getuid()
-        if 'DISPLAY' not in env:
-            env['DISPLAY'] = ':0'
-        if 'XDG_RUNTIME_DIR' not in env:
-            env['XDG_RUNTIME_DIR'] = f'/run/user/{uid}'
-        if 'DBUS_SESSION_BUS_ADDRESS' not in env:
-            env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path=/run/user/{uid}/bus'
+        if "DISPLAY" not in env:
+            env["DISPLAY"] = ":0"
+        if "XDG_RUNTIME_DIR" not in env:
+            env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+        if "DBUS_SESSION_BUS_ADDRESS" not in env:
+            env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
 
         # Get the process ID for pkcheck
         pid = os.getpid()
@@ -168,8 +171,10 @@ def authenticate_polkit(username: str) -> bool:
         result = subprocess.run(
             [
                 "pkcheck",
-                "--action-id", "com.reos.authenticate",
-                "--process", str(pid),
+                "--action-id",
+                "com.reos.authenticate",
+                "--process",
+                str(pid),
                 "--allow-user-interaction",
             ],
             capture_output=True,
@@ -179,8 +184,10 @@ def authenticate_polkit(username: str) -> bool:
 
         return result.returncode == 0
     except subprocess.TimeoutExpired:
+        logger.warning("Polkit authentication timed out")
         return False
-    except Exception:
+    except Exception as e:
+        logger.warning("Polkit authentication failed: %s", e)
         return False
 
 

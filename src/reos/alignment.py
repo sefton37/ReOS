@@ -47,9 +47,7 @@ class GitSummary:
     diff_text: str | None
 
 
-_FILE_PATH_PATTERN = re.compile(
-    r"(?P<path>(?:src|tests|docs|\.github)/[\w\-./]+\.[\w\-]+)"
-)
+_FILE_PATH_PATTERN = re.compile(r"(?P<path>(?:src|tests|docs|\.github)/[\w\-./]+\.[\w\-]+)")
 
 
 def get_default_repo_path() -> Path | None:
@@ -114,11 +112,7 @@ def get_git_summary(repo_path: Path, *, include_diff: bool = False) -> GitSummar
     branch = branch_out if branch_out and branch_out != "HEAD" else None
 
     status_raw = _run_git(repo_path, ["status", "--porcelain=v1"]).splitlines()
-    changed_files = [
-        line[3:].strip()
-        for line in status_raw
-        if len(line) >= 4 and line[3:].strip()
-    ]
+    changed_files = [line[3:].strip() for line in status_raw if len(line) >= 4 and line[3:].strip()]
 
     diff_stat = _run_git(repo_path, ["diff", "--stat"]).strip()
 
@@ -245,7 +239,8 @@ def get_recent_active_files(db: Database, *, limit: int = 100) -> list[str]:
             import json
 
             meta = json.loads(payload)
-        except Exception:
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.debug("Skipping malformed editor event payload: %s", e)
             continue
 
         uri = meta.get("uri")

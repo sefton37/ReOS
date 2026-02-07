@@ -142,11 +142,13 @@ class RelationshipExtractor:
                 source=RelationshipSource.CAIRN,
             )
             if rel_id:
-                created.append({
-                    "id": rel_id,
-                    "type": RelationshipType.REFERENCES.value,
-                    "target": ref_id,
-                })
+                created.append(
+                    {
+                        "id": rel_id,
+                        "type": RelationshipType.REFERENCES.value,
+                        "target": ref_id,
+                    }
+                )
 
         # 2. Detect logical patterns (for connecting to previous reasoning)
         detected_types = self._detect_logical_patterns(chain_content)
@@ -168,12 +170,14 @@ class RelationshipExtractor:
                     source=RelationshipSource.EMBEDDING,
                 )
                 if rel_id:
-                    created.append({
-                        "id": rel_id,
-                        "type": RelationshipType.SIMILAR_TO.value,
-                        "target": similar_id,
-                        "similarity": similarity,
-                    })
+                    created.append(
+                        {
+                            "id": rel_id,
+                            "type": RelationshipType.SIMILAR_TO.value,
+                            "target": similar_id,
+                            "similarity": similarity,
+                        }
+                    )
 
         logger.debug(
             "Extracted %d relationships from chain %s",
@@ -212,11 +216,13 @@ class RelationshipExtractor:
                 source=RelationshipSource.CAIRN,
             )
             if rel_id:
-                created.append({
-                    "id": rel_id,
-                    "type": RelationshipType.RESPONDS_TO.value,
-                    "target": previous_block_id,
-                })
+                created.append(
+                    {
+                        "id": rel_id,
+                        "type": RelationshipType.RESPONDS_TO.value,
+                        "target": previous_block_id,
+                    }
+                )
 
         # Detect logical patterns and extract references
         refs = self._extract_block_references(message_content)
@@ -228,11 +234,13 @@ class RelationshipExtractor:
                 source=RelationshipSource.CAIRN,
             )
             if rel_id:
-                created.append({
-                    "id": rel_id,
-                    "type": RelationshipType.REFERENCES.value,
-                    "target": ref_id,
-                })
+                created.append(
+                    {
+                        "id": rel_id,
+                        "type": RelationshipType.REFERENCES.value,
+                        "target": ref_id,
+                    }
+                )
 
         return created
 
@@ -272,11 +280,13 @@ class RelationshipExtractor:
                     edge.id,
                     confidence=new_confidence,
                 ):
-                    created.append({
-                        "id": edge.id,
-                        "action": "strengthened",
-                        "new_confidence": new_confidence,
-                    })
+                    created.append(
+                        {
+                            "id": edge.id,
+                            "action": "strengthened",
+                            "new_confidence": new_confidence,
+                        }
+                    )
 
         elif rating <= 2 and corrected_block_id:
             # Negative feedback with correction - create CORRECTS relationship
@@ -287,12 +297,14 @@ class RelationshipExtractor:
                 source=RelationshipSource.FEEDBACK,
             )
             if rel_id:
-                created.append({
-                    "id": rel_id,
-                    "type": RelationshipType.CORRECTS.value,
-                    "source": corrected_block_id,
-                    "target": chain_block_id,
-                })
+                created.append(
+                    {
+                        "id": rel_id,
+                        "type": RelationshipType.CORRECTS.value,
+                        "source": corrected_block_id,
+                        "target": chain_block_id,
+                    }
+                )
 
             # Weaken the original chain's relationships
             edges = self._graph_store.get_relationships(
@@ -305,11 +317,13 @@ class RelationshipExtractor:
                     edge.id,
                     confidence=new_confidence,
                 ):
-                    created.append({
-                        "id": edge.id,
-                        "action": "weakened",
-                        "new_confidence": new_confidence,
-                    })
+                    created.append(
+                        {
+                            "id": edge.id,
+                            "action": "weakened",
+                            "new_confidence": new_confidence,
+                        }
+                    )
 
         return created
 
@@ -362,8 +376,8 @@ class RelationshipExtractor:
 
                 if get_block(match) is not None:
                     valid_ids.append(match)
-            except Exception:
-                pass
+            except (ImportError, OSError) as e:
+                logger.debug("Block ref validation failed for %s: %s", match, e)
         return valid_ids
 
     def _detect_logical_patterns(
@@ -455,7 +469,7 @@ class RelationshipExtractor:
 
         for i, (block_id, embedding) in enumerate(all_embeddings):
             # Find similar among remaining blocks
-            candidates = all_embeddings[i + 1:]  # Only look forward to avoid duplicates
+            candidates = all_embeddings[i + 1 :]  # Only look forward to avoid duplicates
             similar = self._embedding_service.find_similar(
                 embedding,
                 candidates,

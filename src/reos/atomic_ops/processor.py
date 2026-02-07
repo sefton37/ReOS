@@ -12,9 +12,12 @@ convert user requests into atomic operations.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol
+
+logger = logging.getLogger(__name__)
 
 from .classifier import AtomicClassifier, ClassificationConfig
 from .decomposer import AtomicDecomposer, DecompositionResult
@@ -25,13 +28,16 @@ from .schema import AtomicOpsStore
 
 class LLMProvider(Protocol):
     """Protocol for LLM providers."""
-    def chat_json(self, system: str, user: str, temperature: float = 0.1, top_p: float = 0.9) -> str:
-        ...
+
+    def chat_json(
+        self, system: str, user: str, temperature: float = 0.1, top_p: float = 0.9
+    ) -> str: ...
 
 
 @dataclass
 class ProcessingResult:
     """Result of processing a user request."""
+
     success: bool
     operations: list[AtomicOperation]
     primary_operation_id: str
@@ -107,8 +113,8 @@ class AtomicOpsProcessor:
             if self.feature_extractor.load_embedding_model():
                 self._embeddings_initialized = self.classifier.initialize_embeddings()
                 return self._embeddings_initialized
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Embeddings initialization failed: %s", e)
         return False
 
     @property
@@ -164,9 +170,7 @@ class AtomicOpsProcessor:
         for op in decomp_result.operations:
             # Extract features if not already done
             if op.features is None and not op.is_decomposed:
-                features, embeddings = self.feature_extractor.extract(
-                    op.user_request, context
-                )
+                features, embeddings = self.feature_extractor.extract(op.user_request, context)
                 op.features = features
 
                 # Store operation
@@ -228,8 +232,7 @@ class AtomicOpsProcessor:
             List of operations awaiting verification or approval.
         """
         return self.store.get_operations_by_status(
-            user_id,
-            [OperationStatus.AWAITING_VERIFICATION, OperationStatus.AWAITING_APPROVAL]
+            user_id, [OperationStatus.AWAITING_VERIFICATION, OperationStatus.AWAITING_APPROVAL]
         )
 
     def update_status(
@@ -249,7 +252,10 @@ class AtomicOpsProcessor:
         try:
             self.store.update_operation_status(operation_id, status)
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "Failed to update operation %s status to %s: %s", operation_id, status, e
+            )
             return False
 
     def get_similar_operations(

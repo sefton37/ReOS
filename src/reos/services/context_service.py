@@ -105,7 +105,9 @@ class ContextService:
             messages = self._db.get_messages(conversation_id=conversation_id, limit=1000)
 
         # Get context components
-        system_prompt, play_context, learned_kb, system_state, codebase_context = self._get_context_components()
+        system_prompt, play_context, learned_kb, system_state, codebase_context = (
+            self._get_context_components()
+        )
 
         # Get disabled sources from database (single source of truth)
         disabled_sources = self._get_disabled_sources()
@@ -216,8 +218,8 @@ class ContextService:
         play_context = ""
         try:
             play_context = play_read_me_markdown()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to read Play context: %s", e)
 
         # Learned knowledge
         learned_kb = ""
@@ -225,8 +227,8 @@ class ContextService:
             _, active_act_id = play_list_acts()
             store = KnowledgeStore()
             learned_kb = store.get_learned_markdown(active_act_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to get learned knowledge: %s", e)
 
         # System state
         system_state = ""
@@ -234,16 +236,17 @@ class ContextService:
             collector = SteadyStateCollector()
             state = collector.refresh_if_stale(max_age_seconds=3600)
             system_state = state.to_context_string()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to collect system state: %s", e)
 
         # Codebase context (self-awareness)
         codebase_context = ""
         try:
             from ..codebase_index import get_codebase_context
+
             codebase_context = get_codebase_context()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to get codebase context: %s", e)
 
         return system_prompt, play_context, learned_kb, system_state, codebase_context
 

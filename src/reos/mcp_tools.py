@@ -65,818 +65,1132 @@ def list_tools() -> list[Tool]:
     # Only included if git_integration_enabled = True
     # =========================================================================
     if settings.git_integration_enabled:
-        tools.extend([
-            Tool(
-                name="reos_repo_discover",
-                description="Discover git repos on disk (bounded scan) and store them in SQLite.",
-                input_schema={"type": "object", "properties": {}},
-            ),
-            Tool(
-                name="reos_git_summary",
-                description=(
-                    "Return git summary for the current repo. Metadata-only by default; "
-                    "include_diff must be explicitly set true."
+        tools.extend(
+            [
+                Tool(
+                    name="reos_repo_discover",
+                    description="Discover git repos on disk (bounded scan) and store them in SQLite.",
+                    input_schema={"type": "object", "properties": {}},
                 ),
-                input_schema={"type": "object", "properties": {"include_diff": {"type": "boolean"}}},
-            ),
+                Tool(
+                    name="reos_git_summary",
+                    description=(
+                        "Return git summary for the current repo. Metadata-only by default; "
+                        "include_diff must be explicitly set true."
+                    ),
+                    input_schema={
+                        "type": "object",
+                        "properties": {"include_diff": {"type": "boolean"}},
+                    },
+                ),
+                Tool(
+                    name="reos_repo_grep",
+                    description="Search text within the current repo (bounded).",
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "include_glob": {
+                                "type": "string",
+                                "description": "Glob like src/**/*.py",
+                            },
+                            "max_results": {"type": "number"},
+                        },
+                        "required": ["query"],
+                    },
+                ),
+                Tool(
+                    name="reos_repo_read_file",
+                    description="Read a file within the current repo (bounded) by line range.",
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "start_line": {"type": "number"},
+                            "end_line": {"type": "number"},
+                        },
+                        "required": ["path", "start_line", "end_line"],
+                    },
+                ),
+                Tool(
+                    name="reos_repo_list_files",
+                    description="List files within the current repo using a glob.",
+                    input_schema={
+                        "type": "object",
+                        "properties": {"glob": {"type": "string"}},
+                        "required": ["glob"],
+                    },
+                ),
+            ]
+        )
+
+    # =========================================================================
+    # Linux System Tools (Always Available - Core ReOS Functionality)
+    # =========================================================================
+    tools.extend(
+        [
+            # --- Linux System Tools ---
             Tool(
-                name="reos_repo_grep",
-                description="Search text within the current repo (bounded).",
+                name="linux_run_command",
+                description=(
+                    "Execute a shell command on the Linux system. Has safety guardrails to block "
+                    "dangerous commands. Use for running terminal commands, scripts, and system operations."
+                ),
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string"},
-                        "include_glob": {"type": "string", "description": "Glob like src/**/*.py"},
-                        "max_results": {"type": "number"},
+                        "command": {
+                            "type": "string",
+                            "description": "The shell command to execute",
+                        },
+                        "timeout": {
+                            "type": "number",
+                            "description": "Timeout in seconds (default: 30, max: 120)",
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory for the command",
+                        },
+                    },
+                    "required": ["command"],
+                },
+            ),
+            Tool(
+                name="linux_preview_command",
+                description=(
+                    "Preview what a command would do BEFORE executing it. Shows affected files, "
+                    "warnings, and whether the action can be undone. Use this for destructive commands "
+                    "like rm, mv, package installs, or service management to let users confirm first."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string", "description": "The command to preview"},
+                        "cwd": {
+                            "type": "string",
+                            "description": "Working directory for resolving paths",
+                        },
+                    },
+                    "required": ["command"],
+                },
+            ),
+            Tool(
+                name="linux_system_info",
+                description=(
+                    "Get comprehensive Linux system information including hostname, kernel, distro, "
+                    "CPU, memory usage, disk usage, and load averages."
+                ),
+                input_schema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="linux_network_info",
+                description="Get network interface information including IP addresses and states.",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="linux_list_processes",
+                description="List running processes sorted by CPU or memory usage.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "sort_by": {
+                            "type": "string",
+                            "enum": ["cpu", "mem"],
+                            "description": "Sort by cpu or mem",
+                        },
+                        "limit": {
+                            "type": "number",
+                            "description": "Max processes to return (default: 20)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="linux_list_services",
+                description="List systemd services on the system.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "filter_active": {
+                            "type": "boolean",
+                            "description": "Only show active services",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="linux_service_status",
+                description="Get detailed status of a specific systemd service.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "service_name": {
+                            "type": "string",
+                            "description": "Name of the service (e.g., 'nginx', 'docker')",
+                        },
+                    },
+                    "required": ["service_name"],
+                },
+            ),
+            Tool(
+                name="linux_manage_service",
+                description="Manage a systemd service (start, stop, restart, enable, disable). May require sudo.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "service_name": {"type": "string", "description": "Name of the service"},
+                        "action": {
+                            "type": "string",
+                            "enum": ["start", "stop", "restart", "reload", "enable", "disable"],
+                        },
+                    },
+                    "required": ["service_name", "action"],
+                },
+            ),
+            Tool(
+                name="linux_search_packages",
+                description="Search for packages using the system's package manager (apt/dnf/pacman/etc).",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Package name or keyword to search",
+                        },
+                        "limit": {"type": "number", "description": "Max results (default: 20)"},
                     },
                     "required": ["query"],
                 },
             ),
             Tool(
-                name="reos_repo_read_file",
-                description="Read a file within the current repo (bounded) by line range.",
+                name="linux_install_package",
+                description=(
+                    "Install a package using the system's package manager. Requires sudo. "
+                    "Set confirm=true to actually execute the install."
+                ),
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string"},
-                        "start_line": {"type": "number"},
-                        "end_line": {"type": "number"},
+                        "package_name": {
+                            "type": "string",
+                            "description": "Name of the package to install",
+                        },
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
                     },
-                    "required": ["path", "start_line", "end_line"],
+                    "required": ["package_name"],
                 },
             ),
             Tool(
-                name="reos_repo_list_files",
-                description="List files within the current repo using a glob.",
+                name="linux_list_installed_packages",
+                description="List installed packages, optionally filtered by search term.",
                 input_schema={
                     "type": "object",
-                    "properties": {"glob": {"type": "string"}},
-                    "required": ["glob"],
+                    "properties": {
+                        "search": {"type": "string", "description": "Optional filter term"},
+                    },
                 },
             ),
-        ])
-
-    # =========================================================================
-    # Linux System Tools (Always Available - Core ReOS Functionality)
-    # =========================================================================
-    tools.extend([
-        # --- Linux System Tools ---
-        Tool(
-            name="linux_run_command",
-            description=(
-                "Execute a shell command on the Linux system. Has safety guardrails to block "
-                "dangerous commands. Use for running terminal commands, scripts, and system operations."
+            Tool(
+                name="linux_disk_usage",
+                description="Get disk usage information for a path.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Path to check (default: /)"},
+                    },
+                },
             ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string", "description": "The shell command to execute"},
-                    "timeout": {"type": "number", "description": "Timeout in seconds (default: 30, max: 120)"},
-                    "cwd": {"type": "string", "description": "Working directory for the command"},
+            Tool(
+                name="linux_list_directory",
+                description="List contents of a directory.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Directory path"},
+                        "show_hidden": {"type": "boolean", "description": "Include hidden files"},
+                        "details": {
+                            "type": "boolean",
+                            "description": "Include size, permissions, etc.",
+                        },
+                    },
+                    "required": ["path"],
                 },
-                "required": ["command"],
-            },
-        ),
-        Tool(
-            name="linux_preview_command",
-            description=(
-                "Preview what a command would do BEFORE executing it. Shows affected files, "
-                "warnings, and whether the action can be undone. Use this for destructive commands "
-                "like rm, mv, package installs, or service management to let users confirm first."
             ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string", "description": "The command to preview"},
-                    "cwd": {"type": "string", "description": "Working directory for resolving paths"},
+            Tool(
+                name="linux_find_files",
+                description="Find files matching criteria in a directory tree.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Starting directory"},
+                        "name": {"type": "string", "description": "Filename pattern to match"},
+                        "extension": {
+                            "type": "string",
+                            "description": "File extension (e.g., '.py')",
+                        },
+                        "max_depth": {
+                            "type": "number",
+                            "description": "Max directory depth (default: 3)",
+                        },
+                        "limit": {"type": "number", "description": "Max results (default: 50)"},
+                    },
+                    "required": ["path"],
                 },
-                "required": ["command"],
-            },
-        ),
-        Tool(
-            name="linux_system_info",
-            description=(
-                "Get comprehensive Linux system information including hostname, kernel, distro, "
-                "CPU, memory usage, disk usage, and load averages."
             ),
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="linux_network_info",
-            description="Get network interface information including IP addresses and states.",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="linux_list_processes",
-            description="List running processes sorted by CPU or memory usage.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "sort_by": {"type": "string", "enum": ["cpu", "mem"], "description": "Sort by cpu or mem"},
-                    "limit": {"type": "number", "description": "Max processes to return (default: 20)"},
+            Tool(
+                name="linux_read_log",
+                description="Read and optionally filter a log file.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Path to log file"},
+                        "lines": {
+                            "type": "number",
+                            "description": "Number of lines to read (default: 100)",
+                        },
+                        "filter_pattern": {
+                            "type": "string",
+                            "description": "Regex pattern to filter lines",
+                        },
+                    },
+                    "required": ["path"],
                 },
-            },
-        ),
-        Tool(
-            name="linux_list_services",
-            description="List systemd services on the system.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "filter_active": {"type": "boolean", "description": "Only show active services"},
-                },
-            },
-        ),
-        Tool(
-            name="linux_service_status",
-            description="Get detailed status of a specific systemd service.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "service_name": {"type": "string", "description": "Name of the service (e.g., 'nginx', 'docker')"},
-                },
-                "required": ["service_name"],
-            },
-        ),
-        Tool(
-            name="linux_manage_service",
-            description="Manage a systemd service (start, stop, restart, enable, disable). May require sudo.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "service_name": {"type": "string", "description": "Name of the service"},
-                    "action": {"type": "string", "enum": ["start", "stop", "restart", "reload", "enable", "disable"]},
-                },
-                "required": ["service_name", "action"],
-            },
-        ),
-        Tool(
-            name="linux_search_packages",
-            description="Search for packages using the system's package manager (apt/dnf/pacman/etc).",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Package name or keyword to search"},
-                    "limit": {"type": "number", "description": "Max results (default: 20)"},
-                },
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="linux_install_package",
-            description=(
-                "Install a package using the system's package manager. Requires sudo. "
-                "Set confirm=true to actually execute the install."
             ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "package_name": {"type": "string", "description": "Name of the package to install"},
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
+            Tool(
+                name="linux_docker_containers",
+                description="List Docker containers.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "all_containers": {
+                            "type": "boolean",
+                            "description": "Include stopped containers",
+                        },
+                    },
                 },
-                "required": ["package_name"],
-            },
-        ),
-        Tool(
-            name="linux_list_installed_packages",
-            description="List installed packages, optionally filtered by search term.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "search": {"type": "string", "description": "Optional filter term"},
-                },
-            },
-        ),
-        Tool(
-            name="linux_disk_usage",
-            description="Get disk usage information for a path.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to check (default: /)"},
-                },
-            },
-        ),
-        Tool(
-            name="linux_list_directory",
-            description="List contents of a directory.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Directory path"},
-                    "show_hidden": {"type": "boolean", "description": "Include hidden files"},
-                    "details": {"type": "boolean", "description": "Include size, permissions, etc."},
-                },
-                "required": ["path"],
-            },
-        ),
-        Tool(
-            name="linux_find_files",
-            description="Find files matching criteria in a directory tree.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Starting directory"},
-                    "name": {"type": "string", "description": "Filename pattern to match"},
-                    "extension": {"type": "string", "description": "File extension (e.g., '.py')"},
-                    "max_depth": {"type": "number", "description": "Max directory depth (default: 3)"},
-                    "limit": {"type": "number", "description": "Max results (default: 50)"},
-                },
-                "required": ["path"],
-            },
-        ),
-        Tool(
-            name="linux_read_log",
-            description="Read and optionally filter a log file.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to log file"},
-                    "lines": {"type": "number", "description": "Number of lines to read (default: 100)"},
-                    "filter_pattern": {"type": "string", "description": "Regex pattern to filter lines"},
-                },
-                "required": ["path"],
-            },
-        ),
-        Tool(
-            name="linux_docker_containers",
-            description="List Docker containers.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "all_containers": {"type": "boolean", "description": "Include stopped containers"},
-                },
-            },
-        ),
-        Tool(
-            name="linux_docker_images",
-            description="List Docker images.",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="linux_environment",
-            description="Get environment information (shell, user, available dev tools, display server, etc.).",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="linux_package_manager",
-            description="Detect the system's package manager (apt, dnf, pacman, etc.).",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        # --- System Index (RAG) ---
-        Tool(
-            name="system_index_status",
-            description=(
-                "Get status of the daily system state index. Shows when the last snapshot "
-                "was captured and whether a refresh is needed."
             ),
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="system_index_refresh",
-            description=(
-                "Force a refresh of the system state index. Captures current system state "
-                "(OS, hardware, services, packages, containers, users, storage). "
-                "This is normally done automatically once per day."
+            Tool(
+                name="linux_docker_images",
+                description="List Docker images.",
+                input_schema={"type": "object", "properties": {}},
             ),
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="system_index_view",
-            description=(
-                "View the current system state snapshot. Returns the RAG context that "
-                "the agent uses for system awareness."
+            Tool(
+                name="linux_environment",
+                description="Get environment information (shell, user, available dev tools, display server, etc.).",
+                input_schema={"type": "object", "properties": {}},
             ),
-            input_schema={"type": "object", "properties": {}},
-        ),
-        # --- Package Removal ---
-        Tool(
-            name="linux_remove_package",
-            description=(
-                "Remove a package using the system's package manager. Requires sudo. "
-                "Set confirm=true to actually execute the removal."
+            Tool(
+                name="linux_package_manager",
+                description="Detect the system's package manager (apt, dnf, pacman, etc.).",
+                input_schema={"type": "object", "properties": {}},
             ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "package_name": {"type": "string", "description": "Name of the package to remove"},
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
-                    "purge": {"type": "boolean", "description": "Also remove configuration files (apt only)"},
-                },
-                "required": ["package_name"],
-            },
-        ),
-        # --- Firewall Management ---
-        Tool(
-            name="linux_firewall_status",
-            description="Get firewall status and rules. Supports ufw (Ubuntu/Debian) and firewalld (RHEL/Fedora).",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="linux_firewall_allow",
-            description=(
-                "Allow a port or service through the firewall. "
-                "Set confirm=true to actually apply the rule."
+            # --- System Index (RAG) ---
+            Tool(
+                name="system_index_status",
+                description=(
+                    "Get status of the daily system state index. Shows when the last snapshot "
+                    "was captured and whether a refresh is needed."
+                ),
+                input_schema={"type": "object", "properties": {}},
             ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "port": {"type": ["string", "integer"], "description": "Port number or service name (e.g., 80, 'ssh', 'http')"},
-                    "protocol": {"type": "string", "enum": ["tcp", "udp"], "description": "Protocol (default: tcp)"},
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
-                },
-                "required": ["port"],
-            },
-        ),
-        Tool(
-            name="linux_firewall_deny",
-            description=(
-                "Block a port or service in the firewall. "
-                "Set confirm=true to actually apply the rule."
+            Tool(
+                name="system_index_refresh",
+                description=(
+                    "Force a refresh of the system state index. Captures current system state "
+                    "(OS, hardware, services, packages, containers, users, storage). "
+                    "This is normally done automatically once per day."
+                ),
+                input_schema={"type": "object", "properties": {}},
             ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "port": {"type": ["string", "integer"], "description": "Port number or service name"},
-                    "protocol": {"type": "string", "enum": ["tcp", "udp"], "description": "Protocol (default: tcp)"},
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
+            Tool(
+                name="system_index_view",
+                description=(
+                    "View the current system state snapshot. Returns the RAG context that "
+                    "the agent uses for system awareness."
+                ),
+                input_schema={"type": "object", "properties": {}},
+            ),
+            # --- Package Removal ---
+            Tool(
+                name="linux_remove_package",
+                description=(
+                    "Remove a package using the system's package manager. Requires sudo. "
+                    "Set confirm=true to actually execute the removal."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "package_name": {
+                            "type": "string",
+                            "description": "Name of the package to remove",
+                        },
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
+                        "purge": {
+                            "type": "boolean",
+                            "description": "Also remove configuration files (apt only)",
+                        },
+                    },
+                    "required": ["package_name"],
                 },
-                "required": ["port"],
-            },
-        ),
-        Tool(
-            name="linux_firewall_enable",
-            description="Enable the system firewall. Set confirm=true to execute.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
+            ),
+            # --- Firewall Management ---
+            Tool(
+                name="linux_firewall_status",
+                description="Get firewall status and rules. Supports ufw (Ubuntu/Debian) and firewalld (RHEL/Fedora).",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="linux_firewall_allow",
+                description=(
+                    "Allow a port or service through the firewall. "
+                    "Set confirm=true to actually apply the rule."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "port": {
+                            "type": ["string", "integer"],
+                            "description": "Port number or service name (e.g., 80, 'ssh', 'http')",
+                        },
+                        "protocol": {
+                            "type": "string",
+                            "enum": ["tcp", "udp"],
+                            "description": "Protocol (default: tcp)",
+                        },
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
+                    },
+                    "required": ["port"],
                 },
-            },
-        ),
-        Tool(
-            name="linux_firewall_disable",
-            description="Disable the system firewall. Set confirm=true to execute.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
+            ),
+            Tool(
+                name="linux_firewall_deny",
+                description=(
+                    "Block a port or service in the firewall. "
+                    "Set confirm=true to actually apply the rule."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "port": {
+                            "type": ["string", "integer"],
+                            "description": "Port number or service name",
+                        },
+                        "protocol": {
+                            "type": "string",
+                            "enum": ["tcp", "udp"],
+                            "description": "Protocol (default: tcp)",
+                        },
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
+                    },
+                    "required": ["port"],
                 },
-            },
-        ),
-        # --- Journalctl / Logging ---
-        Tool(
-            name="linux_service_logs",
-            description="Get logs for a systemd service using journalctl.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "service_name": {"type": "string", "description": "Name of the service (e.g., 'nginx', 'docker')"},
-                    "lines": {"type": "number", "description": "Number of log lines to retrieve (default: 50)"},
-                    "since": {"type": "string", "description": "Time filter (e.g., '1 hour ago', 'today', '2024-01-01')"},
-                    "priority": {"type": "string", "enum": ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"], "description": "Filter by priority level"},
+            ),
+            Tool(
+                name="linux_firewall_enable",
+                description="Enable the system firewall. Set confirm=true to execute.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
+                    },
                 },
-                "required": ["service_name"],
-            },
-        ),
-        Tool(
-            name="linux_system_logs",
-            description="Get system-wide logs using journalctl.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "lines": {"type": "number", "description": "Number of log lines to retrieve (default: 100)"},
-                    "since": {"type": "string", "description": "Time filter (e.g., '1 hour ago', 'today')"},
-                    "priority": {"type": "string", "enum": ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"], "description": "Filter by priority level"},
-                    "grep": {"type": "string", "description": "Filter messages containing this pattern"},
+            ),
+            Tool(
+                name="linux_firewall_disable",
+                description="Disable the system firewall. Set confirm=true to execute.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
+                    },
                 },
-            },
-        ),
-        Tool(
-            name="linux_boot_logs",
-            description="Get boot logs from journalctl.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "current_boot": {"type": "boolean", "description": "If true (default), show current boot; false shows previous boot"},
-                    "lines": {"type": "number", "description": "Number of log lines to retrieve (default: 100)"},
+            ),
+            # --- Journalctl / Logging ---
+            Tool(
+                name="linux_service_logs",
+                description="Get logs for a systemd service using journalctl.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "service_name": {
+                            "type": "string",
+                            "description": "Name of the service (e.g., 'nginx', 'docker')",
+                        },
+                        "lines": {
+                            "type": "number",
+                            "description": "Number of log lines to retrieve (default: 50)",
+                        },
+                        "since": {
+                            "type": "string",
+                            "description": "Time filter (e.g., '1 hour ago', 'today', '2024-01-01')",
+                        },
+                        "priority": {
+                            "type": "string",
+                            "enum": [
+                                "emerg",
+                                "alert",
+                                "crit",
+                                "err",
+                                "warning",
+                                "notice",
+                                "info",
+                                "debug",
+                            ],
+                            "description": "Filter by priority level",
+                        },
+                    },
+                    "required": ["service_name"],
                 },
-            },
-        ),
-        Tool(
-            name="linux_failed_services",
-            description="List all failed systemd services.",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        # --- Container Management (Docker + Podman) ---
-        Tool(
-            name="linux_container_runtime",
-            description="Detect available container runtime (Docker or Podman).",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="linux_containers",
-            description="List containers using Docker or Podman (auto-detected).",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "all_containers": {"type": "boolean", "description": "Include stopped containers"},
+            ),
+            Tool(
+                name="linux_system_logs",
+                description="Get system-wide logs using journalctl.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "lines": {
+                            "type": "number",
+                            "description": "Number of log lines to retrieve (default: 100)",
+                        },
+                        "since": {
+                            "type": "string",
+                            "description": "Time filter (e.g., '1 hour ago', 'today')",
+                        },
+                        "priority": {
+                            "type": "string",
+                            "enum": [
+                                "emerg",
+                                "alert",
+                                "crit",
+                                "err",
+                                "warning",
+                                "notice",
+                                "info",
+                                "debug",
+                            ],
+                            "description": "Filter by priority level",
+                        },
+                        "grep": {
+                            "type": "string",
+                            "description": "Filter messages containing this pattern",
+                        },
+                    },
                 },
-            },
-        ),
-        Tool(
-            name="linux_container_images",
-            description="List container images using Docker or Podman.",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="linux_container_logs",
-            description="Get logs from a container.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "container_id": {"type": "string", "description": "Container ID or name"},
-                    "lines": {"type": "number", "description": "Number of log lines (default: 100)"},
-                    "follow": {"type": "boolean", "description": "If true, returns command to follow logs"},
+            ),
+            Tool(
+                name="linux_boot_logs",
+                description="Get boot logs from journalctl.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "current_boot": {
+                            "type": "boolean",
+                            "description": "If true (default), show current boot; false shows previous boot",
+                        },
+                        "lines": {
+                            "type": "number",
+                            "description": "Number of log lines to retrieve (default: 100)",
+                        },
+                    },
                 },
-                "required": ["container_id"],
-            },
-        ),
-        Tool(
-            name="linux_container_exec",
-            description="Execute a command inside a running container.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "container_id": {"type": "string", "description": "Container ID or name"},
-                    "command": {"type": "string", "description": "Command to execute"},
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
+            ),
+            Tool(
+                name="linux_failed_services",
+                description="List all failed systemd services.",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            # --- Container Management (Docker + Podman) ---
+            Tool(
+                name="linux_container_runtime",
+                description="Detect available container runtime (Docker or Podman).",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="linux_containers",
+                description="List containers using Docker or Podman (auto-detected).",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "all_containers": {
+                            "type": "boolean",
+                            "description": "Include stopped containers",
+                        },
+                    },
                 },
-                "required": ["container_id", "command"],
-            },
-        ),
-        # --- User and Group Management ---
-        Tool(
-            name="linux_list_users",
-            description="List system users.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "system_users": {"type": "boolean", "description": "Include system users (UID < 1000)"},
+            ),
+            Tool(
+                name="linux_container_images",
+                description="List container images using Docker or Podman.",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="linux_container_logs",
+                description="Get logs from a container.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "container_id": {"type": "string", "description": "Container ID or name"},
+                        "lines": {
+                            "type": "number",
+                            "description": "Number of log lines (default: 100)",
+                        },
+                        "follow": {
+                            "type": "boolean",
+                            "description": "If true, returns command to follow logs",
+                        },
+                    },
+                    "required": ["container_id"],
                 },
-            },
-        ),
-        Tool(
-            name="linux_list_groups",
-            description="List system groups (excluding most system groups).",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="linux_add_user",
-            description="Add a new user to the system. Requires sudo.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "username": {"type": "string", "description": "Username to create"},
-                    "home_dir": {"type": "string", "description": "Home directory path"},
-                    "shell": {"type": "string", "description": "Login shell (default: /bin/bash)"},
-                    "groups": {"type": "array", "items": {"type": "string"}, "description": "Additional groups to add user to"},
-                    "create_home": {"type": "boolean", "description": "Create home directory (default: true)"},
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
+            ),
+            Tool(
+                name="linux_container_exec",
+                description="Execute a command inside a running container.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "container_id": {"type": "string", "description": "Container ID or name"},
+                        "command": {"type": "string", "description": "Command to execute"},
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
+                    },
+                    "required": ["container_id", "command"],
                 },
-                "required": ["username"],
-            },
-        ),
-        Tool(
-            name="linux_delete_user",
-            description="Delete a user from the system. Requires sudo.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "username": {"type": "string", "description": "Username to delete"},
-                    "remove_home": {"type": "boolean", "description": "Also remove home directory (default: false)"},
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
+            ),
+            # --- User and Group Management ---
+            Tool(
+                name="linux_list_users",
+                description="List system users.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "system_users": {
+                            "type": "boolean",
+                            "description": "Include system users (UID < 1000)",
+                        },
+                    },
                 },
-                "required": ["username"],
-            },
-        ),
-        Tool(
-            name="linux_add_user_to_group",
-            description="Add a user to a group. Requires sudo.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "username": {"type": "string", "description": "Username"},
-                    "group": {"type": "string", "description": "Group to add user to"},
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
+            ),
+            Tool(
+                name="linux_list_groups",
+                description="List system groups (excluding most system groups).",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="linux_add_user",
+                description="Add a new user to the system. Requires sudo.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "username": {"type": "string", "description": "Username to create"},
+                        "home_dir": {"type": "string", "description": "Home directory path"},
+                        "shell": {
+                            "type": "string",
+                            "description": "Login shell (default: /bin/bash)",
+                        },
+                        "groups": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Additional groups to add user to",
+                        },
+                        "create_home": {
+                            "type": "boolean",
+                            "description": "Create home directory (default: true)",
+                        },
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
+                    },
+                    "required": ["username"],
                 },
-                "required": ["username", "group"],
-            },
-        ),
-        Tool(
-            name="linux_remove_user_from_group",
-            description="Remove a user from a group. Requires sudo.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "username": {"type": "string", "description": "Username"},
-                    "group": {"type": "string", "description": "Group to remove user from"},
-                    "confirm": {"type": "boolean", "description": "Set to true to execute (default: preview only)"},
+            ),
+            Tool(
+                name="linux_delete_user",
+                description="Delete a user from the system. Requires sudo.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "username": {"type": "string", "description": "Username to delete"},
+                        "remove_home": {
+                            "type": "boolean",
+                            "description": "Also remove home directory (default: false)",
+                        },
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
+                    },
+                    "required": ["username"],
                 },
-                "required": ["username", "group"],
-            },
-        ),
-    ])
+            ),
+            Tool(
+                name="linux_add_user_to_group",
+                description="Add a user to a group. Requires sudo.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "username": {"type": "string", "description": "Username"},
+                        "group": {"type": "string", "description": "Group to add user to"},
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
+                    },
+                    "required": ["username", "group"],
+                },
+            ),
+            Tool(
+                name="linux_remove_user_from_group",
+                description="Remove a user from a group. Requires sudo.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "username": {"type": "string", "description": "Username"},
+                        "group": {"type": "string", "description": "Group to remove user from"},
+                        "confirm": {
+                            "type": "boolean",
+                            "description": "Set to true to execute (default: preview only)",
+                        },
+                    },
+                    "required": ["username", "group"],
+                },
+            ),
+        ]
+    )
 
     # =========================================================================
     # CAIRN Tools (Knowledge Management & Thunderbird Integration)
     # CAIRN is the Attention Minder - helps manage tasks, calendar, contacts
     # =========================================================================
-    tools.extend([
-        Tool(
-            name="cairn_get_calendar",
-            description=(
-                "Get calendar events from Thunderbird for a date range. "
-                "Use this to see the user's schedule, appointments, and meetings."
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "start": {"type": "string", "description": "Start date (ISO format, default: now)"},
-                    "end": {"type": "string", "description": "End date (ISO format, default: 30 days from start)"},
-                },
-            },
-        ),
-        Tool(
-            name="cairn_get_upcoming_events",
-            description=(
-                "Get upcoming calendar events in the next N hours. "
-                "Great for showing what's coming up soon."
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "hours": {"type": "number", "description": "Hours to look ahead (default: 24)"},
-                    "limit": {"type": "number", "description": "Max events to return (default: 10)"},
-                },
-            },
-        ),
-        Tool(
-            name="cairn_get_todos",
-            description="Get todos/tasks from Thunderbird calendar.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "include_completed": {"type": "boolean", "description": "Include completed todos (default: false)"},
-                },
-            },
-        ),
-        Tool(
-            name="cairn_search_contacts",
-            description="Search Thunderbird contacts by name, email, or organization.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "limit": {"type": "number", "description": "Max results (default: 20)"},
-                },
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="cairn_thunderbird_status",
-            description="Check Thunderbird integration status (detected paths, availability).",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="cairn_surface_today",
-            description="Get everything relevant for today (calendar events, due items, priorities).",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="cairn_surface_next",
-            description="Get the next thing that needs attention based on priority, due dates, and context.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "max_items": {"type": "number", "description": "Max items to surface (default: 5)"},
-                },
-            },
-        ),
-        # --- Play CRUD Tools (Acts, Scenes, Beats management) ---
-        Tool(
-            name="cairn_list_acts",
-            description="List all Acts in The Play. Shows the organizational structure.",
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="cairn_create_act",
-            description="Create a new Act in The Play. An Act is a major area of life/work.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string", "description": "Title for the new Act"},
-                },
-                "required": ["title"],
-            },
-        ),
-        Tool(
-            name="cairn_update_act",
-            description="Update an Act's title. Use fuzzy matching for act_name.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "act_name": {"type": "string", "description": "Name of the Act to update (fuzzy matched)"},
-                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
-                    "new_title": {"type": "string", "description": "New title for the Act"},
-                },
-                "required": ["new_title"],
-            },
-        ),
-        Tool(
-            name="cairn_delete_act",
-            description="Delete an Act and all its contents. Cannot delete 'Your Story' act.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "act_name": {"type": "string", "description": "Name of the Act to delete (fuzzy matched)"},
-                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
-                },
-            },
-        ),
-        Tool(
-            name="cairn_set_active_act",
-            description="Set the active Act for the current session.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "act_name": {"type": "string", "description": "Name of the Act to set active (fuzzy matched)"},
-                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
-                },
-            },
-        ),
-        Tool(
-            name="cairn_list_scenes",
-            description="List all Scenes in an Act.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "act_name": {"type": "string", "description": "Name of the Act (fuzzy matched)"},
-                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
-                },
-            },
-        ),
-        Tool(
-            name="cairn_create_scene",
-            description="Create a new Scene in an Act.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "act_name": {"type": "string", "description": "Name of the Act (fuzzy matched)"},
-                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
-                    "title": {"type": "string", "description": "Title for the new Scene"},
-                },
-                "required": ["title"],
-            },
-        ),
-        Tool(
-            name="cairn_update_scene",
-            description="Update a Scene's title.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "scene_name": {"type": "string", "description": "Name of the Scene to update (fuzzy matched)"},
-                    "scene_id": {"type": "string", "description": "Scene ID (alternative to scene_name)"},
-                    "act_name": {"type": "string", "description": "Name of the Act containing the Scene"},
-                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
-                    "new_title": {"type": "string", "description": "New title for the Scene"},
-                },
-                "required": ["new_title"],
-            },
-        ),
-        Tool(
-            name="cairn_delete_scene",
-            description="Delete a Scene and all its Beats. Cannot delete 'Stage Direction' scene.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "scene_name": {"type": "string", "description": "Name of the Scene to delete (fuzzy matched)"},
-                    "scene_id": {"type": "string", "description": "Scene ID (alternative to scene_name)"},
-                    "act_name": {"type": "string", "description": "Name of the Act containing the Scene"},
-                    "act_id": {"type": "string", "description": "Act ID (alternative to act_name)"},
-                },
-            },
-        ),
-        Tool(
-            name="cairn_list_beats",
-            description="List Beats, optionally filtered by Act.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "act_name": {"type": "string", "description": "Filter by Act name (fuzzy matched)"},
-                    "act_id": {"type": "string", "description": "Filter by Act ID"},
-                },
-            },
-        ),
-        Tool(
-            name="cairn_create_beat",
-            description="Create a new Beat (task/item) in a Scene.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string", "description": "Title for the Beat"},
-                    "act_name": {"type": "string", "description": "Act name (fuzzy matched, default: Your Story)"},
-                    "scene_name": {"type": "string", "description": "Scene name (fuzzy matched, default: Stage Direction)"},
-                    "stage": {"type": "string", "enum": ["planning", "in_progress", "awaiting_data", "complete"], "description": "Stage (default: planning)"},
-                    "notes": {"type": "string", "description": "Notes for the Beat"},
-                },
-                "required": ["title"],
-            },
-        ),
-        Tool(
-            name="cairn_update_beat",
-            description="Update a Beat's title, stage, or notes.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "beat_name": {"type": "string", "description": "Name of the Beat to update (fuzzy matched)"},
-                    "beat_id": {"type": "string", "description": "Beat ID (alternative to beat_name)"},
-                    "new_title": {"type": "string", "description": "New title for the Beat"},
-                    "stage": {"type": "string", "enum": ["planning", "in_progress", "awaiting_data", "complete"], "description": "New stage"},
-                    "notes": {"type": "string", "description": "New notes"},
-                },
-            },
-        ),
-        Tool(
-            name="cairn_delete_beat",
-            description="Delete a Beat.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "beat_name": {"type": "string", "description": "Name of the Beat to delete (fuzzy matched)"},
-                    "beat_id": {"type": "string", "description": "Beat ID (alternative to beat_name)"},
-                },
-            },
-        ),
-        Tool(
-            name="cairn_move_beat_to_act",
-            description="Move a Beat to a different Act. Uses fuzzy matching for names.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "beat_name": {"type": "string", "description": "Name of the Beat to move (fuzzy matched)"},
-                    "beat_id": {"type": "string", "description": "Beat ID (alternative to beat_name)"},
-                    "target_act_name": {"type": "string", "description": "Target Act name (fuzzy matched)"},
-                    "target_act_id": {"type": "string", "description": "Target Act ID (alternative to target_act_name)"},
-                },
-            },
-        ),
-        # --- Self-Knowledge Tools (RAG for codebase understanding) ---
-        Tool(
-            name="reos_search_codebase",
-            description=(
-                "Search the ReOS codebase for relevant code. Use this to understand how "
-                "features are implemented, find function definitions, or locate relevant files. "
-                "Returns functions, classes, and modules matching the query."
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Natural language search query (e.g., 'intent engine', 'calendar sync')"},
-                    "limit": {"type": "number", "description": "Max results to return (default: 10)"},
-                    "entity_types": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Filter by type: function, class, module, method, type",
+    tools.extend(
+        [
+            Tool(
+                name="cairn_get_calendar",
+                description=(
+                    "Get calendar events from Thunderbird for a date range. "
+                    "Use this to see the user's schedule, appointments, and meetings."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "start": {
+                            "type": "string",
+                            "description": "Start date (ISO format, default: now)",
+                        },
+                        "end": {
+                            "type": "string",
+                            "description": "End date (ISO format, default: 30 days from start)",
+                        },
                     },
                 },
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="reos_get_architecture",
-            description=(
-                "Get the ReOS architecture blueprint. Returns a comprehensive overview of "
-                "the system including data models, component architecture, MCP tools, and "
-                "file index. Use this to understand how ReOS works."
             ),
-            input_schema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="reos_file_summary",
-            description=(
-                "Get a summary of a specific source file. Shows functions, classes, and "
-                "their purposes. Useful for understanding what a file does."
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string", "description": "Relative path (e.g., 'src/reos/cairn/intent_engine.py')"},
+            Tool(
+                name="cairn_get_upcoming_events",
+                description=(
+                    "Get upcoming calendar events in the next N hours. "
+                    "Great for showing what's coming up soon."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "hours": {
+                            "type": "number",
+                            "description": "Hours to look ahead (default: 24)",
+                        },
+                        "limit": {
+                            "type": "number",
+                            "description": "Max events to return (default: 10)",
+                        },
+                    },
                 },
-                "required": ["file_path"],
-            },
-        ),
-    ])
+            ),
+            Tool(
+                name="cairn_get_todos",
+                description="Get todos/tasks from Thunderbird calendar.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "include_completed": {
+                            "type": "boolean",
+                            "description": "Include completed todos (default: false)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="cairn_search_contacts",
+                description="Search Thunderbird contacts by name, email, or organization.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"},
+                        "limit": {"type": "number", "description": "Max results (default: 20)"},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            Tool(
+                name="cairn_thunderbird_status",
+                description="Check Thunderbird integration status (detected paths, availability).",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="cairn_surface_today",
+                description="Get everything relevant for today (calendar events, due items, priorities).",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="cairn_surface_next",
+                description="Get the next thing that needs attention based on priority, due dates, and context.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "max_items": {
+                            "type": "number",
+                            "description": "Max items to surface (default: 5)",
+                        },
+                    },
+                },
+            ),
+            # --- Play CRUD Tools (Acts, Scenes, Beats management) ---
+            Tool(
+                name="cairn_list_acts",
+                description="List all Acts in The Play. Shows the organizational structure.",
+                input_schema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="cairn_create_act",
+                description="Create a new Act in The Play. An Act is a major area of life/work.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Title for the new Act"},
+                    },
+                    "required": ["title"],
+                },
+            ),
+            Tool(
+                name="cairn_update_act",
+                description="Update an Act's title. Use fuzzy matching for act_name.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "act_name": {
+                            "type": "string",
+                            "description": "Name of the Act to update (fuzzy matched)",
+                        },
+                        "act_id": {
+                            "type": "string",
+                            "description": "Act ID (alternative to act_name)",
+                        },
+                        "new_title": {"type": "string", "description": "New title for the Act"},
+                    },
+                    "required": ["new_title"],
+                },
+            ),
+            Tool(
+                name="cairn_delete_act",
+                description="Delete an Act and all its contents. Cannot delete 'Your Story' act.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "act_name": {
+                            "type": "string",
+                            "description": "Name of the Act to delete (fuzzy matched)",
+                        },
+                        "act_id": {
+                            "type": "string",
+                            "description": "Act ID (alternative to act_name)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="cairn_set_active_act",
+                description="Set the active Act for the current session.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "act_name": {
+                            "type": "string",
+                            "description": "Name of the Act to set active (fuzzy matched)",
+                        },
+                        "act_id": {
+                            "type": "string",
+                            "description": "Act ID (alternative to act_name)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="cairn_list_scenes",
+                description="List all Scenes in an Act.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "act_name": {
+                            "type": "string",
+                            "description": "Name of the Act (fuzzy matched)",
+                        },
+                        "act_id": {
+                            "type": "string",
+                            "description": "Act ID (alternative to act_name)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="cairn_create_scene",
+                description="Create a new Scene in an Act.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "act_name": {
+                            "type": "string",
+                            "description": "Name of the Act (fuzzy matched)",
+                        },
+                        "act_id": {
+                            "type": "string",
+                            "description": "Act ID (alternative to act_name)",
+                        },
+                        "title": {"type": "string", "description": "Title for the new Scene"},
+                    },
+                    "required": ["title"],
+                },
+            ),
+            Tool(
+                name="cairn_update_scene",
+                description="Update a Scene's title.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "scene_name": {
+                            "type": "string",
+                            "description": "Name of the Scene to update (fuzzy matched)",
+                        },
+                        "scene_id": {
+                            "type": "string",
+                            "description": "Scene ID (alternative to scene_name)",
+                        },
+                        "act_name": {
+                            "type": "string",
+                            "description": "Name of the Act containing the Scene",
+                        },
+                        "act_id": {
+                            "type": "string",
+                            "description": "Act ID (alternative to act_name)",
+                        },
+                        "new_title": {"type": "string", "description": "New title for the Scene"},
+                    },
+                    "required": ["new_title"],
+                },
+            ),
+            Tool(
+                name="cairn_delete_scene",
+                description="Delete a Scene and all its Beats. Cannot delete 'Stage Direction' scene.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "scene_name": {
+                            "type": "string",
+                            "description": "Name of the Scene to delete (fuzzy matched)",
+                        },
+                        "scene_id": {
+                            "type": "string",
+                            "description": "Scene ID (alternative to scene_name)",
+                        },
+                        "act_name": {
+                            "type": "string",
+                            "description": "Name of the Act containing the Scene",
+                        },
+                        "act_id": {
+                            "type": "string",
+                            "description": "Act ID (alternative to act_name)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="cairn_list_beats",
+                description="List Beats, optionally filtered by Act.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "act_name": {
+                            "type": "string",
+                            "description": "Filter by Act name (fuzzy matched)",
+                        },
+                        "act_id": {"type": "string", "description": "Filter by Act ID"},
+                    },
+                },
+            ),
+            Tool(
+                name="cairn_create_beat",
+                description="Create a new Beat (task/item) in a Scene.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Title for the Beat"},
+                        "act_name": {
+                            "type": "string",
+                            "description": "Act name (fuzzy matched, default: Your Story)",
+                        },
+                        "scene_name": {
+                            "type": "string",
+                            "description": "Scene name (fuzzy matched, default: Stage Direction)",
+                        },
+                        "stage": {
+                            "type": "string",
+                            "enum": ["planning", "in_progress", "awaiting_data", "complete"],
+                            "description": "Stage (default: planning)",
+                        },
+                        "notes": {"type": "string", "description": "Notes for the Beat"},
+                    },
+                    "required": ["title"],
+                },
+            ),
+            Tool(
+                name="cairn_update_beat",
+                description="Update a Beat's title, stage, or notes.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "beat_name": {
+                            "type": "string",
+                            "description": "Name of the Beat to update (fuzzy matched)",
+                        },
+                        "beat_id": {
+                            "type": "string",
+                            "description": "Beat ID (alternative to beat_name)",
+                        },
+                        "new_title": {"type": "string", "description": "New title for the Beat"},
+                        "stage": {
+                            "type": "string",
+                            "enum": ["planning", "in_progress", "awaiting_data", "complete"],
+                            "description": "New stage",
+                        },
+                        "notes": {"type": "string", "description": "New notes"},
+                    },
+                },
+            ),
+            Tool(
+                name="cairn_delete_beat",
+                description="Delete a Beat.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "beat_name": {
+                            "type": "string",
+                            "description": "Name of the Beat to delete (fuzzy matched)",
+                        },
+                        "beat_id": {
+                            "type": "string",
+                            "description": "Beat ID (alternative to beat_name)",
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="cairn_move_beat_to_act",
+                description="Move a Beat to a different Act. Uses fuzzy matching for names.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "beat_name": {
+                            "type": "string",
+                            "description": "Name of the Beat to move (fuzzy matched)",
+                        },
+                        "beat_id": {
+                            "type": "string",
+                            "description": "Beat ID (alternative to beat_name)",
+                        },
+                        "target_act_name": {
+                            "type": "string",
+                            "description": "Target Act name (fuzzy matched)",
+                        },
+                        "target_act_id": {
+                            "type": "string",
+                            "description": "Target Act ID (alternative to target_act_name)",
+                        },
+                    },
+                },
+            ),
+            # --- Self-Knowledge Tools (RAG for codebase understanding) ---
+            Tool(
+                name="reos_search_codebase",
+                description=(
+                    "Search the ReOS codebase for relevant code. Use this to understand how "
+                    "features are implemented, find function definitions, or locate relevant files. "
+                    "Returns functions, classes, and modules matching the query."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural language search query (e.g., 'intent engine', 'calendar sync')",
+                        },
+                        "limit": {
+                            "type": "number",
+                            "description": "Max results to return (default: 10)",
+                        },
+                        "entity_types": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Filter by type: function, class, module, method, type",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            ),
+            Tool(
+                name="reos_get_architecture",
+                description=(
+                    "Get the ReOS architecture blueprint. Returns a comprehensive overview of "
+                    "the system including data models, component architecture, MCP tools, and "
+                    "file index. Use this to understand how ReOS works."
+                ),
+                input_schema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="reos_file_summary",
+                description=(
+                    "Get a summary of a specific source file. Shows functions, classes, and "
+                    "their purposes. Useful for understanding what a file does."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Relative path (e.g., 'src/reos/cairn/intent_engine.py')",
+                        },
+                    },
+                    "required": ["file_path"],
+                },
+            ),
+        ]
+    )
 
     return tools
 
@@ -907,56 +1221,76 @@ def _repo_root(db: Database) -> Path:
 # Simple handlers that just wrap linux_tools functions.
 # Complex handlers with validation remain in call_tool for now.
 
+
 def _handle_linux_system_info(db: Database, args: dict) -> Any:
     return asdict(linux_tools.get_system_info())
 
+
 def _handle_linux_network_info(db: Database, args: dict) -> Any:
     return linux_tools.get_network_info()
+
 
 def _handle_linux_list_processes(db: Database, args: dict) -> Any:
     sort_by = args.get("sort_by", "cpu")
     limit = int(args.get("limit", 20))
     return [asdict(p) for p in linux_tools.list_processes(sort_by=sort_by, limit=limit)]
 
+
 def _handle_linux_list_services(db: Database, args: dict) -> Any:
     filter_active = bool(args.get("filter_active", False))
     return [asdict(s) for s in linux_tools.list_services(filter_active=filter_active)]
+
 
 def _handle_linux_list_installed_packages(db: Database, args: dict) -> Any:
     search = args.get("search")
     packages = linux_tools.list_installed_packages(search=search)
     return {"packages": packages, "count": len(packages)}
 
+
 def _handle_linux_disk_usage(db: Database, args: dict) -> Any:
     return linux_tools.get_disk_usage(args.get("path", "/"))
 
+
 def _handle_linux_environment(db: Database, args: dict) -> Any:
     return linux_tools.get_environment()
+
 
 def _handle_linux_package_manager(db: Database, args: dict) -> Any:
     pm = linux_tools.detect_package_manager()
     return {"name": pm.name, "command": pm.command, "install_cmd": pm.install_cmd}
 
+
 def _handle_linux_docker_containers(db: Database, args: dict) -> Any:
     all_containers = bool(args.get("all_containers", False))
     containers = linux_tools.list_docker_containers(all_containers=all_containers)
-    return {"containers": containers, "docker_available": len(containers) > 0 or linux_tools.check_docker_available()}
+    return {
+        "containers": containers,
+        "docker_available": len(containers) > 0 or linux_tools.check_docker_available(),
+    }
+
 
 def _handle_linux_docker_images(db: Database, args: dict) -> Any:
     images = linux_tools.list_docker_images()
-    return {"images": images, "docker_available": len(images) > 0 or linux_tools.check_docker_available()}
+    return {
+        "images": images,
+        "docker_available": len(images) > 0 or linux_tools.check_docker_available(),
+    }
+
 
 def _handle_linux_environment(db: Database, args: dict) -> Any:
     return linux_tools.get_environment_info()
+
 
 def _handle_linux_package_manager(db: Database, args: dict) -> Any:
     pm = linux_tools.detect_package_manager()
     distro = linux_tools.detect_distro()
     return {"package_manager": pm, "distro": distro}
 
+
 def _handle_linux_container_runtime(db: Database, args: dict) -> Any:
     runtime = linux_tools.detect_container_runtime()
     return {"runtime": runtime, "available": runtime is not None}
+
 
 def _handle_linux_containers(db: Database, args: dict) -> Any:
     all_containers = bool(args.get("all_containers", False))
@@ -964,10 +1298,12 @@ def _handle_linux_containers(db: Database, args: dict) -> Any:
     runtime = linux_tools.detect_container_runtime()
     return {"runtime": runtime, "containers": containers, "count": len(containers)}
 
+
 def _handle_linux_container_images(db: Database, args: dict) -> Any:
     images = linux_tools.list_container_images()
     runtime = linux_tools.detect_container_runtime()
     return {"runtime": runtime, "images": images, "count": len(images)}
+
 
 def _handle_linux_list_users(db: Database, args: dict) -> Any:
     system_users = bool(args.get("system_users", False))
@@ -975,19 +1311,28 @@ def _handle_linux_list_users(db: Database, args: dict) -> Any:
     return {
         "count": len(users),
         "users": [
-            {"username": u.username, "uid": u.uid, "gid": u.gid,
-             "home": u.home, "shell": u.shell, "groups": u.groups}
+            {
+                "username": u.username,
+                "uid": u.uid,
+                "gid": u.gid,
+                "home": u.home,
+                "shell": u.shell,
+                "groups": u.groups,
+            }
             for u in users
         ],
     }
+
 
 def _handle_linux_list_groups(db: Database, args: dict) -> Any:
     groups = linux_tools.list_groups()
     return {"count": len(groups), "groups": groups}
 
+
 def _handle_linux_failed_services(db: Database, args: dict) -> Any:
     services = linux_tools.get_failed_services()
     return {"count": len(services), "services": [asdict(s) for s in services]}
+
 
 def _handle_linux_firewall_status(db: Database, args: dict) -> Any:
     status = linux_tools.get_firewall_status()
@@ -1062,13 +1407,7 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
         if not isinstance(glob, str) or not glob:
             raise ToolError(code="invalid_args", message="glob is required")
         repo_root = _repo_root(db)
-        return sorted(
-            [
-                str(p.relative_to(repo_root))
-                for p in repo_root.glob(glob)
-                if p.is_file()
-            ]
-        )
+        return sorted([str(p.relative_to(repo_root)) for p in repo_root.glob(glob) if p.is_file()])
 
     if name == "reos_repo_read_file":
         repo_root = _repo_root(db)
@@ -1096,7 +1435,11 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
 
         max_lines = 400
         if end_i - start_i + 1 > max_lines:
-            raise ToolError(code="range_too_large", message="Requested range too large", data={"max_lines": max_lines})
+            raise ToolError(
+                code="range_too_large",
+                message="Requested range too large",
+                data={"max_lines": max_lines},
+            )
 
         lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines()
         return "\n".join(lines[start_i - 1 : end_i])
@@ -1269,6 +1612,7 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
 
     if name == "system_index_status":
         from .system_index import SystemIndexer
+
         indexer = SystemIndexer(db)
         snapshot = indexer.get_latest_snapshot()
         needs_refresh = indexer.needs_refresh()
@@ -1282,6 +1626,7 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
 
     if name == "system_index_refresh":
         from .system_index import SystemIndexer
+
         indexer = SystemIndexer(db)
         snapshot = indexer.capture_snapshot()
         return {
@@ -1294,6 +1639,7 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
 
     if name == "system_index_view":
         from .system_index import SystemIndexer, build_rag_context
+
         indexer = SystemIndexer(db)
         snapshot = indexer.get_latest_snapshot()
         if snapshot is None:
@@ -1604,6 +1950,7 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
 
     if name == "reos_get_architecture":
         from pathlib import Path
+
         arch_path = Path(__file__).parent / "architecture" / "ARCHITECTURE.md"
 
         if arch_path.exists():
@@ -1647,7 +1994,8 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
             try:
                 path = play_root()
                 return str(path) if path.exists() else None
-            except Exception:
+            except Exception as e:
+                cairn_logger.debug("Failed to get play path: %s", e)
                 return None
 
         cairn_logger = logging.getLogger("reos.cairn")
@@ -1657,17 +2005,22 @@ def call_tool(db: Database, *, name: str, arguments: dict[str, Any] | None) -> A
             play_path = get_current_play_path(db)
             if not play_path:
                 cairn_logger.warning("CAIRN tool %s failed: No Play path configured", name)
-                return {"error": "No Play path configured. Select or create an Act first.", "tool": name}
+                return {
+                    "error": "No Play path configured. Select or create an Act first.",
+                    "tool": name,
+                }
 
             store_path = Path(play_path) / ".cairn" / "cairn.db"
             store = CairnStore(store_path)
 
             # Get LLM for entity resolution (cheap local inference)
             from reos.providers import get_provider
+
             try:
                 llm = get_provider(db)
-            except Exception:
-                llm = None  # Fallback to fuzzy match if no LLM available
+            except Exception as e:
+                cairn_logger.warning("LLM provider unavailable, falling back to fuzzy match: %s", e)
+                llm = None
 
             handler = CairnToolHandler(store=store, llm=llm)
 

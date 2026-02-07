@@ -41,8 +41,10 @@ def get_conversation_id() -> str | None:
             content = CONVERSATION_FILE.read_text().strip()
             if content:
                 return content
-    except Exception:
-        pass
+    except (OSError, PermissionError) as e:
+        import logging
+
+        logging.getLogger(__name__).debug("Failed to read conversation file: %s", e)
     return None
 
 
@@ -50,8 +52,10 @@ def save_conversation_id(conversation_id: str) -> None:
     """Save conversation ID to file for context continuity."""
     try:
         CONVERSATION_FILE.write_text(conversation_id)
-    except Exception:
-        pass  # Best effort
+    except (OSError, PermissionError) as e:
+        import logging
+
+        logging.getLogger(__name__).warning("Failed to save conversation ID: %s", e)
 
 
 def clear_conversation() -> None:
@@ -59,8 +63,10 @@ def clear_conversation() -> None:
     try:
         if CONVERSATION_FILE.exists():
             CONVERSATION_FILE.unlink()
-    except Exception:
-        pass
+    except (OSError, PermissionError) as e:
+        import logging
+
+        logging.getLogger(__name__).debug("Failed to clear conversation file: %s", e)
 
 
 def read_user_input(prompt_text: str = "") -> str:
@@ -126,7 +132,9 @@ def clear_thinking() -> None:
     print(" " * 30, end="\r", file=sys.stderr)
 
 
-def print_processing_summary(response: ChatResponse, *, quiet: bool = False, show_approval_hint: bool = True) -> None:
+def print_processing_summary(
+    response: ChatResponse, *, quiet: bool = False, show_approval_hint: bool = True
+) -> None:
     """Print a summary of what ReOS did during processing.
 
     This shows tool calls, pending approvals, and other metadata
@@ -190,7 +198,10 @@ def print_processing_summary(response: ChatResponse, *, quiet: bool = False, sho
                 error = tc.get("error", {})
                 preview = f" → {error.get('message', 'failed')}" if error else ""
 
-            print(f"    {status} {tool_emoji} {colorize(display_name, 'cyan')}{colorize(preview, 'dim')}", file=sys.stderr)
+            print(
+                f"    {status} {tool_emoji} {colorize(display_name, 'cyan')}{colorize(preview, 'dim')}",
+                file=sys.stderr,
+            )
 
         has_output = True
 
@@ -257,9 +268,9 @@ def prompt_for_approval() -> str | None:
     print(file=sys.stderr)
     print(colorize("─" * 50, "dim"), file=sys.stderr)
     print(
-        colorize("🔐 ", "yellow") +
-        colorize("Proceed with this plan? ", "bold") +
-        colorize("[y/n/q]: ", "dim"),
+        colorize("🔐 ", "yellow")
+        + colorize("Proceed with this plan? ", "bold")
+        + colorize("[y/n/q]: ", "dim"),
         end="",
         file=sys.stderr,
     )
@@ -402,17 +413,20 @@ Shell Integration:
         help="Natural language prompt (e.g., 'list all python files')",
     )
     parser.add_argument(
-        "--quiet", "-q",
+        "--quiet",
+        "-q",
         action="store_true",
         help="Suppress header and progress indicators (output only)",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Show detailed processing information",
     )
     parser.add_argument(
-        "--new", "-n",
+        "--new",
+        "-n",
         action="store_true",
         help="Start a new conversation (clear previous context)",
     )
@@ -422,7 +436,8 @@ Shell Integration:
         help="Mode for command_not_found_handle (confirms before processing)",
     )
     parser.add_argument(
-        "--version", "-V",
+        "--version",
+        "-V",
         action="version",
         version="%(prog)s 0.0.0a0 (Talking Rock)",
     )
@@ -448,7 +463,9 @@ Shell Integration:
     # In command-not-found mode, confirm before processing
     if args.command_not_found:
         print(colorize("ReOS:", "cyan"), f"'{prompt}' is not a command.", file=sys.stderr)
-        print(colorize("      ", "cyan"), "Treat as natural language? [Y/n] ", end="", file=sys.stderr)
+        print(
+            colorize("      ", "cyan"), "Treat as natural language? [Y/n] ", end="", file=sys.stderr
+        )
         sys.stderr.flush()
 
         try:

@@ -146,8 +146,8 @@ def _extract_docx(file_path: Path) -> tuple[str, dict[str, Any]]:
             metadata["title"] = doc.core_properties.title
         if doc.core_properties.author:
             metadata["author"] = doc.core_properties.author
-    except Exception:
-        pass  # Core properties may not be available
+    except (AttributeError, KeyError) as e:
+        logger.debug("Could not extract DOCX core properties: %s", e)
 
     return full_text, metadata
 
@@ -260,9 +260,7 @@ def _extract_excel(file_path: Path) -> tuple[str, dict[str, Any]]:
             continue
 
         # Find actual data bounds (skip empty rows/cols)
-        non_empty_rows = [
-            row for row in rows if any(cell is not None for cell in row)
-        ]
+        non_empty_rows = [row for row in rows if any(cell is not None for cell in row)]
 
         if not non_empty_rows:
             continue
@@ -284,7 +282,9 @@ def _extract_excel(file_path: Path) -> tuple[str, dict[str, Any]]:
         for row in non_empty_rows[1:]:
             cells = [str(cell) if cell is not None else "" for cell in row]
             # Pad to header length
-            cells = cells + [""] * (len(headers) - len(cells)) if len(cells) < len(headers) else cells
+            cells = (
+                cells + [""] * (len(headers) - len(cells)) if len(cells) < len(headers) else cells
+            )
             lines.append("| " + " | ".join(cells[: len(headers)]) + " |")
 
         sheets_text.append("\n".join(lines))

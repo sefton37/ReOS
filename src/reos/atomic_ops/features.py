@@ -13,9 +13,12 @@ The 3x2x3 taxonomy requires understanding:
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
+
+logger = logging.getLogger(__name__)
 
 from .models import Features
 
@@ -24,53 +27,167 @@ if TYPE_CHECKING:
 
 # Verb patterns for classification
 IMPERATIVE_VERBS = {
-    "show", "display", "print", "list", "get", "fetch", "find", "search",
-    "create", "make", "add", "write", "save", "store",
-    "run", "execute", "start", "stop", "kill", "restart",
-    "delete", "remove", "clear", "clean",
-    "update", "modify", "change", "edit", "rename", "move",
-    "install", "uninstall", "download", "upload",
-    "open", "close", "launch", "exit",
-    "help", "explain", "describe", "tell", "what", "how", "why",
+    "show",
+    "display",
+    "print",
+    "list",
+    "get",
+    "fetch",
+    "find",
+    "search",
+    "create",
+    "make",
+    "add",
+    "write",
+    "save",
+    "store",
+    "run",
+    "execute",
+    "start",
+    "stop",
+    "kill",
+    "restart",
+    "delete",
+    "remove",
+    "clear",
+    "clean",
+    "update",
+    "modify",
+    "change",
+    "edit",
+    "rename",
+    "move",
+    "install",
+    "uninstall",
+    "download",
+    "upload",
+    "open",
+    "close",
+    "launch",
+    "exit",
+    "help",
+    "explain",
+    "describe",
+    "tell",
+    "what",
+    "how",
+    "why",
 }
 
 IMMEDIATE_VERBS = {
-    "now", "immediately", "quick", "fast", "asap", "right away",
-    "hurry", "urgent", "quickly",
+    "now",
+    "immediately",
+    "quick",
+    "fast",
+    "asap",
+    "right away",
+    "hurry",
+    "urgent",
+    "quickly",
 }
 
 # Domain keyword patterns
 CODE_KEYWORDS = {
-    "code", "function", "class", "method", "variable", "bug", "error",
-    "test", "debug", "compile", "build", "deploy", "refactor",
-    "import", "export", "module", "package", "library", "api",
-    "python", "javascript", "typescript", "rust", "java", "go",
+    "code",
+    "function",
+    "class",
+    "method",
+    "variable",
+    "bug",
+    "error",
+    "test",
+    "debug",
+    "compile",
+    "build",
+    "deploy",
+    "refactor",
+    "import",
+    "export",
+    "module",
+    "package",
+    "library",
+    "api",
+    "python",
+    "javascript",
+    "typescript",
+    "rust",
+    "java",
+    "go",
 }
 
 SYSTEM_KEYWORDS = {
-    "memory", "cpu", "disk", "process", "service", "port", "network",
-    "file", "folder", "directory", "permission", "user", "group",
-    "install", "package", "apt", "dnf", "pacman", "systemctl",
-    "docker", "container", "pod", "kubernetes",
+    "memory",
+    "cpu",
+    "disk",
+    "process",
+    "service",
+    "port",
+    "network",
+    "file",
+    "folder",
+    "directory",
+    "permission",
+    "user",
+    "group",
+    "install",
+    "package",
+    "apt",
+    "dnf",
+    "pacman",
+    "systemctl",
+    "docker",
+    "container",
+    "pod",
+    "kubernetes",
 }
 
 GIT_KEYWORDS = {
-    "git", "commit", "push", "pull", "merge", "branch", "checkout",
-    "rebase", "stash", "diff", "log", "status", "clone", "remote",
+    "git",
+    "commit",
+    "push",
+    "pull",
+    "merge",
+    "branch",
+    "checkout",
+    "rebase",
+    "stash",
+    "diff",
+    "log",
+    "status",
+    "clone",
+    "remote",
 }
 
 TEST_KEYWORDS = {
-    "test", "pytest", "unittest", "coverage", "assert", "mock",
-    "fixture", "spec", "tdd", "bdd",
+    "test",
+    "pytest",
+    "unittest",
+    "coverage",
+    "assert",
+    "mock",
+    "fixture",
+    "spec",
+    "tdd",
+    "bdd",
 }
 
 FILE_OPERATION_KEYWORDS = {
-    "save", "write", "create", "delete", "remove", "move", "copy",
-    "rename", "backup", "restore", "export", "import",
+    "save",
+    "write",
+    "create",
+    "delete",
+    "remove",
+    "move",
+    "copy",
+    "rename",
+    "backup",
+    "restore",
+    "export",
+    "import",
 }
 
 # File extension patterns
-FILE_EXTENSION_PATTERN = re.compile(r'\.\w{1,10}(?:\s|$|[,\)\]\}])')
+FILE_EXTENSION_PATTERN = re.compile(r"\.\w{1,10}(?:\s|$|[,\)\]\}])")
 CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".c", ".cpp", ".h"}
 DOC_EXTENSIONS = {".md", ".txt", ".doc", ".docx", ".pdf", ".rst"}
 CONFIG_EXTENSIONS = {".json", ".yaml", ".yml", ".toml", ".ini", ".conf", ".env"}
@@ -108,15 +225,16 @@ class FeatureExtractor:
         """
         try:
             from sentence_transformers import SentenceTransformer
+
             self._embedding_model = SentenceTransformer(model_name)
             self._model_loaded = True
             return True
         except ImportError:
-            # sentence-transformers not installed
+            logger.debug("sentence-transformers not installed, embeddings unavailable")
             self._model_loaded = False
             return False
-        except Exception:
-            # Model download or load failed
+        except Exception as e:
+            logger.warning("Failed to load embedding model %s: %s", model_name, e)
             self._model_loaded = False
             return False
 
@@ -213,7 +331,7 @@ class FeatureExtractor:
     def _tokenize(self, text: str) -> list[str]:
         """Simple tokenization."""
         # Split on whitespace and punctuation
-        return re.findall(r'\b\w+\b', text)
+        return re.findall(r"\b\w+\b", text)
 
     def _extract_pos(self, words: list[str]) -> tuple[set[str], set[str]]:
         """Extract verbs and nouns (simplified POS tagging).
@@ -260,9 +378,21 @@ class FeatureExtractor:
     def _has_interrogative(self, text: str) -> bool:
         """Check for question markers."""
         text_lower = text.lower()
-        return (
-            "?" in text or
-            text_lower.startswith(("what", "how", "why", "when", "where", "who", "which", "is ", "are ", "can ", "do ", "does "))
+        return "?" in text or text_lower.startswith(
+            (
+                "what",
+                "how",
+                "why",
+                "when",
+                "where",
+                "who",
+                "which",
+                "is ",
+                "are ",
+                "can ",
+                "do ",
+                "does ",
+            )
         )
 
     def _has_conditional(self, text: str) -> bool:
@@ -273,12 +403,15 @@ class FeatureExtractor:
     def _has_negation(self, text: str) -> bool:
         """Check for negation markers."""
         text_lower = text.lower()
-        return any(word in text_lower for word in ["not", "don't", "doesn't", "won't", "can't", "never", "no "])
+        return any(
+            word in text_lower
+            for word in ["not", "don't", "doesn't", "won't", "can't", "never", "no "]
+        )
 
     def _count_sentences(self, text: str) -> int:
         """Count sentences in text."""
         # Simple heuristic: count sentence-ending punctuation
-        return max(1, len(re.findall(r'[.!?]+', text)))
+        return max(1, len(re.findall(r"[.!?]+", text)))
 
     def _detect_languages(self, text: str) -> list[str]:
         """Detect programming languages mentioned."""
@@ -322,6 +455,7 @@ class FeatureExtractor:
 def embeddings_to_array(embeddings_bytes: bytes) -> list[float]:
     """Convert embeddings bytes back to float array."""
     import numpy as np
+
     return np.frombuffer(embeddings_bytes, dtype=np.float32).tolist()
 
 
