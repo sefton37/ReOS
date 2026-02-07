@@ -37,56 +37,61 @@ logger = logging.getLogger(__name__)
 
 class IntentCategory(Enum):
     """Categories of user intent."""
-    CALENDAR = auto()      # Calendar/schedule questions
-    CONTACTS = auto()      # Contact/people questions
-    SYSTEM = auto()        # System/computer questions
-    CODE = auto()          # Code/development questions
-    PERSONAL = auto()      # Personal questions (about user)
-    TASKS = auto()         # Task/todo questions
-    KNOWLEDGE = auto()     # Knowledge base questions
-    PLAY = auto()          # The Play hierarchy (Acts, Scenes, Beats)
-    UNDO = auto()          # User wants to undo/revert last action
-    FEEDBACK = auto()      # Meta-commentary about CAIRN's responses
-    UNKNOWN = auto()       # Cannot determine
+
+    CALENDAR = auto()  # Calendar/schedule questions
+    CONTACTS = auto()  # Contact/people questions
+    SYSTEM = auto()  # System/computer questions
+    CODE = auto()  # Code/development questions
+    PERSONAL = auto()  # Personal questions (about user)
+    TASKS = auto()  # Task/todo questions
+    KNOWLEDGE = auto()  # Knowledge base questions
+    PLAY = auto()  # The Play hierarchy (Acts, Scenes, Beats)
+    UNDO = auto()  # User wants to undo/revert last action
+    FEEDBACK = auto()  # Meta-commentary about CAIRN's responses
+    UNKNOWN = auto()  # Cannot determine
 
 
 class IntentAction(Enum):
     """Types of actions the user might want."""
-    VIEW = auto()          # View/list/show
-    SEARCH = auto()        # Search/find
-    CREATE = auto()        # Create/add
-    UPDATE = auto()        # Update/modify
-    DELETE = auto()        # Delete/remove
-    STATUS = auto()        # Check status
+
+    VIEW = auto()  # View/list/show
+    SEARCH = auto()  # Search/find
+    CREATE = auto()  # Create/add
+    UPDATE = auto()  # Update/modify
+    DELETE = auto()  # Delete/remove
+    STATUS = auto()  # Check status
     UNKNOWN = auto()
 
 
 @dataclass
 class ExtractedIntent:
     """Result of intent extraction (Stage 1)."""
+
     category: IntentCategory
     action: IntentAction
-    target: str              # What the user is asking about
+    target: str  # What the user is asking about
     parameters: dict[str, Any] = field(default_factory=dict)
     confidence: float = 0.0  # 0-1, how confident we are
-    raw_input: str = ""      # Original user input
-    reasoning: str = ""      # Why we classified this way
+    raw_input: str = ""  # Original user input
+    reasoning: str = ""  # Why we classified this way
 
 
 @dataclass
 class VerifiedIntent:
     """Result of intent verification (Stage 2)."""
+
     intent: ExtractedIntent
     verified: bool
-    tool_name: str | None    # The tool to use, if verified
+    tool_name: str | None  # The tool to use, if verified
     tool_args: dict[str, Any] = field(default_factory=dict)
-    reason: str = ""         # Why verified or not
+    reason: str = ""  # Why verified or not
     fallback_message: str | None = None  # Message if we can't help
 
 
 @dataclass
 class IntentResult:
     """Final result after tool execution and response generation."""
+
     verified_intent: VerifiedIntent
     tool_result: dict[str, Any] | None
     response: str
@@ -96,86 +101,224 @@ class IntentResult:
 # Intent category keywords for pattern matching (fast path before LLM)
 INTENT_PATTERNS: dict[IntentCategory, list[str]] = {
     IntentCategory.CALENDAR: [
-        "calendar", "schedule", "appointment", "meeting", "event",
-        "today", "tomorrow", "this week", "next week",
-        "when am i", "what's on", "what do i have",
+        "calendar",
+        "schedule",
+        "appointment",
+        "meeting",
+        "event",
+        "today",
+        "tomorrow",
+        "this week",
+        "next week",
+        "when am i",
+        "what's on",
+        "what do i have",
     ],
     IntentCategory.CONTACTS: [
-        "contact", "person", "people", "who is", "email address",
-        "phone number", "reach out to",
+        "contact",
+        "person",
+        "people",
+        "who is",
+        "email address",
+        "phone number",
+        "reach out to",
     ],
     IntentCategory.SYSTEM: [
-        "cpu", "memory", "ram", "disk", "storage", "process",
-        "service", "package", "docker", "container", "system",
-        "computer", "machine", "uptime", "running",
+        "cpu",
+        "memory",
+        "ram",
+        "disk",
+        "storage",
+        "process",
+        "service",
+        "package",
+        "docker",
+        "container",
+        "system",
+        "computer",
+        "machine",
+        "uptime",
+        "running",
     ],
     IntentCategory.TASKS: [
-        "todo", "task", "reminder", "due", "deadline",
-        "what should i", "what do i need to",
+        "todo",
+        "task",
+        "reminder",
+        "due",
+        "deadline",
+        "what should i",
+        "what do i need to",
     ],
     IntentCategory.PERSONAL: [
-        "about me", "my goals", "my values", "who am i",
-        "my story", "my identity", "tell me about myself",
+        "about me",
+        "my goals",
+        "my values",
+        "who am i",
+        "my story",
+        "my identity",
+        "tell me about myself",
         # Response formatting preferences
-        "be more", "be less", "shorter", "longer", "brief",
-        "verbose", "concise", "detailed", "bullet points",
-        "format your", "formatting of your", "your response",
-        "your answer", "how you respond", "the way you",
+        "be more",
+        "be less",
+        "shorter",
+        "longer",
+        "brief",
+        "verbose",
+        "concise",
+        "detailed",
+        "bullet points",
+        "format your",
+        "formatting of your",
+        "your response",
+        "your answer",
+        "how you respond",
+        "the way you",
     ],
     IntentCategory.PLAY: [
         # Acts
-        "act", "acts", "create act", "new act", "delete act", "remove act",
-        "list acts", "show acts", "my acts", "all acts",
+        "act",
+        "acts",
+        "create act",
+        "new act",
+        "delete act",
+        "remove act",
+        "list acts",
+        "show acts",
+        "my acts",
+        "all acts",
         # Scenes
-        "scene", "scenes", "create scene", "new scene", "delete scene",
-        "list scenes", "show scenes",
+        "scene",
+        "scenes",
+        "create scene",
+        "new scene",
+        "delete scene",
+        "list scenes",
+        "show scenes",
         # Beats
-        "beat", "beats", "create beat", "new beat", "delete beat",
-        "list beats", "show beats", "move beat", "move to",
+        "beat",
+        "beats",
+        "create beat",
+        "new beat",
+        "delete beat",
+        "list beats",
+        "show beats",
+        "move beat",
+        "move to",
         # Organization
-        "should be in", "belongs to", "put in", "organize", "reorganize",
-        "not your story", "wrong act", "different act",
+        "should be in",
+        "belongs to",
+        "put in",
+        "organize",
+        "reorganize",
+        "not your story",
+        "wrong act",
+        "different act",
         # The Play
-        "the play", "my play",
+        "the play",
+        "my play",
     ],
     IntentCategory.UNDO: [
         # Direct undo requests
-        "undo", "undo that", "undo it", "undo this",
+        "undo",
+        "undo that",
+        "undo it",
+        "undo this",
         # Revert/reverse
-        "revert", "revert that", "reverse", "reverse that",
+        "revert",
+        "revert that",
+        "reverse",
+        "reverse that",
         # Put back / go back
-        "put it back", "put that back", "move it back", "go back",
+        "put it back",
+        "put that back",
+        "move it back",
+        "go back",
         # Cancel / nevermind
-        "nevermind", "never mind", "cancel that", "cancel it",
+        "nevermind",
+        "never mind",
+        "cancel that",
+        "cancel it",
         # Regret
-        "i didn't mean", "didn't mean that", "that was wrong", "wrong one",
-        "take it back", "take that back",
+        "i didn't mean",
+        "didn't mean that",
+        "that was wrong",
+        "wrong one",
+        "take it back",
+        "take that back",
     ],
     IntentCategory.FEEDBACK: [
         # Repetition complaints
-        "repeating yourself", "you already said", "said that already",
-        "you just said", "same thing", "same answer",
+        "repeating yourself",
+        "you already said",
+        "said that already",
+        "you just said",
+        "same thing",
+        "same answer",
         # Correction/disagreement
-        "that's not what", "not what i meant", "not what i asked",
-        "wrong answer", "incorrect", "misunderstood",
-        "bad assumption", "wrong assumption",
+        "that's not what",
+        "not what i meant",
+        "not what i asked",
+        "wrong answer",
+        "incorrect",
+        "misunderstood",
+        "bad assumption",
+        "wrong assumption",
         # Quality feedback
-        "that was helpful", "that was good", "that was bad",
-        "not helpful", "confusing", "makes no sense",
+        "that was helpful",
+        "that was good",
+        "that was bad",
+        "not helpful",
+        "confusing",
+        "makes no sense",
         # Meta about CAIRN behavior
-        "why did you", "why are you", "stop doing that",
-        "don't do that", "you should", "you shouldn't",
+        "why did you",
+        "why are you",
+        "stop doing that",
+        "don't do that",
+        "you should",
+        "you shouldn't",
     ],
 }
 
 # Code-related nouns that indicate actual code intent (not just "formatting")
 CODE_INDICATOR_NOUNS = {
-    "code", "function", "class", "method", "variable", "file",
-    "script", "program", "module", "package", "library", "api",
-    "bug", "error", "exception", "debug", "test", "compile",
-    "syntax", "logic", "algorithm", "loop", "array", "string",
-    "python", "javascript", "rust", "java", "html", "css", "sql",
-    "git", "commit", "branch", "merge", "repo", "repository",
+    "code",
+    "function",
+    "class",
+    "method",
+    "variable",
+    "file",
+    "script",
+    "program",
+    "module",
+    "package",
+    "library",
+    "api",
+    "bug",
+    "error",
+    "exception",
+    "debug",
+    "test",
+    "compile",
+    "syntax",
+    "logic",
+    "algorithm",
+    "loop",
+    "array",
+    "string",
+    "python",
+    "javascript",
+    "rust",
+    "java",
+    "html",
+    "css",
+    "sql",
+    "git",
+    "commit",
+    "branch",
+    "merge",
+    "repo",
+    "repository",
 }
 
 # Tool mappings for each category (default tool - may be refined in _verify_intent)
@@ -207,7 +350,7 @@ class CairnIntentEngine:
         Args:
             llm: LLM provider for intent extraction
             available_tools: Set of available tool names (for verification)
-            play_data: Dictionary with 'acts' and 'beats' lists for context
+            play_data: Dictionary with 'acts' and 'all_scenes' lists for context
         """
         self.llm = llm
         self.available_tools = available_tools or set()
@@ -222,6 +365,7 @@ class CairnIntentEngine:
         *,
         execute_tool: Any | None = None,  # Callable to execute tools
         persona_context: str = "",
+        conversation_context: str = "",
     ) -> IntentResult:
         """Process user input through all stages.
 
@@ -229,6 +373,7 @@ class CairnIntentEngine:
             user_input: The user's message
             execute_tool: Function to call tools: (name, args) -> result
             persona_context: Context about the user (from THE_PLAY)
+            conversation_context: Recent conversation history for continuity
 
         Returns:
             IntentResult with the final response
@@ -240,7 +385,7 @@ class CairnIntentEngine:
         observer.emit(
             ConsciousnessEventType.PHASE_START,
             "Stage 1: Intent Extraction",
-            f"Analyzing: \"{user_input[:100]}{'...' if len(user_input) > 100 else ''}\"",
+            f'Analyzing: "{user_input[:100]}{"..." if len(user_input) > 100 else ""}"',
         )
         logger.debug("Stage 1: Extracting intent from: %r", user_input[:100])
         intent = self._extract_intent(user_input)
@@ -256,7 +401,12 @@ class CairnIntentEngine:
             action=intent.action.name,
             confidence=intent.confidence,
         )
-        logger.debug("Stage 1 result: category=%s, action=%s, confidence=%.2f", intent.category.name, intent.action.name, intent.confidence)
+        logger.debug(
+            "Stage 1 result: category=%s, action=%s, confidence=%.2f",
+            intent.category.name,
+            intent.action.name,
+            intent.confidence,
+        )
 
         # Stage 2: Verify intent
         observer.emit(
@@ -268,11 +418,16 @@ class CairnIntentEngine:
         verified = self._verify_intent(intent)
         observer.emit(
             ConsciousnessEventType.INTENT_VERIFIED,
-            f"Verified: {verified.verified}" + (f" → {verified.tool_name}" if verified.tool_name else ""),
+            f"Verified: {verified.verified}"
+            + (f" → {verified.tool_name}" if verified.tool_name else ""),
             f"Verified: {verified.verified}\n"
             f"Tool: {verified.tool_name or 'None (no tool needed)'}\n"
             f"Reason: {verified.reason}\n"
-            + (f"Tool Args: {json.dumps(verified.tool_args, indent=2)}" if verified.tool_args else ""),
+            + (
+                f"Tool Args: {json.dumps(verified.tool_args, indent=2)}"
+                if verified.tool_args
+                else ""
+            ),
             verified=verified.verified,
             tool=verified.tool_name,
         )
@@ -289,7 +444,9 @@ class CairnIntentEngine:
                 f"Arguments: {json.dumps(verified.tool_args, indent=2, default=str)}",
                 tool=verified.tool_name,
             )
-            logger.debug("Stage 3: Executing tool %s with args %s", verified.tool_name, verified.tool_args)
+            logger.debug(
+                "Stage 3: Executing tool %s with args %s", verified.tool_name, verified.tool_args
+            )
             try:
                 tool_result = execute_tool(verified.tool_name, verified.tool_args)
                 all_tool_results.append({"tool": verified.tool_name, "result": tool_result})
@@ -351,6 +508,7 @@ class CairnIntentEngine:
             persona_context=persona_context,
             user_input=user_input,
             execute_tool=execute_tool,
+            conversation_context=conversation_context,
         )
         logger.debug("Stage 4 response: %s...", response[:200])
 
@@ -421,10 +579,16 @@ class CairnIntentEngine:
                         if not has_code_noun:
                             # No code nouns - this might be about response formatting
                             # Check if it's about CAIRN's responses (PERSONAL preference)
-                            if any(p in user_lower for p in [
-                                "your response", "your answer", "the way you",
-                                "how you respond", "formatting of your",
-                            ]):
+                            if any(
+                                p in user_lower
+                                for p in [
+                                    "your response",
+                                    "your answer",
+                                    "the way you",
+                                    "how you respond",
+                                    "formatting of your",
+                                ]
+                            ):
                                 category = IntentCategory.PERSONAL
                             else:
                                 # Skip CODE, let it fall through to other categories or LLM
@@ -436,7 +600,10 @@ class CairnIntentEngine:
                         action = IntentAction.CREATE
                     elif any(w in user_lower for w in ["find", "search", "look for", "where"]):
                         action = IntentAction.SEARCH
-                    elif any(w in user_lower for w in ["update", "change", "modify", "edit", "move", "assign", "put"]):
+                    elif any(
+                        w in user_lower
+                        for w in ["update", "change", "modify", "edit", "move", "assign", "put"]
+                    ):
                         action = IntentAction.UPDATE
                     elif any(w in user_lower for w in ["delete", "remove", "cancel"]):
                         action = IntentAction.DELETE
@@ -659,8 +826,14 @@ Be precise. Output ONLY valid JSON."""
             # Check if this is a move operation (updating act_id)
             user_lower = intent.raw_input.lower()
             move_patterns = [
-                "should be moved", "move to", "moved to", "should be in",
-                "belongs to", "put in", "wrong act", "different act",
+                "should be moved",
+                "move to",
+                "moved to",
+                "should be in",
+                "belongs to",
+                "put in",
+                "wrong act",
+                "different act",
             ]
             is_move = any(p in user_lower for p in move_patterns)
 
@@ -721,7 +894,11 @@ Be precise. Output ONLY valid JSON."""
 
         # Pattern: "in X" (act context)
         if "act" in user_lower:
-            match = re.search(r"(?:in|from|to)\s+(?:the\s+)?([A-Za-z][A-Za-z\s]+?)(?:\s+act|\s*$|,|\.)", user_input, re.IGNORECASE)
+            match = re.search(
+                r"(?:in|from|to)\s+(?:the\s+)?([A-Za-z][A-Za-z\s]+?)(?:\s+act|\s*$|,|\.)",
+                user_input,
+                re.IGNORECASE,
+            )
             if match:
                 return match.group(1).strip()
 
@@ -744,12 +921,16 @@ Be precise. Output ONLY valid JSON."""
     def _extract_beat_name(self, user_input: str) -> str | None:
         """Extract a beat name from user input."""
         # Pattern: "the X beat" or "X beat"
-        match = re.search(r"(?:the\s+)?([A-Za-z][A-Za-z\s]+?)\s+(?:beat|event)", user_input, re.IGNORECASE)
+        match = re.search(
+            r"(?:the\s+)?([A-Za-z][A-Za-z\s]+?)\s+(?:beat|event)", user_input, re.IGNORECASE
+        )
         if match:
             return match.group(1).strip()
 
         # Pattern: "beat called/named X"
-        match = re.search(r"(?:beat|event)\s+(?:called|named)\s+[\"']?([^\"']+)[\"']?", user_input.lower())
+        match = re.search(
+            r"(?:beat|event)\s+(?:called|named)\s+[\"']?([^\"']+)[\"']?", user_input.lower()
+        )
         if match:
             return match.group(1).strip()
 
@@ -762,7 +943,7 @@ Be precise. Output ONLY valid JSON."""
         # Pattern: "create/add/new X called/named Y"
         match = re.search(
             rf"(?:create|add|new|make)\s+(?:a\s+)?(?:new\s+)?{entity_type}\s+(?:called|named)\s+[\"']?([^\"']+)[\"']?",
-            user_lower
+            user_lower,
         )
         if match:
             return match.group(1).strip()
@@ -771,7 +952,7 @@ Be precise. Output ONLY valid JSON."""
         match = re.search(
             rf"(?:create|add|new|make)\s+(?:a\s+)?(?:new\s+)?{entity_type}\s+([A-Za-z][A-Za-z\s]+?)(?:\s+in|\s+for|$|,|\.)",
             user_input,
-            re.IGNORECASE
+            re.IGNORECASE,
         )
         if match:
             title = match.group(1).strip()
@@ -783,7 +964,7 @@ Be precise. Output ONLY valid JSON."""
         match = re.search(
             rf"([A-Za-z][A-Za-z\s]+?)\s+(?:as\s+)?(?:a\s+)?(?:new\s+)?{entity_type}",
             user_input,
-            re.IGNORECASE
+            re.IGNORECASE,
         )
         if match:
             return match.group(1).strip()
@@ -795,7 +976,9 @@ Be precise. Output ONLY valid JSON."""
         user_lower = user_input.lower()
 
         # Pattern: "rename to X" or "change to X"
-        match = re.search(r"(?:rename|change|update)\s+(?:it\s+)?to\s+[\"']?([^\"']+)[\"']?", user_lower)
+        match = re.search(
+            r"(?:rename|change|update)\s+(?:it\s+)?to\s+[\"']?([^\"']+)[\"']?", user_lower
+        )
         if match:
             return match.group(1).strip()
 
@@ -857,7 +1040,11 @@ Be precise. Output ONLY valid JSON."""
         if any(w in user_lower for w in ["mark as", "set to", "change to", "move to"]):
             if "planning" in user_lower:
                 args["stage"] = "planning"
-            elif "in progress" in user_lower or "in_progress" in user_lower or "started" in user_lower:
+            elif (
+                "in progress" in user_lower
+                or "in_progress" in user_lower
+                or "started" in user_lower
+            ):
                 args["stage"] = "in_progress"
             elif "awaiting" in user_lower or "waiting" in user_lower or "blocked" in user_lower:
                 args["stage"] = "awaiting_data"
@@ -878,7 +1065,11 @@ Be precise. Output ONLY valid JSON."""
             logger.debug("Using LLM extraction with Play context")
             llm_args = self._llm_extract_beat_move_args(user_input)
             if llm_args.get("beat_name") and llm_args.get("target_act_name"):
-                logger.debug("LLM extracted: beat=%r, act=%r", llm_args.get('beat_name'), llm_args.get('target_act_name'))
+                logger.debug(
+                    "LLM extracted: beat=%r, act=%r",
+                    llm_args.get("beat_name"),
+                    llm_args.get("target_act_name"),
+                )
                 return llm_args
             logger.debug("LLM extraction incomplete, trying regex fallback")
 
@@ -896,7 +1087,9 @@ Be precise. Output ONLY valid JSON."""
         beats_list = self.play_data.get("all_beats", [])
 
         act_names = [a["title"] for a in acts_list]
-        beat_info = [f"'{b['title']}' (in {b['act_title']} act)" for b in beats_list[:20]]  # Limit for context
+        beat_info = [
+            f"'{b['title']}' (in {b['act_title']} act)" for b in beats_list[:20]
+        ]  # Limit for context
 
         system = f"""You are an ENTITY EXTRACTOR. Extract the beat name and target act from the user's request.
 
@@ -941,7 +1134,7 @@ IMPORTANT:
         # Pattern 1: "X should be in/for the Y act"
         match = re.search(
             r"(.+?)\s+(?:beat|event)?\s*(?:should be|belongs to|goes in|should go)\s+(?:in|to|for|under)?\s*(?:the\s+)?(.+?)\s*(?:act)?(?:,|\.|$|not)",
-            user_lower
+            user_lower,
         )
         if match:
             args["beat_name"] = match.group(1).strip()
@@ -951,7 +1144,7 @@ IMPORTANT:
         # Pattern 2: "move X to Y"
         match = re.search(
             r"(?:move|put|assign|organize)\s+(?:the\s+)?(.+?)\s+(?:beat|event)?\s*(?:to|in|into|under)\s+(?:the\s+)?(.+?)\s*(?:act)?(?:,|\.|$)",
-            user_lower
+            user_lower,
         )
         if match:
             args["beat_name"] = match.group(1).strip()
@@ -961,7 +1154,7 @@ IMPORTANT:
         # Pattern 3: "X beat/event for Y act"
         match = re.search(
             r"(.+?)\s+(?:beat|event)\s+(?:for|to)\s+(?:the\s+)?(.+?)\s*(?:act)?(?:,|\.|$)",
-            user_lower
+            user_lower,
         )
         if match:
             args["beat_name"] = match.group(1).strip()
@@ -989,7 +1182,12 @@ IMPORTANT:
                     full_phrase = " ".join(phrase)
                     if j < len(words) and words[j].lower() in ("act", "act,", "act."):
                         act_candidates.append(full_phrase)
-                    elif j < len(words) and words[j].lower() in ("beat", "event", "beat,", "event,"):
+                    elif j < len(words) and words[j].lower() in (
+                        "beat",
+                        "event",
+                        "beat,",
+                        "event,",
+                    ):
                         beat_candidates.append(full_phrase)
                     else:
                         if not beat_candidates:
@@ -1018,7 +1216,12 @@ IMPORTANT:
             logger.debug("Using LLM extraction for scene move")
             llm_args = self._llm_extract_scene_move_args(user_input)
             if llm_args.get("scene_name") and llm_args.get("new_act_name"):
-                logger.debug("LLM extracted scene move: scene=%r, from=%r, to=%r", llm_args.get('scene_name'), llm_args.get('act_name'), llm_args.get('new_act_name'))
+                logger.debug(
+                    "LLM extracted scene move: scene=%r, from=%r, to=%r",
+                    llm_args.get("scene_name"),
+                    llm_args.get("act_name"),
+                    llm_args.get("new_act_name"),
+                )
                 return llm_args
             logger.debug("LLM extraction incomplete, trying regex fallback")
 
@@ -1032,7 +1235,9 @@ IMPORTANT:
         scenes_list = self.play_data.get("all_scenes", [])
 
         act_names = [a["title"] for a in acts_list]
-        scene_info = [f"'{s['title']}' (in {s.get('act_title', 'unknown')} act)" for s in scenes_list[:30]]
+        scene_info = [
+            f"'{s['title']}' (in {s.get('act_title', 'unknown')} act)" for s in scenes_list[:30]
+        ]
 
         system = f"""You are an ENTITY EXTRACTOR. Extract the scene name, source act, and target act from the user's move request.
 
@@ -1063,8 +1268,12 @@ IMPORTANT:
             raw = self.llm.chat_json(system=system, user=user, temperature=0.1, top_p=0.9)
             data = json.loads(raw)
             result = {
-                "scene_name": data.get("scene_name", "").strip() if data.get("scene_name") else None,
-                "new_act_name": data.get("new_act_name", "").strip() if data.get("new_act_name") else None,
+                "scene_name": data.get("scene_name", "").strip()
+                if data.get("scene_name")
+                else None,
+                "new_act_name": data.get("new_act_name", "").strip()
+                if data.get("new_act_name")
+                else None,
             }
             # Only include act_name if provided (optional for tool, will be inferred)
             if data.get("act_name"):
@@ -1082,7 +1291,7 @@ IMPORTANT:
         # Pattern 1: "The X scene(s) should be moved to Y"
         match = re.search(
             r"(?:the\s+)?(.+?)\s+scenes?\s+(?:should be|should go|needs? to be)\s+(?:moved\s+)?(?:to|in)\s+(?:the\s+)?(.+?)(?:\s+act)?(?:,|\.|$)",
-            user_lower
+            user_lower,
         )
         if match:
             args["scene_name"] = match.group(1).strip()
@@ -1092,7 +1301,7 @@ IMPORTANT:
         # Pattern 2: "move X scene to Y"
         match = re.search(
             r"move\s+(?:the\s+)?(.+?)\s+(?:scene\s+)?(?:to|into)\s+(?:the\s+)?(.+?)(?:\s+act)?(?:,|\.|$)",
-            user_lower
+            user_lower,
         )
         if match:
             args["scene_name"] = match.group(1).strip()
@@ -1102,7 +1311,7 @@ IMPORTANT:
         # Pattern 3: "X belongs in Y"
         match = re.search(
             r"(.+?)\s+(?:belongs|should be)\s+(?:in|to)\s+(?:the\s+)?(.+?)(?:\s+act)?(?:,|\.|$)",
-            user_lower
+            user_lower,
         )
         if match:
             args["scene_name"] = match.group(1).strip()
@@ -1142,9 +1351,19 @@ IMPORTANT:
             return "cairn_move_beat_to_act"
 
         move_patterns = [
-            "should be in", "should be for", "belongs to", "tied to",
-            "put in", "wrong act", "not your story", "different act",
-            "reorganize", "assign to", "assign my", "link to", "associate with",
+            "should be in",
+            "should be for",
+            "belongs to",
+            "tied to",
+            "put in",
+            "wrong act",
+            "not your story",
+            "different act",
+            "reorganize",
+            "assign to",
+            "assign my",
+            "link to",
+            "associate with",
         ]
         if any(w in user_lower for w in move_patterns):
             # This is a beat move operation
@@ -1194,11 +1413,12 @@ IMPORTANT:
         persona_context: str,
         user_input: str = "",
         execute_tool: Any | None = None,
+        conversation_context: str = "",
     ) -> tuple[str, list[str]]:
         """Stage 4: Generate response strictly from tool results.
 
         If hallucination is detected, this method will:
-        1. Try to gather more data (e.g., search for beats)
+        1. Try to gather more data (e.g., search for scenes)
         2. Ask for clarification if needed
         3. Never just give up silently
         """
@@ -1211,6 +1431,13 @@ IMPORTANT:
             return self._handle_feedback(verified_intent.intent), []
 
         # Build a strict prompt that prevents hallucination
+        conversation_section = ""
+        if conversation_context:
+            conversation_section = f"""
+RECENT CONVERSATION (use for continuity - understand what "that", "it", etc. refer to):
+{conversation_context}
+"""
+
         system = f"""You are CAIRN, the Attention Minder. Generate a response based STRICTLY on the data provided.
 
 CRITICAL RULES:
@@ -1219,7 +1446,8 @@ CRITICAL RULES:
 3. Do NOT mention tools, APIs, or technical details
 4. Be conversational but factual
 5. This is a Linux desktop application - NEVER mention macOS, Windows, or other platforms
-
+6. Use the conversation history to maintain context and understand references
+{conversation_section}
 INTENT: The user asked about {verified_intent.intent.category.name.lower()} ({verified_intent.intent.action.name.lower()})
 TARGET: {verified_intent.intent.target}
 """
@@ -1402,8 +1630,9 @@ No data was retrieved. Explain that you couldn't get the requested information."
                         return (
                             f"I couldn't find the exact beat you mentioned. "
                             f"Here are your current beats:\n\n"
-                            f"• " + "\n• ".join(beat_names) +
-                            f"\n\nWhich one would you like to move? "
+                            f"• "
+                            + "\n• ".join(beat_names)
+                            + f"\n\nWhich one would you like to move? "
                             f"Please use the exact name from the list above."
                         )
             except Exception as e:
@@ -1445,20 +1674,33 @@ No data was retrieved. Explain that you couldn't get the requested information."
         user_lower = intent.raw_input.lower()
 
         # Repetition complaints
-        if any(p in user_lower for p in [
-            "repeating", "same thing", "same answer", "already said",
-            "you just said",
-        ]):
+        if any(
+            p in user_lower
+            for p in [
+                "repeating",
+                "same thing",
+                "same answer",
+                "already said",
+                "you just said",
+            ]
+        ):
             return (
                 "You're right, I apologize for repeating myself. "
                 "Let me try a different approach. What would you like to know or do?"
             )
 
         # Misunderstanding complaints
-        if any(p in user_lower for p in [
-            "not what i meant", "not what i asked", "misunderstood",
-            "wrong", "incorrect", "bad assumption",
-        ]):
+        if any(
+            p in user_lower
+            for p in [
+                "not what i meant",
+                "not what i asked",
+                "misunderstood",
+                "wrong",
+                "incorrect",
+                "bad assumption",
+            ]
+        ):
             return (
                 "I apologize for the misunderstanding. "
                 "Could you rephrase what you're looking for? "
@@ -1466,25 +1708,34 @@ No data was retrieved. Explain that you couldn't get the requested information."
             )
 
         # Quality complaints
-        if any(p in user_lower for p in [
-            "not helpful", "confusing", "makes no sense",
-        ]):
+        if any(
+            p in user_lower
+            for p in [
+                "not helpful",
+                "confusing",
+                "makes no sense",
+            ]
+        ):
             return (
                 "I'm sorry my response wasn't helpful. "
                 "Let me try again - what specifically would you like me to help with?"
             )
 
         # Positive feedback
-        if any(p in user_lower for p in [
-            "helpful", "good", "great", "thanks", "thank you",
-        ]):
+        if any(
+            p in user_lower
+            for p in [
+                "helpful",
+                "good",
+                "great",
+                "thanks",
+                "thank you",
+            ]
+        ):
             return "I'm glad I could help! Is there anything else you'd like to know?"
 
         # Generic feedback acknowledgment
-        return (
-            "Thank you for the feedback. I'll try to do better. "
-            "How can I help you?"
-        )
+        return "Thank you for the feedback. I'll try to do better. How can I help you?"
 
     def _is_response_repetitive(self, response: str) -> bool:
         """Check if a response is too similar to recent responses.
@@ -1553,18 +1804,35 @@ No data was retrieved. Explain that you couldn't get the requested information."
         if tool_result and tool_result.get("count") == 0:
             # If count is 0, response shouldn't mention specific events
             event_indicators = [
-                "meeting with", "appointment at", "event at", "scheduled for",
-                "at 10:", "at 11:", "at 12:", "at 1:", "at 2:", "at 3:", "at 4:", "at 5:",
-                "am", "pm",  # Time indicators suggesting specific events
+                "meeting with",
+                "appointment at",
+                "event at",
+                "scheduled for",
+                "at 10:",
+                "at 11:",
+                "at 12:",
+                "at 1:",
+                "at 2:",
+                "at 3:",
+                "at 4:",
+                "at 5:",
+                "am",
+                "pm",  # Time indicators suggesting specific events
             ]
             for indicator in event_indicators:
                 if indicator in response_lower:
                     return False, f"Response mentions events but data shows count=0"
 
         # For empty events list, ensure we're reporting empty correctly
-        if tool_result and isinstance(tool_result.get("events"), list) and len(tool_result.get("events", [])) == 0:
+        if (
+            tool_result
+            and isinstance(tool_result.get("events"), list)
+            and len(tool_result.get("events", [])) == 0
+        ):
             # Response should indicate empty, not list fake events
-            if any(word in response_lower for word in ["first event", "next meeting", "you have a"]):
+            if any(
+                word in response_lower for word in ["first event", "next meeting", "you have a"]
+            ):
                 return False, "Response claims events exist but events list is empty"
 
         # LLM-based verification for more complex cases
@@ -1612,6 +1880,7 @@ Is this response grounded in the data?"""
     def _format_event_time(self, iso_time: str) -> str:
         """Format ISO time to human-readable format."""
         from datetime import datetime
+
         try:
             dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
             # Format: "Tuesday, January 14 at 10:00 AM"
@@ -1622,6 +1891,7 @@ Is this response grounded in the data?"""
     def _format_event_date(self, iso_time: str) -> str:
         """Format ISO time to just the date."""
         from datetime import datetime
+
         try:
             dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
             return dt.strftime("%A, %B %d")
@@ -1711,7 +1981,9 @@ Is this response grounded in the data?"""
         answer = raw.strip()
 
         # Check for thinking tags
-        thinking_match = re.search(r"<think(?:ing)?>(.*?)</think(?:ing)?>", raw, re.DOTALL | re.IGNORECASE)
+        thinking_match = re.search(
+            r"<think(?:ing)?>(.*?)</think(?:ing)?>", raw, re.DOTALL | re.IGNORECASE
+        )
         if thinking_match:
             thinking_content = thinking_match.group(1).strip()
             thinking_steps = [s.strip() for s in thinking_content.split("\n") if s.strip()]
@@ -1722,6 +1994,8 @@ Is this response grounded in the data?"""
             answer = answer_match.group(1).strip()
         else:
             # Remove thinking tags from answer
-            answer = re.sub(r"<think(?:ing)?>.*?</think(?:ing)?>", "", answer, flags=re.DOTALL | re.IGNORECASE).strip()
+            answer = re.sub(
+                r"<think(?:ing)?>.*?</think(?:ing)?>", "", answer, flags=re.DOTALL | re.IGNORECASE
+            ).strip()
 
         return answer, thinking_steps

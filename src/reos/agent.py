@@ -13,10 +13,15 @@ from .mcp_tools import Tool, ToolError, call_tool, list_tools, render_tool_resul
 from .providers import LLMProvider, get_provider
 from .play_fs import list_acts as play_list_acts
 from .play_fs import list_scenes as play_list_scenes
-from .play_fs import list_beats as play_list_beats
 from .play_fs import read_me_markdown as play_read_me_markdown
 from .play_fs import Act
-from .reasoning import ReasoningEngine, ReasoningConfig, ComplexityLevel, TaskPlan, create_llm_planner_callback
+from .reasoning import (
+    ReasoningEngine,
+    ReasoningConfig,
+    ComplexityLevel,
+    TaskPlan,
+    create_llm_planner_callback,
+)
 from .code_mode import CodeModeRouter, CodePlanner, CodeSandbox, CodeTaskPlan
 from .system_index import get_or_refresh_context as get_system_context
 from .system_state import SteadyStateCollector
@@ -62,11 +67,16 @@ _REPO_PATH_VALUE_PATTERN = re.compile(r"^[~/.].+")
 
 # Map ordinals to numbers
 _ORDINAL_MAP = {
-    "first": 1, "1st": 1,
-    "second": 2, "2nd": 2,
-    "third": 3, "3rd": 3,
-    "fourth": 4, "4th": 4,
-    "fifth": 5, "5th": 5,
+    "first": 1,
+    "1st": 1,
+    "second": 2,
+    "2nd": 2,
+    "third": 3,
+    "3rd": 3,
+    "fourth": 4,
+    "4th": 4,
+    "fifth": 5,
+    "5th": 5,
 }
 
 
@@ -98,6 +108,7 @@ class ConversationContext:
     This consolidates all context gathering into a single object to avoid
     redundant file I/O and database queries.
     """
+
     # User input
     user_text: str
     conversation_id: str
@@ -173,10 +184,14 @@ class ChatAgent:
     - Simple tasks go direct, complex tasks get planned.
     """
 
-    def __init__(self, *, db: Database, llm: LLMProvider | None = None, use_code_mode: bool = False) -> None:
+    def __init__(
+        self, *, db: Database, llm: LLMProvider | None = None, use_code_mode: bool = False
+    ) -> None:
         self._db = db
         self._llm_override = llm
-        self._use_code_mode = use_code_mode  # Only route to code mode when explicitly requested (RIVA)
+        self._use_code_mode = (
+            use_code_mode  # Only route to code mode when explicitly requested (RIVA)
+        )
 
         # Initialize steady state collector for system knowledge (RAG)
         # This provides grounded facts about the machine
@@ -220,6 +235,9 @@ class ChatAgent:
         # Restore pending plan from database if exists
         self._restore_pending_plan()
 
+        # Cached CAIRN intent engine (persists across requests for response history)
+        self._cairn_intent_engine: Any = None
+
         # Initialize Code Mode router for repo-based coding tasks
         self._code_router = CodeModeRouter(llm=llm)
         self._code_planner: CodePlanner | None = None
@@ -251,6 +269,7 @@ class ChatAgent:
             except (json.JSONDecodeError, KeyError, TypeError) as e:
                 # Invalid plan data, clear it
                 import logging
+
                 logging.getLogger(__name__).debug("Failed to restore plan: %s", e)
                 self._clear_pending_plan()
 
@@ -270,20 +289,24 @@ class ChatAgent:
     def _save_pending_code_plan(self, plan: CodeTaskPlan) -> None:
         """Save pending code plan to database for persistence."""
         try:
-            plan_json = json.dumps({
-                "id": plan.id,
-                "goal": plan.goal,
-                "steps": [
-                    {
-                        "id": s.id,
-                        "type": s.type.value if hasattr(s.type, 'value') else str(s.type),
-                        "description": s.description,
-                        "target_path": s.target_path,
-                    }
-                    for s in plan.steps
-                ],
-                "estimated_impact": plan.estimated_impact.value if hasattr(plan.estimated_impact, 'value') else str(plan.estimated_impact),
-            })
+            plan_json = json.dumps(
+                {
+                    "id": plan.id,
+                    "goal": plan.goal,
+                    "steps": [
+                        {
+                            "id": s.id,
+                            "type": s.type.value if hasattr(s.type, "value") else str(s.type),
+                            "description": s.description,
+                            "target_path": s.target_path,
+                        }
+                        for s in plan.steps
+                    ],
+                    "estimated_impact": plan.estimated_impact.value
+                    if hasattr(plan.estimated_impact, "value")
+                    else str(plan.estimated_impact),
+                }
+            )
             self._db.set_state(key="pending_code_plan_json", value=plan_json)
             self._pending_code_plan = plan
         except Exception as e:
@@ -300,6 +323,7 @@ class ChatAgent:
                 data = json.loads(plan_json)
                 # Reconstruct minimal plan object for execution
                 from reos.code_mode import CodeStep, CodeStepType, ImpactLevel
+
                 steps = []
                 for s in data.get("steps", []):
                     try:
@@ -348,60 +372,52 @@ class ChatAgent:
             return None
 
     def _gather_play_data(self) -> dict[str, Any]:
-        """Gather The Play data (acts, scenes, and beats) for intent engine context.
+        """Gather The Play data (acts and scenes) for intent engine context.
 
         Returns:
-            Dictionary with 'acts', 'all_scenes', and 'all_beats' lists for LLM-based extraction.
+            Dictionary with 'acts' and 'all_scenes' lists for LLM-based extraction.
         """
         try:
             acts, active_id = play_list_acts()
             acts_data = []
             all_scenes = []
-            all_beats = []
 
             for act in acts:
-                acts_data.append({
-                    "act_id": act.act_id,
-                    "title": act.title,
-                    "active": act.active,
-                })
+                acts_data.append(
+                    {
+                        "act_id": act.act_id,
+                        "title": act.title,
+                        "active": act.active,
+                    }
+                )
 
                 # Get scenes for this act
                 try:
                     scenes = play_list_scenes(act_id=act.act_id)
                     for scene in scenes:
-                        all_scenes.append({
+                        scene_data: dict[str, Any] = {
                             "scene_id": scene.scene_id,
                             "title": scene.title,
                             "act_id": act.act_id,
                             "act_title": act.title,
-                        })
-                        # Get beats for this scene
-                        try:
-                            beats = play_list_beats(act_id=act.act_id, scene_id=scene.scene_id)
-                            for beat in beats:
-                                all_beats.append({
-                                    "beat_id": beat.beat_id,
-                                    "title": beat.title,
-                                    "act_id": act.act_id,
-                                    "act_title": act.title,
-                                    "scene_id": scene.scene_id,
-                                    "scene_title": scene.title,
-                                })
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                            "stage": scene.stage,
+                        }
+                        if scene.notes and scene.notes.strip():
+                            scene_data["notes"] = scene.notes.strip()[:300]
+                        if scene.calendar_event_id:
+                            scene_data["is_calendar_event"] = True
+                        all_scenes.append(scene_data)
+                except Exception as e:
+                    logger.debug("Error gathering scenes for act %s: %s", act.act_id, e)
 
             return {
                 "acts": acts_data,
                 "all_scenes": all_scenes,
-                "all_beats": all_beats,
                 "active_act_id": active_id,
             }
         except Exception as e:
             logger.debug("Error gathering play data: %s", e)
-            return {"acts": [], "all_scenes": [], "all_beats": [], "active_act_id": None}
+            return {"acts": [], "all_scenes": [], "active_act_id": None}
 
     def _get_active_act_with_repo(self) -> Act | None:
         """Get the active Act if it has a repository assigned.
@@ -417,8 +433,8 @@ class ChatAgent:
     def _slugify(self, text: str) -> str:
         """Convert text to a URL-safe slug for directory names."""
         slug = text.lower().strip()
-        slug = re.sub(r'[^\w\s-]', '', slug)
-        slug = re.sub(r'[\s_-]+', '-', slug)
+        slug = re.sub(r"[^\w\s-]", "", slug)
+        slug = re.sub(r"[\s_-]+", "-", slug)
         return slug[:50]
 
     def _get_pending_code_prerequisite(self) -> dict[str, Any] | None:
@@ -506,12 +522,18 @@ class ChatAgent:
             git_dir = path / ".git"
             if not git_dir.exists():
                 import subprocess
+
                 subprocess.run(["git", "init"], cwd=str(path), capture_output=True, check=True)
                 readme = path / "README.md"
                 if not readme.exists():
                     readme.write_text(f"# Project\n\nCreated by ReOS\n")
                 subprocess.run(["git", "add", "."], cwd=str(path), capture_output=True, check=True)
-                subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(path), capture_output=True, check=True)
+                subprocess.run(
+                    ["git", "commit", "-m", "Initial commit"],
+                    cwd=str(path),
+                    capture_output=True,
+                    check=True,
+                )
 
             # Assign to act
             assign_repo_to_act(act_id=prereq["act_id"], repo_path=str(path))
@@ -808,13 +830,15 @@ class ChatAgent:
                 role="assistant",
                 content=response_text,
                 message_type="code_plan_preview",
-                metadata=json.dumps({
-                    "code_mode": True,
-                    "plan_id": plan.id,
-                    "contract_id": contract.id,
-                    "repo_path": active_act.repo_path,
-                    "intent_goal": discovered_intent.goal,
-                }),
+                metadata=json.dumps(
+                    {
+                        "code_mode": True,
+                        "plan_id": plan.id,
+                        "contract_id": contract.id,
+                        "repo_path": active_act.repo_path,
+                        "intent_goal": discovered_intent.goal,
+                    }
+                ),
             )
 
             return ChatResponse(
@@ -873,12 +897,14 @@ class ChatAgent:
             role="assistant",
             content=result.response,
             message_type=message_type,
-            metadata=json.dumps({
-                "reasoning": True,
-                "complexity": result.complexity.level.value if result.complexity else None,
-                "plan_id": result.plan.id if result.plan else None,
-                "needs_approval": result.needs_approval,
-            }),
+            metadata=json.dumps(
+                {
+                    "reasoning": True,
+                    "complexity": result.complexity.level.value if result.complexity else None,
+                    "plan_id": result.plan.id if result.plan else None,
+                    "needs_approval": result.needs_approval,
+                }
+            ),
         )
 
         return ChatResponse(
@@ -1046,9 +1072,7 @@ class ChatAgent:
                 return prereq_result
 
         # Check for pending code plan approval (e.g., user said "yes" to proceed)
-        plan_approval_result = self._handle_pending_code_plan_approval(
-            user_text, conversation_id
-        )
+        plan_approval_result = self._handle_pending_code_plan_approval(user_text, conversation_id)
         if plan_approval_result is not None:
             return plan_approval_result
 
@@ -1061,14 +1085,13 @@ class ChatAgent:
                 # Code Mode needed - check if we have a repo
                 if active_act.repo_path:
                     # Have repo - proceed with Code Mode
-                    code_result = self._handle_code_mode(
-                        user_text, active_act, conversation_id
-                    )
+                    code_result = self._handle_code_mode(user_text, active_act, conversation_id)
                     if code_result is not None:
                         return code_result
                 else:
                     # No repo - prompt for one and save the original request
                     from pathlib import Path
+
                     suggested_path = str(Path.home() / "projects" / self._slugify(active_act.title))
 
                     self._set_pending_code_prerequisite(
@@ -1135,6 +1158,7 @@ class ChatAgent:
         # Use Atomic Ops Bridge for CAIRN (proper decomposition + verification)
         if agent_type == "cairn":
             import sys
+
             print(f"[CAIRN] Using AtomicBridge for: {user_text[:100]!r}", file=sys.stderr)
 
             from reos.cairn.intent_engine import CairnIntentEngine
@@ -1146,17 +1170,25 @@ class ChatAgent:
             # Create tool executor function
             def execute_tool(name: str, args: dict) -> dict:
                 from reos.mcp_tools import call_tool, ToolError
+
                 try:
                     return call_tool(self._db, name=name, arguments=args)
                 except ToolError as e:
                     return {"error": e.message, "code": e.code}
 
-            # Create intent engine with Play context
-            intent_engine = CairnIntentEngine(
-                llm=llm,
-                available_tools=available_tools,
-                play_data=ctx.play_data,
-            )
+            # Reuse cached intent engine (preserves response history across turns)
+            # or create one if first request
+            if self._cairn_intent_engine is None:
+                self._cairn_intent_engine = CairnIntentEngine(
+                    llm=llm,
+                    available_tools=available_tools,
+                    play_data=ctx.play_data,
+                )
+            else:
+                # Refresh play_data and tools each turn (may have changed)
+                self._cairn_intent_engine.play_data = ctx.play_data
+                self._cairn_intent_engine.available_tools = available_tools
+            intent_engine = self._cairn_intent_engine
 
             # Add conversation context for intent verification ("fix that" → understand "that")
             conversation_context = ctx.conversation_history or ""
@@ -1180,7 +1212,14 @@ class ChatAgent:
             result = bridge_result.intent_result
             if result is None:
                 # Bridge didn't execute through intent engine (e.g., needs approval)
-                from reos.cairn.intent_engine import IntentResult, VerifiedIntent, ExtractedIntent, IntentCategory, IntentAction
+                from reos.cairn.intent_engine import (
+                    IntentResult,
+                    VerifiedIntent,
+                    ExtractedIntent,
+                    IntentCategory,
+                    IntentAction,
+                )
+
                 result = IntentResult(
                     verified_intent=VerifiedIntent(
                         intent=ExtractedIntent(
@@ -1199,18 +1238,22 @@ class ChatAgent:
             # Build response in expected format
             tool_results = []
             if result.tool_result is not None:
-                tool_results.append({
-                    "name": result.verified_intent.tool_name,
-                    "arguments": result.verified_intent.tool_args,
-                    "ok": "error" not in result.tool_result,
-                    "result": result.tool_result,
-                })
+                tool_results.append(
+                    {
+                        "name": result.verified_intent.tool_name,
+                        "arguments": result.verified_intent.tool_args,
+                        "ok": "error" not in result.tool_result,
+                        "result": result.tool_result,
+                    }
+                )
 
             # Validate response certainty
             try:
                 certain_response = self._certainty.wrap_response(
                     response=result.response,
-                    system_state=self._steady_state.current if self._steady_state._current else None,
+                    system_state=self._steady_state.current
+                    if self._steady_state._current
+                    else None,
                     tool_outputs=tool_results,
                     user_input=user_text,
                 )
@@ -1237,15 +1280,19 @@ class ChatAgent:
                 message_id=assistant_message_id,
                 thinking_steps=result.thinking_steps or [],
                 tool_calls=tool_results or [],
-                metadata=({
-                    "intent": {
-                        "category": result.verified_intent.intent.category.name,
-                        "action": result.verified_intent.intent.action.name,
-                        "target": result.verified_intent.intent.target,
-                        "confidence": result.verified_intent.intent.confidence,
-                    },
-                    "verified": result.verified_intent.verified,
-                }) if result.verified_intent else None,
+                metadata=(
+                    {
+                        "intent": {
+                            "category": result.verified_intent.intent.category.name,
+                            "action": result.verified_intent.intent.action.name,
+                            "target": result.verified_intent.intent.target,
+                            "confidence": result.verified_intent.intent.confidence,
+                        },
+                        "verified": result.verified_intent.verified,
+                    }
+                )
+                if result.verified_intent
+                else None,
                 confidence=confidence,
                 evidence_summary=evidence_summary,
                 extended_thinking_trace=extended_thinking_trace,
@@ -1257,12 +1304,18 @@ class ChatAgent:
         # Personal questions should be answered directly from THE_PLAY context
         is_personal = self._is_personal_question(user_text)
         import sys
-        print(f"[CAIRN DEBUG] Tool selection: user_text={user_text[:100]!r}, is_personal={is_personal}", file=sys.stderr)
+
+        print(
+            f"[CAIRN DEBUG] Tool selection: user_text={user_text[:100]!r}, is_personal={is_personal}",
+            file=sys.stderr,
+        )
 
         if is_personal:
             # Personal question - skip tools entirely, answer from context
             tool_calls = []
-            print("[CAIRN DEBUG] Personal question detected, skipping tool selection", file=sys.stderr)
+            print(
+                "[CAIRN DEBUG] Personal question detected, skipping tool selection", file=sys.stderr
+            )
         else:
             tool_calls = self._select_tools(
                 user_text=user_text,
@@ -1274,7 +1327,10 @@ class ChatAgent:
                 top_p=top_p,
                 tool_call_limit=tool_call_limit,
             )
-            print(f"[CAIRN DEBUG] Tool selection returned {len(tool_calls)} tools: {[c.name for c in tool_calls]}", file=sys.stderr)
+            print(
+                f"[CAIRN DEBUG] Tool selection returned {len(tool_calls)} tools: {[c.name for c in tool_calls]}",
+                file=sys.stderr,
+            )
 
         tool_results: list[dict[str, Any]] = []
         for call in tool_calls[:tool_call_limit]:
@@ -1344,13 +1400,17 @@ class ChatAgent:
             role="assistant",
             content=answer,
             message_type="text",
-            metadata=json.dumps({
-                "tool_calls": tool_results,
-                "thinking_steps": thinking_steps,
-                "confidence": confidence,
-                "evidence_summary": evidence_summary,
-                "has_uncertainties": has_uncertainties,
-            }) if tool_results or thinking_steps or confidence < 1.0 else None,
+            metadata=json.dumps(
+                {
+                    "tool_calls": tool_results,
+                    "thinking_steps": thinking_steps,
+                    "confidence": confidence,
+                    "evidence_summary": evidence_summary,
+                    "has_uncertainties": has_uncertainties,
+                }
+            )
+            if tool_results or thinking_steps or confidence < 1.0
+            else None,
         )
 
         # Generate title for new conversations (first message)
@@ -1553,6 +1613,7 @@ class ChatAgent:
             # Persist the trace
             try:
                 import json
+
                 cairn_store.save_extended_thinking_trace(
                     trace_id=trace.trace_id,
                     conversation_id=conversation_id,
@@ -1580,13 +1641,11 @@ class ChatAgent:
         Context structure:
         - README (always included - app identity and documentation)
         - The Play (always included - user's story and identity)
-        - Selected Act + all its Scenes and Beats (if an act is selected)
+        - Selected Act + all its Scenes (if an act is selected)
         """
         from pathlib import Path
         from .play_fs import (
-            play_root,
             list_scenes,
-            list_beats,
             kb_read,
             list_attachments,
         )
@@ -1643,7 +1702,7 @@ class ChatAgent:
             return "\n\n".join(ctx_parts)
 
         # Act context
-        act_ctx = f"ACTIVE_ACT: {act.title} (selected = in context with all Scenes & Beats)"
+        act_ctx = f"ACTIVE_ACT: {act.title} (selected = in context with all Scenes)"
         if act.notes.strip():
             act_ctx += f"\nACT_NOTES: {act.notes.strip()}"
 
@@ -1655,8 +1714,8 @@ class ChatAgent:
                 if len(act_kb) > cap:
                     act_kb = act_kb[:cap] + "\n…"
                 act_ctx += f"\nACT_KB:\n{act_kb.strip()}"
-        except Exception:  # noqa: BLE001
-            pass
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logger.debug("Failed to read act KB for %s: %s", active_id, e)
 
         # Act attachments
         try:
@@ -1664,8 +1723,8 @@ class ChatAgent:
             if act_attachments:
                 att_list = ", ".join(f"{a.file_name} ({a.file_type})" for a in act_attachments)
                 act_ctx += f"\nACT_ATTACHMENTS: {att_list}"
-        except Exception:  # noqa: BLE001
-            pass
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logger.debug("Failed to list act attachments for %s: %s", active_id, e)
 
         ctx_parts.append(act_ctx)
 
@@ -1674,12 +1733,12 @@ class ChatAgent:
             scenes = list_scenes(act_id=active_id)
             for scene in scenes:
                 scene_ctx = f"  SCENE: {scene.title}"
-                if scene.intent:
-                    scene_ctx += f" | Intent: {scene.intent}"
-                if scene.status:
-                    scene_ctx += f" | Status: {scene.status}"
+                if scene.stage:
+                    scene_ctx += f" | Stage: {scene.stage}"
                 if scene.notes and scene.notes.strip():
                     scene_ctx += f"\n    Notes: {scene.notes.strip()[:500]}"
+                if scene.calendar_event_id:
+                    scene_ctx += " | (calendar event)"
 
                 # Scene attachments
                 try:
@@ -1687,25 +1746,12 @@ class ChatAgent:
                     if scene_attachments:
                         att_list = ", ".join(f"{a.file_name}" for a in scene_attachments)
                         scene_ctx += f"\n    Attachments: {att_list}"
-                except Exception:  # noqa: BLE001
-                    pass
+                except (FileNotFoundError, PermissionError, OSError) as e:
+                    logger.debug("Failed to list scene attachments for %s: %s", scene.scene_id, e)
 
                 ctx_parts.append(scene_ctx)
-
-                # Beats under scene
-                try:
-                    beats = list_beats(act_id=active_id, scene_id=scene.scene_id)
-                    for beat in beats:
-                        beat_ctx = f"    BEAT: {beat.title}"
-                        if beat.status:
-                            beat_ctx += f" | Status: {beat.status}"
-                        if beat.notes and beat.notes.strip():
-                            beat_ctx += f"\n      Notes: {beat.notes.strip()[:300]}"
-                        ctx_parts.append(beat_ctx)
-                except Exception:  # noqa: BLE001
-                    pass
-        except Exception:  # noqa: BLE001
-            pass
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logger.warning("Failed to list scenes for act %s: %s", active_id, e)
 
         return "\n\n".join(ctx_parts)
 
@@ -1769,6 +1815,7 @@ class ChatAgent:
             # Fallback to legacy codebase_index if available
             try:
                 from .codebase_index import get_codebase_context as get_codebase_ctx
+
                 codebase_ctx = get_codebase_ctx()
                 if codebase_ctx.strip():
                     return f"CODEBASE_REFERENCE:\n{codebase_ctx}"
@@ -1871,8 +1918,10 @@ class ChatAgent:
 
         # Get memory context (semantic search + graph expansion)
         # This retrieves relevant past interactions, knowledge, and reasoning chains
-        memory_context = "" if "memory" in disabled_sources else self._get_memory_context(
-            user_text, play_data.get("active_act_id")
+        memory_context = (
+            ""
+            if "memory" in disabled_sources
+            else self._get_memory_context(user_text, play_data.get("active_act_id"))
         )
 
         # Conversation history ("messages") - always loaded, cannot be disabled
@@ -2157,32 +2206,40 @@ class ChatAgent:
             + "- linux_system_info: CPU, memory, disk info\n"
             + "- linux_run_command: Execute shell commands\n\n"
             + "OUTPUT FORMAT (STRICT - no other format allowed):\n"
-            + "{\"tool_calls\": [{\"name\": \"TOOL_NAME\", \"arguments\": {}}]}\n\n"
+            + '{"tool_calls": [{"name": "TOOL_NAME", "arguments": {}}]}\n\n'
             + "EXAMPLES:\n"
-            + "User: 'what does my calendar look like' → {\"tool_calls\": [{\"name\": \"cairn_get_calendar\", \"arguments\": {}}]}\n"
-            + "User: 'show me my schedule' → {\"tool_calls\": [{\"name\": \"cairn_get_calendar\", \"arguments\": {}}]}\n"
-            + "User: 'how much RAM do I have' → {\"tool_calls\": [{\"name\": \"linux_system_info\", \"arguments\": {}}]}\n"
+            + 'User: \'what does my calendar look like\' → {"tool_calls": [{"name": "cairn_get_calendar", "arguments": {}}]}\n'
+            + 'User: \'show me my schedule\' → {"tool_calls": [{"name": "cairn_get_calendar", "arguments": {}}]}\n'
+            + 'User: \'how much RAM do I have\' → {"tool_calls": [{"name": "linux_system_info", "arguments": {}}]}\n'
             + "User: 'what are my goals' → {\"tool_calls\": []}\n"
         )
 
         user = (
-            "TOOLS:\n" + json.dumps(tool_specs, indent=2) + "\n\n" +
-            "USER_MESSAGE:\n" + user_text
+            "TOOLS:\n" + json.dumps(tool_specs, indent=2) + "\n\n" + "USER_MESSAGE:\n" + user_text
         )
 
         import sys
+
         raw = llm.chat_json(system=system, user=user, temperature=temperature, top_p=top_p)
-        print(f"[CAIRN DEBUG] LLM tool selection raw response: {raw[:500] if raw else 'None'}", file=sys.stderr)
+        print(
+            f"[CAIRN DEBUG] LLM tool selection raw response: {raw[:500] if raw else 'None'}",
+            file=sys.stderr,
+        )
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError as e:
             # Fallback: return empty - don't assume system tools
-            print(f"[CAIRN DEBUG] LLM returned invalid JSON for tool selection: {e}", file=sys.stderr)
+            print(
+                f"[CAIRN DEBUG] LLM returned invalid JSON for tool selection: {e}", file=sys.stderr
+            )
             return []
 
         # Handle case where LLM returns a list directly instead of dict
         if not isinstance(payload, dict):
-            print(f"[CAIRN DEBUG] LLM returned non-dict for tool selection: {type(payload)}", file=sys.stderr)
+            print(
+                f"[CAIRN DEBUG] LLM returned non-dict for tool selection: {type(payload)}",
+                file=sys.stderr,
+            )
             return []
 
         calls = payload.get("tool_calls")
@@ -2263,7 +2320,11 @@ class ChatAgent:
         """
         tool_dump = []
         for r in tool_results:
-            rendered = render_tool_result(r.get("result")) if r.get("ok") else json.dumps(r.get("error"), indent=2)
+            rendered = (
+                render_tool_result(r.get("result"))
+                if r.get("ok")
+                else json.dumps(r.get("error"), indent=2)
+            )
             tool_dump.append(
                 {
                     "name": r.get("name"),
@@ -2321,15 +2382,22 @@ class ChatAgent:
 
         # Debug: trace what we're sending to the LLM
         import sys
+
         print(f"[CAIRN DEBUG] _answer called with {len(tool_dump)} tool results", file=sys.stderr)
         if tool_dump:
-            print(f"[CAIRN DEBUG] Tool results preview: {json.dumps(tool_dump, indent=2)[:1000]}", file=sys.stderr)
+            print(
+                f"[CAIRN DEBUG] Tool results preview: {json.dumps(tool_dump, indent=2)[:1000]}",
+                file=sys.stderr,
+            )
         print(f"[CAIRN DEBUG] User message preview: {user[:500]}", file=sys.stderr)
 
         raw = llm.chat_text(system=system, user=user, temperature=temperature, top_p=top_p)
 
         # Debug: trace LLM response
-        print(f"[CAIRN DEBUG] LLM _answer raw response: {raw[:1000] if raw else 'None'}", file=sys.stderr)
+        print(
+            f"[CAIRN DEBUG] LLM _answer raw response: {raw[:1000] if raw else 'None'}",
+            file=sys.stderr,
+        )
 
         return self._parse_thinking_answer(raw)
 
@@ -2354,7 +2422,9 @@ class ChatAgent:
         thinking_match = re.search(r"<think>(.*?)</think>", raw, re.DOTALL | re.IGNORECASE)
         if not thinking_match:
             # Fall back to <thinking> (ReOS prompted format)
-            thinking_match = re.search(r"<thinking>(.*?)</thinking>", raw, re.DOTALL | re.IGNORECASE)
+            thinking_match = re.search(
+                r"<thinking>(.*?)</thinking>", raw, re.DOTALL | re.IGNORECASE
+            )
 
         if thinking_match:
             thinking_content = thinking_match.group(1).strip()
@@ -2370,8 +2440,12 @@ class ChatAgent:
             # Fallback: remove thinking tags and use the rest
             # Remove both <think> and <thinking> variants
             answer = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
-            answer = re.sub(r"<thinking>.*?</thinking>", "", answer, flags=re.DOTALL | re.IGNORECASE).strip()
+            answer = re.sub(
+                r"<thinking>.*?</thinking>", "", answer, flags=re.DOTALL | re.IGNORECASE
+            ).strip()
             # Also remove any leftover tags
-            answer = re.sub(r"</?(?:think|thinking|answer)>", "", answer, flags=re.IGNORECASE).strip()
+            answer = re.sub(
+                r"</?(?:think|thinking|answer)>", "", answer, flags=re.IGNORECASE
+            ).strip()
 
         return answer, thinking_steps

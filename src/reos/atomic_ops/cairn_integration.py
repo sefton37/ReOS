@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 @dataclass
 class CairnOperationResult:
     """Result of processing a CAIRN operation through atomic ops pipeline."""
+
     operation: AtomicOperation
     verification: PipelineResult
     intent_result: Optional[Any] = None  # IntentResult from CAIRN
@@ -237,7 +238,9 @@ class CairnAtomicBridge:
             # Process each child operation and combine results
             return self._process_decomposed(
                 parent_op=primary_op,
-                child_ops=[op for op in proc_result.operations[1:] if op.id in primary_op.child_ids],
+                child_ops=[
+                    op for op in proc_result.operations[1:] if op.id in primary_op.child_ids
+                ],
                 user_id=user_id,
                 execute_tool=execute_tool,
                 persona_context=persona_context,
@@ -280,8 +283,10 @@ class CairnAtomicBridge:
         # READ/INTERPRET operations on STREAM don't need full verification
         if operation.classification:
             from .models import ExecutionSemantics, DestinationType
+
             is_read_op = operation.classification.semantics in (
-                ExecutionSemantics.READ, ExecutionSemantics.INTERPRET
+                ExecutionSemantics.READ,
+                ExecutionSemantics.INTERPRET,
             )
             is_stream = operation.classification.destination == DestinationType.STREAM
             if is_read_op and is_stream:
@@ -309,18 +314,24 @@ class CairnAtomicBridge:
         logger.debug(
             "CAIRN request: %.50s... verification.passed=%s auto_approved=%s "
             "needs_approval=%s persona_context_len=%d",
-            user_input, verification.passed, auto_approved, needs_approval,
+            user_input,
+            verification.passed,
+            auto_approved,
+            needs_approval,
             len(persona_context),
         )
 
         if verification.passed and (auto_approved or not needs_approval):
             # Execute through CAIRN intent engine
             if self.intent_engine and execute_tool:
-                logger.debug("Calling intent_engine.process with %d chars of context", len(persona_context))
+                logger.debug(
+                    "Calling intent_engine.process with %d chars of context", len(persona_context)
+                )
                 intent_result = self.intent_engine.process(
                     user_input=operation.user_request,  # Use operation's request (may be sub-request)
                     execute_tool=execute_tool,
                     persona_context=persona_context,
+                    conversation_context=conversation_context,
                 )
                 response = intent_result.response
                 logger.debug("Got response: %.100s...", response)
@@ -413,6 +424,7 @@ class CairnAtomicBridge:
                 user_input=operation.user_request,
                 execute_tool=execute_tool,
                 persona_context=persona_context,
+                conversation_context="",
             )
             response = intent_result.response
             operation.status = OperationStatus.COMPLETE
@@ -568,6 +580,7 @@ class CairnAtomicBridge:
                     user_input=child_op.user_request,
                     execute_tool=execute_tool,
                     persona_context=persona_context,
+                    conversation_context=conversation_context,
                 )
                 all_responses.append(intent_result.response)
                 all_intent_results.append(intent_result)
@@ -577,7 +590,9 @@ class CairnAtomicBridge:
                 all_responses.append(f"Could not process: {child_op.user_request}")
 
         # Combine responses
-        combined_response = "\n\n".join(all_responses) if all_responses else "No operations completed."
+        combined_response = (
+            "\n\n".join(all_responses) if all_responses else "No operations completed."
+        )
 
         # Use first intent result as primary (for compatibility)
         primary_intent = all_intent_results[0] if all_intent_results else None
@@ -690,6 +705,7 @@ class CairnAtomicBridge:
         and extracts the appropriate intent category and action.
         """
         import json
+
         if not conversation_context:
             return None
 
@@ -777,8 +793,17 @@ What is the user referring to and what do they want to do?"""
 
             # Check for safety-critical warnings (not minor semantic notes)
             if verification.warnings:
-                safety_keywords = ["destructive", "dangerous", "safety", "security",
-                                   "execute", "delete", "remove", "kill", "process"]
+                safety_keywords = [
+                    "destructive",
+                    "dangerous",
+                    "safety",
+                    "security",
+                    "execute",
+                    "delete",
+                    "remove",
+                    "kill",
+                    "process",
+                ]
                 for warning in verification.warnings:
                     warning_lower = warning.lower()
                     if any(kw in warning_lower for kw in safety_keywords):
