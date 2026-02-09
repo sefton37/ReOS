@@ -143,10 +143,9 @@ class IntentVerifier(BaseVerifier):
             )
 
         # Check classification confidence
-        if operation.classification.confidence < 0.6:
+        if not operation.classification.confident:
             issues.append(
-                f"Low confidence ({operation.classification.confidence:.2f}) "
-                "suggests possible misinterpretation"
+                "Classification not confident — possible misinterpretation"
             )
 
         # Check for obvious mismatches
@@ -178,7 +177,7 @@ class IntentVerifier(BaseVerifier):
             issues.extend(context_issues)
 
         # Calculate confidence
-        confidence = operation.classification.confidence
+        confidence = operation.confidence  # 0.9 if confident, 0.3 if not
         if issues:
             confidence *= 0.7
 

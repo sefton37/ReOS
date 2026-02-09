@@ -61,11 +61,9 @@ class VerificationLayer(str, Enum):
 
 class FeedbackType(str, Enum):
     """Types of user feedback."""
-    EXPLICIT_RATING = "explicit_rating"
     CORRECTION = "correction"
     APPROVAL = "approval"
-    BEHAVIORAL = "behavioral"
-    LONG_TERM = "long_term"
+    REJECTION = "rejection"
 
 
 @dataclass
@@ -74,49 +72,9 @@ class Classification:
     destination: DestinationType
     consumer: ConsumerType
     semantics: ExecutionSemantics
-    confidence: float
-    reasoning: dict[str, str] = field(default_factory=dict)
-    alternatives: list[dict] = field(default_factory=list)
+    confident: bool = True
+    reasoning: str = ""
 
-
-@dataclass
-class Features:
-    """Extracted features for ML classification."""
-    # Lexical features
-    token_count: int = 0
-    char_count: int = 0
-    verb_count: int = 0
-    noun_count: int = 0
-    verbs: list[str] = field(default_factory=list)
-    nouns: list[str] = field(default_factory=list)
-    has_file_extension: bool = False
-    file_extension_type: Optional[str] = None
-    avg_word_length: float = 0.0
-
-    # Syntactic features
-    has_imperative_verb: bool = False
-    has_interrogative: bool = False
-    has_conditional: bool = False
-    has_negation: bool = False
-    sentence_count: int = 1
-
-    # Domain features
-    mentions_code: bool = False
-    detected_languages: list[str] = field(default_factory=list)
-    mentions_system_resource: bool = False
-    has_file_operation: bool = False
-    has_immediate_verb: bool = False
-    mentions_testing: bool = False
-    mentions_git: bool = False
-
-    # Context features
-    time_of_day: int = 0
-    day_of_week: int = 0
-    recent_operation_count: int = 0
-    recent_success_rate: float = 0.0
-
-    # Semantic features (embeddings stored separately as blobs)
-    request_hash: str = ""
 
 
 @dataclass
@@ -180,9 +138,6 @@ class AtomicOperation:
     # Classification
     classification: Optional[Classification] = None
 
-    # Features (for ML)
-    features: Optional[Features] = None
-
     # Decomposition
     is_decomposed: bool = False
     parent_id: Optional[str] = None
@@ -219,7 +174,10 @@ class AtomicOperation:
 
     @property
     def confidence(self) -> float:
-        return self.classification.confidence if self.classification else 0.0
+        """Backward-compatible confidence for verification layers."""
+        if not self.classification:
+            return 0.0
+        return 0.9 if self.classification.confident else 0.3
 
     def is_verified(self) -> bool:
         """Check if operation passed all verification layers."""
@@ -261,62 +219,18 @@ class UserFeedback:
     user_id: str = ""
     feedback_type: FeedbackType = FeedbackType.APPROVAL
 
-    # Explicit rating
-    rating: Optional[int] = None  # 1-5
-    rating_dimensions: dict[str, int] = field(default_factory=dict)
-    comment: Optional[str] = None
-
-    # Correction
+    # Correction fields
     system_classification: Optional[dict] = None
-    user_corrected_classification: Optional[dict] = None
+    user_corrected_destination: Optional[str] = None
+    user_corrected_consumer: Optional[str] = None
+    user_corrected_semantics: Optional[str] = None
     correction_reasoning: Optional[str] = None
 
-    # Approval
+    # Approval fields
     approved: Optional[bool] = None
-    modified: bool = False
-    modification_extent: float = 0.0
-    modification_details: Optional[dict] = None
     time_to_decision_ms: Optional[int] = None
 
-    # Behavioral
-    retried: bool = False
-    time_to_retry_ms: Optional[int] = None
-    undid: bool = False
-    time_to_undo_ms: Optional[int] = None
-    abandoned: bool = False
-
-    # Long-term
-    operation_persisted: Optional[bool] = None
-    days_persisted: Optional[int] = None
-    reused_pattern: bool = False
-    referenced_later: bool = False
-
     # Meta
-    feedback_confidence: float = 0.5
     created_at: datetime = field(default_factory=datetime.now)
 
 
-@dataclass
-class LearningMetrics:
-    """Aggregated learning metrics for a user."""
-    user_id: str = ""
-    window_start: datetime = field(default_factory=datetime.now)
-    window_end: datetime = field(default_factory=datetime.now)
-    window_days: int = 7
-
-    # Accuracy metrics
-    classification_accuracy: float = 0.0
-    sample_size: int = 0
-
-    # Breakdown by category
-    accuracy_by_destination: dict[str, float] = field(default_factory=dict)
-    accuracy_by_consumer: dict[str, float] = field(default_factory=dict)
-    accuracy_by_semantics: dict[str, float] = field(default_factory=dict)
-
-    # Improvement tracking
-    previous_accuracy: Optional[float] = None
-    improvement: Optional[float] = None
-
-    # User satisfaction
-    avg_rating: Optional[float] = None
-    correction_rate: float = 0.0

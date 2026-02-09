@@ -57,61 +57,61 @@ class CairnOperationResult:
 
 # Mapping from CAIRN intent categories to atomic operation classification
 INTENT_TO_CLASSIFICATION = {
-    # Calendar operations - read from stream
     "CALENDAR": Classification(
         destination=DestinationType.STREAM,
         consumer=ConsumerType.HUMAN,
         semantics=ExecutionSemantics.READ,
-        confidence=0.9,
+        confident=True,
+        reasoning="CAIRN intent: CALENDAR",
     ),
-    # Contact operations - read from stream
     "CONTACTS": Classification(
         destination=DestinationType.STREAM,
         consumer=ConsumerType.HUMAN,
         semantics=ExecutionSemantics.READ,
-        confidence=0.9,
+        confident=True,
+        reasoning="CAIRN intent: CONTACTS",
     ),
-    # System operations - may execute processes
     "SYSTEM": Classification(
         destination=DestinationType.PROCESS,
         consumer=ConsumerType.MACHINE,
         semantics=ExecutionSemantics.EXECUTE,
-        confidence=0.85,
+        confident=True,
+        reasoning="CAIRN intent: SYSTEM",
     ),
-    # Tasks - read/execute on files
     "TASKS": Classification(
         destination=DestinationType.FILE,
         consumer=ConsumerType.HUMAN,
         semantics=ExecutionSemantics.READ,
-        confidence=0.85,
+        confident=True,
+        reasoning="CAIRN intent: TASKS",
     ),
-    # Knowledge queries - read from files
     "KNOWLEDGE": Classification(
         destination=DestinationType.FILE,
         consumer=ConsumerType.HUMAN,
         semantics=ExecutionSemantics.READ,
-        confidence=0.85,
+        confident=True,
+        reasoning="CAIRN intent: KNOWLEDGE",
     ),
-    # Personal questions - interpret from knowledge
     "PERSONAL": Classification(
         destination=DestinationType.STREAM,
         consumer=ConsumerType.HUMAN,
         semantics=ExecutionSemantics.INTERPRET,
-        confidence=0.9,
+        confident=True,
+        reasoning="CAIRN intent: PERSONAL",
     ),
-    # Play operations - file-based CRUD
     "PLAY": Classification(
         destination=DestinationType.FILE,
         consumer=ConsumerType.HUMAN,
         semantics=ExecutionSemantics.EXECUTE,
-        confidence=0.85,
+        confident=True,
+        reasoning="CAIRN intent: PLAY",
     ),
-    # Undo operations - execute reversal
     "UNDO": Classification(
         destination=DestinationType.FILE,
         consumer=ConsumerType.HUMAN,
         semantics=ExecutionSemantics.EXECUTE,
-        confidence=0.9,
+        confident=True,
+        reasoning="CAIRN intent: UNDO",
     ),
 }
 
@@ -151,10 +151,10 @@ class CairnAtomicBridge:
             verification_mode: Verification pipeline mode.
             auto_approve_low_risk: Auto-approve read-only operations.
         """
-        # Extract LLM from intent engine for semantic decomposition
+        # Extract LLM from intent engine for classification and decomposition
         llm = intent_engine.llm if intent_engine else None
 
-        self.processor = AtomicOpsProcessor(conn, auto_init_embeddings=True, llm=llm)
+        self.processor = AtomicOpsProcessor(conn, llm=llm)
         self.verifier = VerificationPipeline(mode=verification_mode)
         self.feedback = FeedbackCollector(self.processor.store)
         self.intent_engine = intent_engine
@@ -470,34 +470,6 @@ class CairnAtomicBridge:
 
         return True
 
-    def record_user_rating(
-        self,
-        operation_id: str,
-        rating: int,
-        comment: Optional[str] = None,
-    ) -> bool:
-        """Record user rating for an operation.
-
-        Args:
-            operation_id: ID of operation to rate.
-            rating: Rating 1-5.
-            comment: Optional comment.
-
-        Returns:
-            True if rating recorded.
-        """
-        operation = self.processor.get_operation(operation_id)
-        if not operation:
-            return False
-
-        self.feedback.collect_rating(
-            operation=operation,
-            rating=rating,
-            comment=comment,
-        )
-
-        return True
-
     def record_user_correction(
         self,
         operation_id: str,
@@ -681,12 +653,8 @@ class CairnAtomicBridge:
                 destination=base_class.destination,
                 consumer=base_class.consumer,
                 semantics=semantics,
-                confidence=base_class.confidence,
-                reasoning={
-                    "category": detected_category,
-                    "action": detected_action,
-                    "source": "cairn_intent",
-                },
+                confident=True,
+                reasoning=f"CAIRN intent: {detected_category}/{detected_action}",
             )
 
             operation.classification = refined
@@ -756,8 +724,8 @@ What is the user referring to and what do they want to do?"""
 
         Approval is required for:
         - EXECUTE operations that modify files/processes
-        - Low confidence classifications (< 0.7)
-        - Safety-critical warnings (not minor semantic notes)
+        - Not-confident classifications
+        - Safety-critical warnings
         """
         # Always approve if verification failed
         if not verification.passed:
@@ -768,7 +736,7 @@ What is the user referring to and what do they want to do?"""
             semantics = operation.classification.semantics
             destination = operation.classification.destination
             consumer = operation.classification.consumer
-            confidence = operation.classification.confidence
+            confident = operation.classification.confident
 
             # Low-risk operations: READ/INTERPRET on STREAM for HUMAN
             # These are conversational queries - respond naturally
@@ -778,20 +746,19 @@ What is the user referring to and what do they want to do?"""
                 and consumer == ConsumerType.HUMAN
             )
 
-            # For low-risk operations, only require approval if confidence is very low
+            # For low-risk operations, auto-approve if confident
             if is_low_risk:
-                # Trust READ/INTERPRET stream operations with decent confidence
-                if confidence >= 0.5:
+                if confident:
                     return False
-                # Very low confidence still needs approval
+                # Not confident still needs approval
                 return True
 
-            # EXECUTE operations on FILE/PROCESS need approval (side effects)
+            # EXECUTE operations on FILE/PROCESS always need approval (side effects)
             if semantics == ExecutionSemantics.EXECUTE:
                 if destination in (DestinationType.FILE, DestinationType.PROCESS):
                     return True
 
-            # Check for safety-critical warnings (not minor semantic notes)
+            # Check for safety-critical warnings
             if verification.warnings:
                 safety_keywords = [
                     "destructive",
@@ -808,11 +775,9 @@ What is the user referring to and what do they want to do?"""
                     warning_lower = warning.lower()
                     if any(kw in warning_lower for kw in safety_keywords):
                         return True
-                # Minor warnings (like read vs interpret mismatch) don't require approval
-                # for non-execute operations
 
-            # Low confidence needs approval for non-low-risk operations
-            if confidence < 0.7:
+            # Not confident needs approval for non-low-risk operations
+            if not confident:
                 return True
 
         return False

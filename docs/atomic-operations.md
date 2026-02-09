@@ -61,42 +61,25 @@ User Request
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │  1. FEATURE EXTRACTION                                    │   │
-│  │     • Tokenize and POS-tag request                        │   │
-│  │     • Extract verbs, nouns, file extensions               │   │
-│  │     • Generate embeddings (sentence-transformers)         │   │
-│  │     • Detect domain indicators (code, system, etc.)       │   │
+│  │  1. FEW-SHOT CONTEXT BUILDING                             │   │
+│  │     • Load example classifications from database          │   │
+│  │     • Select relevant examples using similarity search    │   │
+│  │     • Build few-shot prompt with examples                 │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                            │                                     │
 │                            ▼                                     │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │  2. INDICATOR DETECTION                                   │   │
-│  │     Persistence:                                          │   │
-│  │       • File extension → file                             │   │
-│  │       • System resource → process                         │   │
-│  │       • Neither → stream                                  │   │
-│  │     Consumer:                                             │   │
-│  │       • Immediate verb + no code → human                  │   │
-│  │       • Code detected → machine                           │   │
-│  │     Semantics:                                            │   │
-│  │       • run/execute/start → execute                       │   │
-│  │       • analyze/check/test → interpret                    │   │
-│  │       • show/list/get → read                              │   │
+│  │  2. LLM CLASSIFICATION                                    │   │
+│  │     • Submit request + examples to LLM                    │   │
+│  │     • Parse JSON response with classification             │   │
+│  │     • Extract confident: bool flag                        │   │
+│  │     • Extract reasoning from LLM                          │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                            │                                     │
 │                            ▼                                     │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │  3. CONFIDENCE SCORING                                    │   │
-│  │     • Base confidence: 0.5                                │   │
-│  │     • Each clear indicator: +0.2                          │   │
-│  │     • Ambiguous fallback: +0.1                            │   │
-│  │     • Final: min(1.0, accumulated)                        │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                            │                                     │
-│                            ▼                                     │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  4. DECOMPOSITION CHECK                                   │   │
-│  │     If confidence < 0.7:                                  │   │
+│  │  3. DECOMPOSITION CHECK                                   │   │
+│  │     If confident == false:                                │   │
 │  │       → Attempt decomposition into sub-operations         │   │
 │  │     If request contains "and", "then", "also":            │   │
 │  │       → Decompose into sequential operations              │   │
@@ -111,7 +94,7 @@ User Request
               │   destination: file      │
               │   consumer: human        │
               │   semantics: execute     │
-              │   confidence: 0.85       │
+              │   confident: true        │
               └──────────────────────────┘
 ```
 
@@ -213,7 +196,7 @@ CREATE TABLE atomic_operations (
     execution_semantics TEXT,           -- 'read', 'interpret', 'execute'
 
     -- Classification metadata
-    classification_confidence REAL,
+    classification_confident INTEGER,      -- Boolean: 1 if LLM is confident, 0 otherwise
     classification_pass_number INTEGER DEFAULT 1,
     requires_decomposition BOOLEAN DEFAULT 0,
 
@@ -301,4 +284,4 @@ CREATE TABLE classification_reasoning (
 - [Foundation](./FOUNDATION.md) — Core philosophy
 - [Verification Layers](./verification-layers.md) — How operations are verified
 - [RLHF Learning](./rlhf-learning.md) — Learning from feedback
-- [ML Features](./ml-features.md) — Feature extraction for classification
+- [Classification](./classification.md) — LLM-native classification approach

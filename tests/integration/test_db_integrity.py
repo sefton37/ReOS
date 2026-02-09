@@ -249,12 +249,12 @@ class TestSchemaVersioning:
         assert runner.get_current_version() == 0
 
     def test_baseline_migration_applied(self, tmp_path: Path) -> None:
-        """Baseline migration should be applied on migrate()."""
+        """All migrations should be applied on migrate()."""
         db = Database(tmp_path / "test.db")
         db.migrate()
 
         runner = MigrationRunner(db)
-        assert runner.get_current_version() == 1
+        assert runner.get_current_version() == 3
 
     def test_pending_migrations_empty_after_migrate(self, tmp_path: Path) -> None:
         """No pending migrations after full migrate()."""

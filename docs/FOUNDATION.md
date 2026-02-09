@@ -218,7 +218,7 @@ See [The Play](./the-play.md) for the complete organizational system.
 | [Verification Layers](./verification-layers.md) | 5-layer verification system |
 | [RLHF Learning](./rlhf-learning.md) | Feedback collection and learning loop |
 | [Memory System](./memory-system.md) | Hybrid vector-graph memory for relational recall |
-| [ML Features](./ml-features.md) | Feature extraction and embeddings |
+| [Classification](./classification.md) | LLM-native classification with few-shot learning |
 | [Execution Engine](./execution-engine.md) | Safe execution with undo capability |
 
 ## Agent Documentation

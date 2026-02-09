@@ -8,42 +8,33 @@ The RLHF (Reinforcement Learning from Human Feedback) system captures user feedb
 
 ## Feedback Hierarchy
 
-Feedback is collected at multiple levels, each with different reliability:
+Feedback is collected at three levels, each with different reliability:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    FEEDBACK PYRAMID                              │
+│                    FEEDBACK HIERARCHY                            │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│                    ▲ Long-term Outcome                          │
-│                   /│\   (Highest Confidence)                    │
-│                  / │ \  • Operation persisted                   │
-│                 /  │  \ • Pattern reused                        │
-│                /   │   \• Referenced later                      │
-│               ────────── ─────────────────                      │
+│                    ▲ Correction                                 │
+│                   /│\   (Highest Value)                         │
+│                  / │ \  • User provides correct classification  │
+│                 /  │  \ • Optional reasoning                    │
+│                /   │   \• Becomes training data                 │
+│               ──────────────────────                             │
 │              /     │     \                                      │
-│             /  Behavioral  \                                    │
-│            /   (High Conf)  \                                   │
-│           /    • Retry       \                                  │
-│          /     • Undo         \                                 │
-│         /      • Abandon       \                                │
+│             /   Approval   \                                    │
+│            /  (Medium Value) \                                  │
+│           /    • Accept/reject \                                │
+│          /     • Quick signal   \                               │
+│         /      • Time to decision \                             │
 │        ──────────────────────────                               │
 │       /          │              \                               │
-│      /      Correction          \                               │
-│     /      (High Conf)           \                              │
-│    /       • User fixes class     \                             │
-│   /        • Provides reasoning    \                            │
+│      /       Rejection          \                               │
+│     /      (Low Value)           \                              │
+│    /       • Simple no            \                             │
+│   /        • No detail             \                            │
 │  ──────────────────────────────────                             │
-│ /              │                    \                           │
-│/          Approval                   \                          │
-│          (Medium Conf)                \                         │
-│          • Approve/reject              \                        │
-│          • Time to decision             \                       │
-│──────────────────────────────────────────                       │
-│              Explicit Rating                                    │
-│              (Medium Conf)                                      │
-│              • 1-5 scale                                        │
-│              • Dimensional ratings                              │
+│                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -51,25 +42,7 @@ Feedback is collected at multiple levels, each with different reliability:
 
 ## Feedback Types
 
-### 1. Explicit Rating
-
-User provides a direct 1-5 rating, optionally with dimensional breakdown.
-
-```python
-collect_explicit_rating(
-    operation_id: str,
-    user_id: str,
-    rating: int,                    # 1-5
-    dimensions: dict = None,        # {accuracy: 4, speed: 5, helpfulness: 3}
-    comment: str = None
-)
-```
-
-**Confidence:** Medium (0.7-0.9)
-- Users may rate inconsistently
-- Rating without context is less informative
-
-### 2. Correction
+### 1. Correction
 
 User corrects a classification error. **Most valuable feedback.**
 
@@ -83,9 +56,10 @@ collect_correction(
 )
 ```
 
-**Confidence:** High (0.9)
+**Value:** Highest
 - Direct signal about classification error
-- Reasoning provides training context
+- Becomes training data for few-shot examples
+- Reasoning provides context for future classifications
 
 **Example:**
 ```python
@@ -106,67 +80,38 @@ collector.collect_correction(
 )
 ```
 
-### 3. Approval
+### 2. Approval
 
-User approves or rejects the proposed operation.
+User approves the proposed operation.
 
 ```python
 collect_approval(
     operation_id: str,
     user_id: str,
-    approved: bool,
-    time_to_decision_ms: int,       # How long user deliberated
-    modified: bool = False,         # Did user modify before approving?
-    modification_extent: float = 0.0,  # 0.0-1.0
-    modification_details: dict = None
+    approved: bool
 )
 ```
 
-**Confidence:** Inferred from deliberation time:
-- < 2 seconds: 0.9 (confident decision)
-- 2-5 seconds: 0.7 (considered decision)
-- 5-10 seconds: 0.5 (uncertain)
-- > 10 seconds: 0.3 (struggled with decision)
+**Value:** Medium
+- Positive signal that classification was acceptable
+- Can be used to populate few-shot examples
+- Quick feedback loop (immediate)
 
-### 4. Behavioral
+### 3. Rejection
 
-Implicit signals from user actions.
+User rejects the proposed operation.
 
 ```python
-collect_behavioral_signals(
+collect_rejection(
     operation_id: str,
-    user_id: str,
-    retried: bool = False,
-    time_to_retry_ms: int = None,
-    undid: bool = False,
-    time_to_undo_ms: int = None,
-    abandoned: bool = False
+    user_id: str
 )
 ```
 
-**Confidence:** High for quick actions:
-- Quick retry (< 5s): 0.9 — system was wrong
-- Quick undo (< 10s): 0.95 — system was wrong
-- Slow retry/undo: 0.7 — might be user error
-
-### 5. Long-term Outcome
-
-Strongest signal: what happened over time.
-
-```python
-collect_long_term_outcome(
-    operation_id: str,
-    user_id: str,
-    operation_persisted: bool,      # Did result stay?
-    days_persisted: int,            # How long before change?
-    reused_pattern: bool = False,   # Did user do similar again?
-    referenced_later: bool = False  # Did user refer to this work?
-)
-```
-
-**Confidence:** 0.95
-- If user kept result and reused pattern → system was RIGHT
-- If user reverted days later → system was WRONG
+**Value:** Low
+- Negative signal, but no corrective information
+- Indicates classification may be wrong, but doesn't specify how
+- Should prompt for correction feedback if possible
 
 ---
 
@@ -231,9 +176,9 @@ def compute_learning_metrics(user_id: str, window_days: int = 7) -> dict:
     """Compute metrics over time window."""
 
     return {
-        'classification_accuracy': correct / total,
-        'user_satisfaction': avg_rating,
+        'approval_rate': approvals / total,
         'correction_rate': corrections / total,
+        'rejection_rate': rejections / total,
         'by_destination_type': {
             'stream': 0.92,
             'file': 0.85,
@@ -250,28 +195,15 @@ Compares current window to previous window:
 
 ```python
 {
-    'classification_accuracy': 0.85,
+    'approval_rate': 0.85,
     'previous_value': 0.80,
     'improvement': 0.05,  # +5%
-    'p_value': 0.02       # Statistically significant
 }
 ```
 
 ---
 
 ## Feedback Quality Evaluation
-
-Not all feedback is equally useful. Quality metrics help weight feedback:
-
-### Consistency Score
-
-Do user's ratings align with their approvals?
-
-```python
-# If user rates 5/5 but then undoes → inconsistent
-# If user rates 1/5 but approved → inconsistent
-consistency_score = correlation(ratings, approvals)  # 0.0-1.0
-```
 
 ### Informativeness Score
 
@@ -281,14 +213,7 @@ How detailed is the feedback?
 informativeness_score = corrections_with_reasoning / total_corrections
 ```
 
-### Reliability Score
-
-Can we trust this user's feedback?
-
-Based on:
-- Consistency over time
-- Alignment with long-term outcomes
-- Agreement with other users (if applicable)
+**Higher is better** — corrections with reasoning are more valuable for training.
 
 ---
 
@@ -303,45 +228,21 @@ CREATE TABLE user_feedback (
     user_id TEXT NOT NULL,
 
     -- Feedback type
-    feedback_type TEXT NOT NULL,        -- 'explicit_rating', 'correction',
-                                        -- 'approval', 'behavioral', 'long_term'
-
-    -- Explicit feedback
-    rating INTEGER,                     -- 1-5
-    rating_dimensions JSON,             -- {accuracy: 4, speed: 5}
-    comment TEXT,
+    feedback_type TEXT NOT NULL,        -- 'correction', 'approval', 'rejection'
 
     -- Correction feedback
     system_classification JSON,
     user_corrected_classification JSON,
     correction_reasoning TEXT,
 
-    -- Approval feedback
+    -- Approval/rejection feedback
     approved BOOLEAN,
-    modified BOOLEAN,
-    modification_extent REAL,           -- 0.0-1.0
-    modification_details JSON,
-
-    -- Behavioral feedback
-    time_to_decision_ms INTEGER,
-    retried BOOLEAN DEFAULT 0,
-    time_to_retry_ms INTEGER,
-    undid BOOLEAN DEFAULT 0,
-    time_to_undo_ms INTEGER,
-    abandoned BOOLEAN DEFAULT 0,
-
-    -- Long-term outcome
-    operation_persisted BOOLEAN,
-    days_persisted INTEGER,
-    reused_pattern BOOLEAN DEFAULT 0,
-    referenced_later BOOLEAN DEFAULT 0,
-
-    -- Meta-feedback
-    feedback_confidence REAL,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    FOREIGN KEY (operation_block_id) REFERENCES atomic_operations(block_id)
+    FOREIGN KEY (operation_block_id) REFERENCES atomic_operations(block_id),
+
+    CHECK (feedback_type IN ('correction', 'approval', 'rejection'))
 );
 ```
 
@@ -351,7 +252,7 @@ CREATE TABLE user_feedback (
 CREATE TABLE rlhf_learning_metrics (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    metric_type TEXT NOT NULL,          -- 'classification_accuracy', etc.
+    metric_type TEXT NOT NULL,          -- 'approval_rate', 'correction_rate', etc.
 
     -- Time window
     window_start TIMESTAMP NOT NULL,
@@ -370,29 +271,6 @@ CREATE TABLE rlhf_learning_metrics (
     -- Comparison to previous window
     previous_value REAL,
     improvement REAL,
-    confidence_interval JSON,
-    p_value REAL,
-
-    computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-### Feedback Quality Table
-
-```sql
-CREATE TABLE feedback_quality_metrics (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-
-    consistency_score REAL,
-    informativeness_score REAL,
-    reliability_score REAL,
-
-    explicit_feedback_rate REAL,
-    implicit_signals_available REAL,
-
-    window_start TIMESTAMP NOT NULL,
-    window_end TIMESTAMP NOT NULL,
 
     computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -400,73 +278,52 @@ CREATE TABLE feedback_quality_metrics (
 
 ---
 
-## Training Data Generation
+## Few-Shot Example Generation
 
-Feedback is used to generate training data for ML models:
+Feedback is used to generate few-shot examples for LLM classification:
 
-### Training Data View
+### Example Selection View
 
 ```sql
-CREATE VIEW training_data AS
+CREATE VIEW few_shot_examples AS
 SELECT
-    ao.block_id,
     ao.user_request,
-    ao.destination_type AS system_destination,
-    ao.consumer_type AS system_consumer,
-    ao.execution_semantics AS system_semantics,
-    ao.classification_confidence,
-
-    mlf.request_embedding,
-    mlf.features_json,
-
+    ao.destination_type,
+    ao.consumer_type,
+    ao.execution_semantics,
+    cr.reasoning,
     uf.approved,
-    uf.user_corrected_classification,
-    uf.rating,
-
-    -- True labels (from user feedback)
-    CASE
-        WHEN uf.approved = 1 THEN ao.destination_type
-        WHEN uf.user_corrected_classification IS NOT NULL
-            THEN json_extract(uf.user_corrected_classification, '$.destination_type')
-        ELSE NULL
-    END AS true_destination,
-    -- ... similar for consumer and semantics
+    uf.user_corrected_classification
 
 FROM atomic_operations ao
-JOIN ml_features mlf ON ao.block_id = mlf.operation_block_id
-LEFT JOIN user_feedback uf ON ao.block_id = uf.operation_block_id
-WHERE uf.feedback_type IN ('correction', 'approval')
-  AND (uf.approved = 1 OR uf.user_corrected_classification IS NOT NULL);
+LEFT JOIN classification_reasoning cr
+    ON ao.block_id = cr.operation_block_id
+LEFT JOIN user_feedback uf
+    ON ao.block_id = uf.operation_block_id
+
+WHERE
+    -- Approved classifications
+    (uf.feedback_type = 'approval' AND uf.approved = 1)
+    OR
+    -- Corrected classifications (use the correction, not original)
+    (uf.feedback_type = 'correction')
+
+ORDER BY ao.created_at DESC;
 ```
 
-### Dataset Snapshots
+### Example Quality
 
-Periodically snapshot training data with quality metrics:
+High-quality few-shot examples have:
 
-```sql
-CREATE TABLE ml_datasets (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    dataset_name TEXT NOT NULL,
+1. **User approval** — Explicitly approved by user
+2. **Reasoning** — LLM provided clear reasoning
+3. **Confident classification** — `classification_confident = 1`
+4. **No corrections** — User didn't need to fix it
 
-    start_date TIMESTAMP NOT NULL,
-    end_date TIMESTAMP NOT NULL,
+Lower-quality but still useful:
 
-    train_operation_ids JSON NOT NULL,
-    val_operation_ids JSON NOT NULL,
-    test_operation_ids JSON NOT NULL,
-
-    total_operations INTEGER NOT NULL,
-    labeled_operations INTEGER NOT NULL,
-    label_quality_score REAL,
-
-    classification_accuracy REAL,
-    model_version TEXT,
-    model_performance JSON,
-
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+1. **Corrected classifications** — Use the corrected version, not original
+2. **Reasoning from user** — User provided explanation during correction
 
 ---
 
@@ -484,5 +341,5 @@ All learning happens **locally**:
 
 - [Foundation](./FOUNDATION.md) — Core philosophy (privacy by architecture)
 - [Atomic Operations](./atomic-operations.md) — What gets classified
-- [ML Features](./ml-features.md) — Features extracted for learning
+- [Classification](./classification.md) — LLM-native classification approach
 - [Verification Layers](./verification-layers.md) — Verification that produces feedback opportunities

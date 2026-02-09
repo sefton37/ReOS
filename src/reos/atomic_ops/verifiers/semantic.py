@@ -140,13 +140,11 @@ class SemanticVerifier(BaseVerifier):
             issues.append(agent_issue)
 
         # Check classification confidence
-        if operation.classification.confidence < 0.5:
-            issues.append(
-                f"Low classification confidence ({operation.classification.confidence:.2f})"
-            )
+        if not operation.classification.confident:
+            issues.append("Classification not confident")
 
         # Calculate overall confidence
-        confidence = operation.classification.confidence
+        confidence = operation.confidence  # 0.9 if confident, 0.3 if not
         if issues:
             confidence *= 0.7  # Reduce confidence if issues found
 

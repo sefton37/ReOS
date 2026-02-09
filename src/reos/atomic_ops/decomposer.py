@@ -34,7 +34,7 @@ class DecompositionResult:
     decomposed: bool
     operations: list[AtomicOperation]
     reasoning: str
-    confidence: float
+    confident: bool = True
     needs_clarification: bool = False
     clarification_prompt: str | None = None
 
@@ -94,7 +94,7 @@ class AtomicDecomposer:
         analysis = self._analyze_request(request)
 
         # If LLM is uncertain, signal clarification needed
-        if analysis.get("needs_clarification") and analysis.get("confidence", 1.0) < 0.7:
+        if analysis.get("needs_clarification") and not analysis.get("confident", True):
             # Create a placeholder operation that signals clarification needed
             op = AtomicOperation(
                 id=str(uuid4()),
@@ -110,7 +110,7 @@ class AtomicDecomposer:
                 decomposed=False,
                 operations=[op],
                 reasoning=analysis.get("reasoning", "Uncertain decomposition"),
-                confidence=analysis.get("confidence", 0.5),
+                confident=False,
                 needs_clarification=True,
                 clarification_prompt=analysis.get("clarification_prompt"),
             )
@@ -137,7 +137,7 @@ class AtomicDecomposer:
                 decomposed=False,
                 operations=[op],
                 reasoning=analysis.get("reasoning", "Single atomic operation"),
-                confidence=classification_result.classification.confidence,
+                confident=classification_result.classification.confident,
             )
 
         # Create parent operation for tracking
@@ -146,7 +146,7 @@ class AtomicDecomposer:
         # Classify each sub-request
         child_operations = []
         child_ids = []
-        total_confidence = 0.0
+        all_confident = True
         any_needs_clarification = False
 
         for sub_request in sub_requests:
@@ -157,8 +157,8 @@ class AtomicDecomposer:
             classification_result = self.classifier.classify(sub_request)
 
             # Check if this sub-operation needs further decomposition (recursive)
-            if classification_result.classification.confidence < 0.6:
-                # Low confidence - may need further decomposition or clarification
+            if not classification_result.classification.confident:
+                # Not confident - may need further decomposition or clarification
                 any_needs_clarification = True
 
             child_op = AtomicOperation(
@@ -173,7 +173,8 @@ class AtomicDecomposer:
 
             child_operations.append(child_op)
             child_ids.append(child_op.id)
-            total_confidence += classification_result.classification.confidence
+            if not classification_result.classification.confident:
+                all_confident = False
 
         # Create parent operation
         parent_op = AtomicOperation(
@@ -190,14 +191,12 @@ class AtomicDecomposer:
         # Include parent in result
         all_operations = [parent_op] + child_operations
 
-        avg_confidence = total_confidence / len(child_operations) if child_operations else 0.5
-
         return DecompositionResult(
             original_request=request,
             decomposed=True,
             operations=all_operations,
             reasoning=analysis.get("reasoning", f"Split into {len(child_operations)} sub-operations"),
-            confidence=min(avg_confidence, analysis.get("confidence", 1.0)),
+            confident=all_confident and analysis.get("confident", True),
             needs_clarification=any_needs_clarification,
             clarification_prompt=analysis.get("clarification_prompt") if any_needs_clarification else None,
         )
@@ -218,7 +217,7 @@ class AtomicDecomposer:
             return {
                 "needs_decomposition": False,
                 "sub_requests": [request],
-                "confidence": 0.5,
+                "confident": False,
                 "reasoning": "No LLM available for semantic analysis",
                 "needs_clarification": False,
                 "clarification_prompt": None,
@@ -247,7 +246,7 @@ Return ONLY a JSON object:
     "needs_decomposition": true/false,
     "operation_count": number,
     "sub_requests": ["first operation", "second operation", ...],
-    "confidence": 0.0-1.0,
+    "confident": true/false,
     "reasoning": "why you made this decision",
     "needs_clarification": true if uncertain about entity references,
     "clarification_prompt": "question to ask if clarification needed"
@@ -264,7 +263,7 @@ Analyze: Does this contain multiple distinct operations? If yes, what are they?"
             return {
                 "needs_decomposition": data.get("needs_decomposition", False),
                 "sub_requests": data.get("sub_requests", [request]),
-                "confidence": float(data.get("confidence", 0.5)),
+                "confident": bool(data.get("confident", False)),
                 "reasoning": data.get("reasoning", ""),
                 "needs_clarification": data.get("needs_clarification", False),
                 "clarification_prompt": data.get("clarification_prompt"),
@@ -274,7 +273,7 @@ Analyze: Does this contain multiple distinct operations? If yes, what are they?"
             return {
                 "needs_decomposition": False,
                 "sub_requests": [request],
-                "confidence": 0.3,
+                "confident": False,
                 "reasoning": f"LLM analysis failed: {e}",
                 "needs_clarification": True,
                 "clarification_prompt": "Could you rephrase your request more specifically?",

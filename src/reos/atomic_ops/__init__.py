@@ -10,13 +10,14 @@ Core Concepts:
   - Destination: stream | file | process
   - Consumer: human | machine
   - Semantics: read | interpret | execute
+- Classification uses the LLM already loaded for CAIRN/ReOS
 - Operations pass through 5-layer verification before execution
-- User feedback is collected for continuous learning (RLHF)
+- User feedback (corrections) is fed back as few-shot examples
 
 Usage:
     from reos.atomic_ops import AtomicOpsProcessor
 
-    processor = AtomicOpsProcessor(db_connection)
+    processor = AtomicOpsProcessor(db_connection, llm=llm_provider)
     operation = processor.process_request(
         request="show memory usage",
         user_id="user-123",
@@ -31,9 +32,7 @@ from .models import (
     DestinationType,
     ExecutionResult,
     ExecutionSemantics,
-    Features,
     FeedbackType,
-    LearningMetrics,
     OperationStatus,
     ReversibilityInfo,
     StateSnapshot,
@@ -43,18 +42,16 @@ from .models import (
 )
 from .schema import AtomicOpsStore, init_atomic_ops_schema
 
-# Classification pipeline (Phase 2)
-from .features import FeatureExtractor, cosine_similarity, embeddings_to_array
+# Classification (LLM-native)
 from .classifier import (
     AtomicClassifier,
-    CanonicalExample,
-    ClassificationConfig,
     ClassificationResult,
 )
+from .classification_context import ClassificationContext
 from .decomposer import AtomicDecomposer, DecompositionResult, create_operation_tree
 from .processor import AtomicOpsProcessor, ProcessingResult, create_processor
 
-# Verification pipeline (Phase 3)
+# Verification pipeline
 from .verifiers import (
     BaseVerifier,
     VerificationContext,
@@ -67,7 +64,7 @@ from .verifiers import (
 )
 from .verifiers.pipeline import VerificationMode, PipelineResult
 
-# Execution engine (Phase 4)
+# Execution engine
 from .executor import (
     ExecutionConfig,
     ExecutionContext,
@@ -76,7 +73,7 @@ from .executor import (
     create_executor,
 )
 
-# RLHF Feedback (Phase 5)
+# Feedback
 from .feedback import (
     FeedbackCollector,
     FeedbackSession,
@@ -85,7 +82,7 @@ from .feedback import (
     create_learning_aggregator,
 )
 
-# CAIRN Integration (Phase 6)
+# CAIRN Integration
 from .cairn_integration import (
     CairnAtomicBridge,
     CairnOperationResult,
@@ -100,9 +97,7 @@ __all__ = [
     "DestinationType",
     "ExecutionResult",
     "ExecutionSemantics",
-    "Features",
     "FeedbackType",
-    "LearningMetrics",
     "OperationStatus",
     "ReversibilityInfo",
     "StateSnapshot",
@@ -112,24 +107,19 @@ __all__ = [
     # Storage
     "AtomicOpsStore",
     "init_atomic_ops_schema",
-    # Feature Extraction (Phase 2)
-    "FeatureExtractor",
-    "cosine_similarity",
-    "embeddings_to_array",
-    # Classification (Phase 2)
+    # Classification (LLM-native)
     "AtomicClassifier",
-    "CanonicalExample",
-    "ClassificationConfig",
     "ClassificationResult",
-    # Decomposition (Phase 2)
+    "ClassificationContext",
+    # Decomposition
     "AtomicDecomposer",
     "DecompositionResult",
     "create_operation_tree",
-    # Processor (Phase 2)
+    # Processor
     "AtomicOpsProcessor",
     "ProcessingResult",
     "create_processor",
-    # Verification (Phase 3)
+    # Verification
     "BaseVerifier",
     "VerificationContext",
     "SyntaxVerifier",
@@ -140,19 +130,19 @@ __all__ = [
     "VerificationPipeline",
     "VerificationMode",
     "PipelineResult",
-    # Execution Engine (Phase 4)
+    # Execution Engine
     "ExecutionConfig",
     "ExecutionContext",
     "OperationExecutor",
     "StateCapture",
     "create_executor",
-    # RLHF Feedback (Phase 5)
+    # Feedback
     "FeedbackCollector",
     "FeedbackSession",
     "LearningAggregator",
     "create_feedback_collector",
     "create_learning_aggregator",
-    # CAIRN Integration (Phase 6)
+    # CAIRN Integration
     "CairnAtomicBridge",
     "CairnOperationResult",
     "create_cairn_bridge",

@@ -187,6 +187,7 @@ src/reos/atomic_ops/executor.py    # Command execution safety
 src/reos/atomic_ops/processor.py   # Classification and decomposition
 src/reos/atomic_ops/executor.py    # Execution with safety checks
 src/reos/atomic_ops/cairn_integration.py  # CAIRN bridge
+src/reos/atomic_ops/classification_context.py  # Few-shot learning for LLM classification
 ```
 
 ### Working on Providers/LLM Integration

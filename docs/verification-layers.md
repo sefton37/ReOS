@@ -307,8 +307,8 @@ def _verify_intent(operation_id: str, content: str, context: dict) -> Verificati
 
     # Get classification confidence
     classification = _get_classification(operation_id)
-    if classification.confidence < 0.7:
-        issues.append(f"Low classification confidence: {classification.confidence}")
+    if not classification.confident:
+        issues.append("Classification marked as uncertain by LLM")
 
     # Check semantic similarity to original request
     original_request = _get_original_request(operation_id)
@@ -321,10 +321,13 @@ def _verify_intent(operation_id: str, content: str, context: dict) -> Verificati
     if _matches_correction_pattern(user_id, classification):
         issues.append("Similar classifications were corrected by user")
 
+    # Compute confidence based on similarity and classification confidence
+    confidence = similarity if classification.confident else similarity * 0.5
+
     return VerificationResult(
         layer='intent',
         passed=len(issues) == 0,
-        confidence=classification.confidence * similarity,
+        confidence=confidence,
         issues_found=issues
     )
 ```
