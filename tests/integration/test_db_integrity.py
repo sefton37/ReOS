@@ -254,7 +254,7 @@ class TestSchemaVersioning:
         db.migrate()
 
         runner = MigrationRunner(db)
-        assert runner.get_current_version() == 3
+        assert runner.get_current_version() == 4
 
     def test_pending_migrations_empty_after_migrate(self, tmp_path: Path) -> None:
         """No pending migrations after full migrate()."""

@@ -266,9 +266,9 @@ def init_atomic_ops_schema(conn: sqlite3.Connection) -> None:
     )
     if cursor.fetchone() is not None:
         # Check version
-        cursor = conn.execute("SELECT version FROM atomic_ops_schema_version LIMIT 1")
+        cursor = conn.execute("SELECT MAX(version) FROM atomic_ops_schema_version")
         row = cursor.fetchone()
-        if row and row[0] >= ATOMIC_OPS_SCHEMA_VERSION:
+        if row and row[0] and row[0] >= ATOMIC_OPS_SCHEMA_VERSION:
             return  # Already at current version
 
     logger.info(f"Initializing atomic operations schema v{ATOMIC_OPS_SCHEMA_VERSION}")
