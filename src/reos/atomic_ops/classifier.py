@@ -55,6 +55,20 @@ CANONICAL_EXAMPLES = [
     CanonicalExample("why is this test failing", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
     CanonicalExample("summarize my week", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
 
+    # Stream + Human + Interpret (conversational / greetings / small talk)
+    CanonicalExample("good morning", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("hello", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("hi there", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("hey", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("good afternoon", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("good evening", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("how are you", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("thanks", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("thank you", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("goodbye", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("see you later", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+    CanonicalExample("nice work", DestinationType.STREAM, ConsumerType.HUMAN, ExecutionSemantics.INTERPRET),
+
     # Stream + Machine + Read (machine-readable output)
     CanonicalExample("get process list as json", DestinationType.STREAM, ConsumerType.MACHINE, ExecutionSemantics.READ),
     CanonicalExample("output memory stats for parsing", DestinationType.STREAM, ConsumerType.MACHINE, ExecutionSemantics.READ),
@@ -290,6 +304,13 @@ class AtomicClassifier:
             scores["semantics"]["interpret"] += 0.4
         if any(v in features.verbs for v in ["run", "execute", "start", "stop", "create", "save", "install", "delete"]):
             scores["semantics"]["execute"] += 0.5
+
+        # Conversational default: when no signals fire, assume human speech
+        # Principle: uncertainty → conversation, not uncertainty → action
+        if sum(scores["destination"].values()) == 0.0:
+            scores["destination"]["stream"] += 0.3
+        if sum(scores["semantics"].values()) == 0.0:
+            scores["semantics"]["interpret"] += 0.3
 
         # Normalize scores
         for dimension in scores:
