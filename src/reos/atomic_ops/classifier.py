@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol
+from dataclasses import dataclass
+from typing import Any
 
 from .models import (
     Classification,
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 CLASSIFICATION_SYSTEM_PROMPT = """You are a REQUEST CLASSIFIER for a local AI assistant.
 
-Classify the user's request into three dimensions:
+Classify the user's request into five dimensions:
 
 1. **destination** — Where does the output go?
    - "stream": ephemeral display (conversations, answers, greetings, status info)
@@ -44,24 +44,73 @@ Classify the user's request into three dimensions:
    - "interpret": analyze, explain, summarize, or converse (including greetings and small talk)
    - "execute": perform a side-effecting action (create, delete, run, install)
 
-CRITICAL RULES:
-- Greetings ("good morning", "hello", "hi", "thanks") → stream/human/interpret
-- Questions ("what's X?", "show me Y") → stream/human/read
-- Conversational / small talk → stream/human/interpret
-- "Save X to file" → file/human/execute
-- "Run pytest" → process/machine/execute
-- When uncertain, bias toward stream/human/interpret (conversation, not action)
+4. **domain** — What subject area does this relate to?
+   - "calendar": schedule, events, appointments, meetings
+   - "contacts": people, email addresses, phone numbers
+   - "system": CPU, memory, disk, processes, packages, services
+   - "play": acts, scenes, beats (life organization hierarchy)
+   - "tasks": todos, reminders, deadlines
+   - "knowledge": stored notes, knowledge base
+   - "personal": questions about the user (identity, goals, values, preferences)
+   - "conversation": greetings, small talk, acknowledgments, social niceties
+   - "feedback": meta-commentary about the assistant's responses or behavior
+   - "undo": reverting or undoing a previous action
+   - null: cannot determine
 
-EXAMPLES:
-- "good morning" → {{"destination":"stream","consumer":"human","semantics":"interpret","confident":true}}
-- "show memory usage" → {{"destination":"stream","consumer":"human","semantics":"read","confident":true}}
-- "run pytest" → {{"destination":"process","consumer":"machine","semantics":"execute","confident":true}}
-- "save to notes.txt" → {{"destination":"file","consumer":"human","semantics":"execute","confident":true}}
-- "explain this error" → {{"destination":"stream","consumer":"human","semantics":"interpret","confident":true}}
-- "create a new scene in Career" → {{"destination":"file","consumer":"human","semantics":"execute","confident":true}}
+5. **action_hint** — What specific action does the user want?
+   - "view": view, list, show, display
+   - "search": find, search, look for
+   - "create": create, add, new, make
+   - "update": update, change, modify, move, rename
+   - "delete": delete, remove, cancel
+   - "status": check status
+   - null: not applicable (e.g., greetings) or cannot determine
+
+CRITICAL RULES:
+- Greetings ("good morning", "hello", "hi", "thanks"):
+  stream/human/interpret, domain="conversation"
+- Questions ("what's X?", "show me Y") → stream/human/read
+- Conversational / small talk:
+  stream/human/interpret, domain="conversation"
+- "Save X to file" → file/human/execute
+- "Run pytest" → process/machine/execute, domain="system"
+- "create a new scene in Career":
+  file/human/execute, domain="play", action_hint="create"
+- When uncertain, bias toward stream/human/interpret
+
+EXAMPLES (showing input → output JSON):
+"good morning":
+  {{"destination":"stream","consumer":"human","semantics":"interpret",
+    "confident":true,"domain":"conversation","action_hint":null}}
+"show memory usage":
+  {{"destination":"stream","consumer":"human","semantics":"read",
+    "confident":true,"domain":"system","action_hint":"view"}}
+"run pytest":
+  {{"destination":"process","consumer":"machine",
+    "semantics":"execute","confident":true,
+    "domain":"system","action_hint":null}}
+"what's on my calendar?":
+  {{"destination":"stream","consumer":"human","semantics":"read",
+    "confident":true,"domain":"calendar","action_hint":"view"}}
+"move Job Search to Career":
+  {{"destination":"file","consumer":"human","semantics":"execute",
+    "confident":true,"domain":"play","action_hint":"update"}}
+"undo that":
+  {{"destination":"file","consumer":"human","semantics":"execute",
+    "confident":true,"domain":"undo","action_hint":null}}
+"you're repeating yourself":
+  {{"destination":"stream","consumer":"human",
+    "semantics":"interpret","confident":true,
+    "domain":"feedback","action_hint":null}}
+"tell me about my goals":
+  {{"destination":"stream","consumer":"human",
+    "semantics":"interpret","confident":true,
+    "domain":"personal","action_hint":"view"}}
 {corrections_block}
 Return ONLY a JSON object:
-{{"destination":"...","consumer":"...","semantics":"...","confident":true/false,"reasoning":"..."}}
+{{"destination":"...","consumer":"...","semantics":"...",
+  "confident":true/false,"reasoning":"...",
+  "domain":"...or null","action_hint":"...or null"}}
 
 Set confident=false if you are genuinely unsure which category fits best."""
 
@@ -69,6 +118,7 @@ Set confident=false if you are genuinely unsure which category fits best."""
 @dataclass
 class ClassificationResult:
     """Result of classifying a user request."""
+
     classification: Classification
     model: str = ""
 
@@ -125,10 +175,15 @@ class AtomicClassifier:
         if corrections:
             lines = ["\nPAST CORRECTIONS (learn from these):"]
             for c in corrections[:5]:  # Limit to 5 most recent
+                sys_cls = (
+                    f'{c["system_destination"]}/{c["system_consumer"]}' f'/{c["system_semantics"]}'
+                )
+                cor_cls = (
+                    f'{c["corrected_destination"]}/{c["corrected_consumer"]}'
+                    f'/{c["corrected_semantics"]}'
+                )
                 lines.append(
-                    f'- "{c["request"]}" was misclassified as '
-                    f'{c["system_destination"]}/{c["system_consumer"]}/{c["system_semantics"]}, '
-                    f'correct is {c["corrected_destination"]}/{c["corrected_consumer"]}/{c["corrected_semantics"]}'
+                    f'- "{c["request"]}" was misclassified as ' f"{sys_cls}, correct is {cor_cls}"
                 )
             corrections_block = "\n".join(lines)
 
@@ -144,6 +199,8 @@ class AtomicClassifier:
         semantics = ExecutionSemantics(data["semantics"])
         confident = bool(data.get("confident", False))
         reasoning = str(data.get("reasoning", ""))
+        domain = data.get("domain") or None
+        action_hint = data.get("action_hint") or None
 
         model_name = ""
         if hasattr(self.llm, "current_model"):
@@ -156,6 +213,8 @@ class AtomicClassifier:
                 semantics=semantics,
                 confident=confident,
                 reasoning=reasoning,
+                domain=domain,
+                action_hint=action_hint,
             ),
             model=model_name,
         )
@@ -185,8 +244,50 @@ class AtomicClassifier:
         semantics = ExecutionSemantics.INTERPRET  # Default to conversation
         if words & {"show", "list", "get", "what", "display", "status", "check"}:
             semantics = ExecutionSemantics.READ
-        elif words & {"run", "start", "stop", "kill", "create", "save", "delete", "install", "build"}:
+        elif words & {
+            "run",
+            "start",
+            "stop",
+            "kill",
+            "create",
+            "save",
+            "delete",
+            "install",
+            "build",
+        }:
             semantics = ExecutionSemantics.EXECUTE
+
+        # Domain
+        domain: str | None = None
+        if words & {"calendar", "schedule", "event", "meeting", "appointment"}:
+            domain = "calendar"
+        elif words & {"contact", "person", "people", "email", "phone"}:
+            domain = "contacts"
+        elif words & {"cpu", "memory", "ram", "disk", "process", "system", "uptime", "docker"}:
+            domain = "system"
+        elif words & {"act", "scene", "beat", "play"}:
+            domain = "play"
+        elif words & {"todo", "task", "reminder", "deadline"}:
+            domain = "tasks"
+        elif words & {"undo", "revert", "reverse"}:
+            domain = "undo"
+        elif words & {"hi", "hello", "hey", "morning", "afternoon", "evening", "thanks", "bye"}:
+            domain = "conversation"
+
+        # Action hint
+        action_hint: str | None = None
+        if words & {"show", "list", "display", "view", "what"}:
+            action_hint = "view"
+        elif words & {"find", "search", "where", "look"}:
+            action_hint = "search"
+        elif words & {"create", "add", "new", "make"}:
+            action_hint = "create"
+        elif words & {"update", "change", "modify", "move", "rename", "fix"}:
+            action_hint = "update"
+        elif words & {"delete", "remove", "cancel"}:
+            action_hint = "delete"
+        elif words & {"status", "check"}:
+            action_hint = "status"
 
         return Classification(
             destination=destination,
@@ -194,4 +295,6 @@ class AtomicClassifier:
             semantics=semantics,
             confident=False,
             reasoning="keyword fallback (LLM unavailable)",
+            domain=domain,
+            action_hint=action_hint,
         )

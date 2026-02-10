@@ -1,25 +1,21 @@
-"""Tests for cairn/intent_engine.py - Multi-stage intent processing.
+"""Tests for cairn/intent_engine.py — Response generation and hallucination checking.
 
-Tests intent extraction, verification, and execution:
-- Intent category and action classification
-- Pattern matching (fast path)
-- LLM-based extraction
-- Tool selection and argument building
+Tests for:
+- Intent category and action enums
 - Hallucination detection
-- Conversational response generation
+- Response generation (safe responses, feedback, conversation)
+- Response parsing
+- Event formatting
+- Data classes
 """
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from reos.cairn.intent_engine import (
-    CATEGORY_TOOLS,
-    INTENT_PATTERNS,
     CairnIntentEngine,
     ExtractedIntent,
     IntentAction,
@@ -27,7 +23,6 @@ from reos.cairn.intent_engine import (
     IntentResult,
     VerifiedIntent,
 )
-
 
 # =============================================================================
 # Fixtures
@@ -38,8 +33,10 @@ from reos.cairn.intent_engine import (
 def mock_llm() -> MagicMock:
     """Create a mock LLM provider."""
     llm = MagicMock()
-    # Default JSON response for intent extraction
-    llm.chat_json.return_value = '{"category": "CALENDAR", "action": "VIEW", "target": "events", "confidence": 0.9, "reasoning": "test"}'
+    llm.chat_json.return_value = (
+        '{"category": "CALENDAR", "action": "VIEW",'
+        ' "target": "events", "confidence": 0.9, "reasoning": "test"}'
+    )
     llm.chat_text.return_value = "Test response"
     return llm
 
@@ -85,8 +82,18 @@ class TestIntentEnums:
     def test_all_categories_defined(self) -> None:
         """All expected categories are defined."""
         expected = [
-            "CALENDAR", "CONTACTS", "SYSTEM", "CODE", "PERSONAL",
-            "TASKS", "KNOWLEDGE", "PLAY", "UNDO", "FEEDBACK", "CONVERSATION", "UNKNOWN",
+            "CALENDAR",
+            "CONTACTS",
+            "SYSTEM",
+            "CODE",
+            "PERSONAL",
+            "TASKS",
+            "KNOWLEDGE",
+            "PLAY",
+            "UNDO",
+            "FEEDBACK",
+            "CONVERSATION",
+            "UNKNOWN",
         ]
         actual = [c.name for c in IntentCategory]
         assert set(expected) == set(actual)
@@ -94,420 +101,16 @@ class TestIntentEnums:
     def test_all_actions_defined(self) -> None:
         """All expected actions are defined."""
         expected = [
-            "VIEW", "SEARCH", "CREATE", "UPDATE", "DELETE",
-            "STATUS", "UNKNOWN",
+            "VIEW",
+            "SEARCH",
+            "CREATE",
+            "UPDATE",
+            "DELETE",
+            "STATUS",
+            "UNKNOWN",
         ]
         actual = [a.name for a in IntentAction]
         assert set(expected) == set(actual)
-
-
-# =============================================================================
-# Intent Pattern Matching Tests
-# =============================================================================
-
-
-class TestIntentPatterns:
-    """Test INTENT_PATTERNS dictionary."""
-
-    def test_calendar_patterns_exist(self) -> None:
-        """Calendar category has patterns."""
-        patterns = INTENT_PATTERNS.get(IntentCategory.CALENDAR, [])
-        assert len(patterns) > 0
-        assert "calendar" in patterns
-        assert "schedule" in patterns
-
-    def test_play_patterns_exist(self) -> None:
-        """Play category has patterns for acts, scenes, beats."""
-        patterns = INTENT_PATTERNS.get(IntentCategory.PLAY, [])
-        assert any("act" in p for p in patterns)
-        assert any("scene" in p for p in patterns)
-        assert any("beat" in p for p in patterns)
-
-    def test_undo_patterns_exist(self) -> None:
-        """Undo category has patterns."""
-        patterns = INTENT_PATTERNS.get(IntentCategory.UNDO, [])
-        assert "undo" in patterns
-        assert "revert" in patterns
-
-    def test_feedback_patterns_exist(self) -> None:
-        """Feedback category has patterns."""
-        patterns = INTENT_PATTERNS.get(IntentCategory.FEEDBACK, [])
-        assert any("repeating" in p for p in patterns)
-        assert any("not what i" in p for p in patterns)
-
-
-# =============================================================================
-# Category-Tool Mapping Tests
-# =============================================================================
-
-
-class TestCategoryTools:
-    """Test CATEGORY_TOOLS mapping."""
-
-    def test_calendar_has_tool(self) -> None:
-        """Calendar category maps to a tool."""
-        assert CATEGORY_TOOLS.get(IntentCategory.CALENDAR) == "cairn_get_calendar"
-
-    def test_play_has_default_tool(self) -> None:
-        """Play category has a default tool."""
-        assert CATEGORY_TOOLS.get(IntentCategory.PLAY) == "cairn_list_acts"
-
-    def test_undo_has_tool(self) -> None:
-        """Undo category maps to undo tool."""
-        assert CATEGORY_TOOLS.get(IntentCategory.UNDO) == "cairn_undo_last"
-
-
-# =============================================================================
-# Intent Extraction Tests
-# =============================================================================
-
-
-class TestIntentExtraction:
-    """Test _extract_intent method."""
-
-    def test_extract_calendar_intent(self, intent_engine: CairnIntentEngine) -> None:
-        """Extract calendar intent from pattern match."""
-        intent = intent_engine._extract_intent("What's on my calendar today?")
-
-        assert intent.category == IntentCategory.CALENDAR
-        assert intent.confidence > 0.5
-
-    def test_extract_play_intent(self, intent_engine: CairnIntentEngine) -> None:
-        """Extract Play intent for act operations."""
-        intent = intent_engine._extract_intent("Show me my acts")
-
-        assert intent.category == IntentCategory.PLAY
-        assert intent.action == IntentAction.VIEW
-
-    def test_extract_create_action(self, intent_engine: CairnIntentEngine) -> None:
-        """Detect CREATE action from keywords."""
-        intent = intent_engine._extract_intent("Create a new act for Career")
-
-        assert intent.action == IntentAction.CREATE
-
-    def test_extract_delete_action(self, intent_engine: CairnIntentEngine) -> None:
-        """Detect DELETE action from keywords."""
-        intent = intent_engine._extract_intent("Delete the old act")
-
-        assert intent.action == IntentAction.DELETE
-
-    def test_extract_update_action(self, intent_engine: CairnIntentEngine) -> None:
-        """Detect UPDATE action from keywords."""
-        intent = intent_engine._extract_intent("Move this beat to another act")
-
-        assert intent.action == IntentAction.UPDATE
-
-    def test_extract_undo_intent(self, intent_engine: CairnIntentEngine) -> None:
-        """Extract undo intent."""
-        intent = intent_engine._extract_intent("Undo that please")
-
-        assert intent.category == IntentCategory.UNDO
-
-    def test_unknown_falls_back_to_llm(
-        self, intent_engine: CairnIntentEngine, mock_llm: MagicMock
-    ) -> None:
-        """Unknown patterns fall back to LLM extraction."""
-        # Use a message that doesn't match any patterns
-        mock_llm.chat_json.return_value = '{"category": "CODE", "action": "CREATE", "target": "function", "confidence": 0.8, "reasoning": "test"}'
-
-        # Use a completely unrelated phrase that won't match any patterns
-        intent = intent_engine._extract_intent("xyzzy plugh foobar baz")
-
-        # Should have called LLM
-        mock_llm.chat_json.assert_called()
-        # Should get CODE category from LLM
-        assert intent.category == IntentCategory.CODE
-
-
-class TestLLMIntentExtraction:
-    """Test _extract_intent_with_llm method."""
-
-    def test_llm_extraction_parses_json(
-        self, intent_engine: CairnIntentEngine, mock_llm: MagicMock
-    ) -> None:
-        """LLM extraction parses JSON response."""
-        mock_llm.chat_json.return_value = '{"category": "CONTACTS", "action": "SEARCH", "target": "john", "confidence": 0.9, "reasoning": "test"}'
-
-        intent = intent_engine._extract_intent_with_llm("Find John's phone number")
-
-        assert intent.category == IntentCategory.CONTACTS
-        assert intent.action == IntentAction.SEARCH
-        assert intent.confidence == 0.9
-
-    def test_llm_extraction_handles_invalid_json(
-        self, intent_engine: CairnIntentEngine, mock_llm: MagicMock
-    ) -> None:
-        """LLM extraction returns UNKNOWN on invalid JSON."""
-        mock_llm.chat_json.return_value = "not valid json"
-
-        intent = intent_engine._extract_intent_with_llm("Something weird")
-
-        assert intent.category == IntentCategory.UNKNOWN
-        assert intent.confidence == 0.0
-
-
-# =============================================================================
-# Intent Verification Tests
-# =============================================================================
-
-
-class TestIntentVerification:
-    """Test _verify_intent method."""
-
-    def test_verify_calendar_intent(self, intent_engine: CairnIntentEngine) -> None:
-        """Verify calendar intent selects correct tool."""
-        intent = ExtractedIntent(
-            category=IntentCategory.CALENDAR,
-            action=IntentAction.VIEW,
-            target="today",
-            raw_input="What's on my calendar?",
-        )
-
-        verified = intent_engine._verify_intent(intent)
-
-        assert verified.verified is True
-        assert verified.tool_name == "cairn_get_calendar"
-
-    def test_verify_personal_no_tool(self, intent_engine: CairnIntentEngine) -> None:
-        """Personal questions don't need a tool."""
-        intent = ExtractedIntent(
-            category=IntentCategory.PERSONAL,
-            action=IntentAction.VIEW,
-            target="goals",
-            raw_input="What are my goals?",
-        )
-
-        verified = intent_engine._verify_intent(intent)
-
-        assert verified.verified is True
-        assert verified.tool_name is None
-
-    def test_verify_feedback_no_tool(self, intent_engine: CairnIntentEngine) -> None:
-        """Feedback category uses direct handling, not tools."""
-        intent = ExtractedIntent(
-            category=IntentCategory.FEEDBACK,
-            action=IntentAction.UNKNOWN,
-            target="response quality",
-            raw_input="You're repeating yourself",
-        )
-
-        verified = intent_engine._verify_intent(intent)
-
-        assert verified.verified is True
-        assert verified.tool_name is None
-
-    def test_verify_unknown_not_verified(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
-        """Unknown category is not verified."""
-        intent = ExtractedIntent(
-            category=IntentCategory.UNKNOWN,
-            action=IntentAction.UNKNOWN,
-            target="unknown",
-            raw_input="gibberish",
-        )
-
-        verified = intent_engine._verify_intent(intent)
-
-        assert verified.verified is False
-        assert verified.fallback_message is not None
-
-
-# =============================================================================
-# Play Tool Selection Tests
-# =============================================================================
-
-
-class TestSelectPlayTool:
-    """Test _select_play_tool method."""
-
-    def test_select_list_acts(self, intent_engine: CairnIntentEngine) -> None:
-        """Select cairn_list_acts for viewing acts."""
-        intent = ExtractedIntent(
-            category=IntentCategory.PLAY,
-            action=IntentAction.VIEW,
-            target="acts",
-            raw_input="Show me all my acts",
-        )
-
-        tool = intent_engine._select_play_tool(intent)
-        assert tool == "cairn_list_acts"
-
-    def test_select_list_beats(self, intent_engine: CairnIntentEngine) -> None:
-        """Select cairn_list_beats for viewing beats."""
-        intent = ExtractedIntent(
-            category=IntentCategory.PLAY,
-            action=IntentAction.VIEW,
-            target="beats",
-            raw_input="Show me all my beats",
-        )
-
-        tool = intent_engine._select_play_tool(intent)
-        assert tool == "cairn_list_beats"
-
-    def test_select_move_beat(self, intent_engine: CairnIntentEngine) -> None:
-        """Select cairn_move_beat_to_act for move operations."""
-        intent = ExtractedIntent(
-            category=IntentCategory.PLAY,
-            action=IntentAction.UPDATE,
-            target="beat",
-            raw_input="Move Job Search to the Career act",
-        )
-
-        tool = intent_engine._select_play_tool(intent)
-        assert tool == "cairn_move_beat_to_act"
-
-    def test_select_create_act(self, intent_engine: CairnIntentEngine) -> None:
-        """Select cairn_create_act for creating acts."""
-        intent = ExtractedIntent(
-            category=IntentCategory.PLAY,
-            action=IntentAction.CREATE,
-            target="act",
-            raw_input="Create a new act called Hobbies",
-        )
-
-        tool = intent_engine._select_play_tool(intent)
-        assert tool == "cairn_create_act"
-
-
-# =============================================================================
-# Entity Extraction Tests
-# =============================================================================
-
-
-class TestEntityExtraction:
-    """Test entity name extraction methods."""
-
-    def test_extract_act_name(self, intent_engine: CairnIntentEngine) -> None:
-        """Extract act name from input."""
-        # The regex extracts "Career" from "the Career act" pattern
-        result = intent_engine._extract_act_name("the Career act needs updating")
-        assert result == "Career"
-
-    def test_extract_act_name_from_sentence(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
-        """Extract act name from 'in/to the X act' pattern."""
-        result = intent_engine._extract_act_name("Move beat to the Career act")
-        # May return Career or partial match depending on regex
-        assert result is not None
-
-    def test_extract_act_name_called_pattern(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
-        """Extract act name with 'called' pattern."""
-        result = intent_engine._extract_act_name("act called my projects")
-        # Regex uses lower() so returns lowercase
-        assert result == "my projects"
-
-    def test_extract_scene_name(self, intent_engine: CairnIntentEngine) -> None:
-        """Extract scene name from input."""
-        # The regex captures what's before "scene"
-        result = intent_engine._extract_scene_name("the Planning scene needs work")
-        assert result == "Planning"
-
-    def test_extract_beat_name(self, intent_engine: CairnIntentEngine) -> None:
-        """Extract beat name from input."""
-        # The regex captures what's before "beat"
-        result = intent_engine._extract_beat_name("the Job Search beat is done")
-        assert result == "Job Search"
-
-    def test_extract_entity_title_create_pattern(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
-        """Extract title from create patterns."""
-        result = intent_engine._extract_entity_title(
-            "Create a new act called Side Projects", "act"
-        )
-        # Regex uses lower() so returns lowercase
-        assert result == "side projects"
-
-    def test_extract_new_title(self, intent_engine: CairnIntentEngine) -> None:
-        """Extract new title from rename patterns."""
-        result = intent_engine._extract_new_title("Rename to my career goals")
-        assert result == "my career goals"
-
-
-# =============================================================================
-# Beat Move Argument Extraction Tests
-# =============================================================================
-
-
-class TestBeatMoveArgExtraction:
-    """Test _extract_beat_move_args method."""
-
-    def test_regex_pattern_should_be_in(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
-        """Extract from 'X should be in Y act' pattern."""
-        args = intent_engine._regex_extract_beat_move_args(
-            "Job Search beat should be in the Career act"
-        )
-
-        assert "beat_name" in args or "target_act_name" in args
-
-    def test_regex_pattern_move_to(self, intent_engine: CairnIntentEngine) -> None:
-        """Extract from 'move X to Y' pattern."""
-        args = intent_engine._regex_extract_beat_move_args(
-            "Move Job Search to Career"
-        )
-
-        assert "beat_name" in args or "target_act_name" in args
-
-    def test_llm_extraction_with_play_data(
-        self, engine_with_play_data: CairnIntentEngine, mock_llm: MagicMock
-    ) -> None:
-        """LLM extraction uses Play context."""
-        mock_llm.chat_json.return_value = '{"beat_name": "Job Search", "target_act_name": "Career"}'
-
-        args = engine_with_play_data._extract_beat_move_args(
-            "Move Job Search to Career act"
-        )
-
-        # LLM should have been called
-        mock_llm.chat_json.assert_called()
-
-
-# =============================================================================
-# Build Tool Args Tests
-# =============================================================================
-
-
-class TestBuildToolArgs:
-    """Test _build_tool_args method."""
-
-    def test_build_args_for_contacts_search(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
-        """Build args for contacts search includes query."""
-        intent = ExtractedIntent(
-            category=IntentCategory.CONTACTS,
-            action=IntentAction.SEARCH,
-            target="john",
-            raw_input="Find John's email",
-        )
-
-        args = intent_engine._build_tool_args(intent, "cairn_search_contacts")
-
-        assert "query" in args
-        assert args["query"] == "john"
-
-    def test_build_args_preserves_existing_params(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
-        """Build args preserves parameters from extraction."""
-        intent = ExtractedIntent(
-            category=IntentCategory.PLAY,
-            action=IntentAction.UPDATE,
-            target="beat",
-            parameters={"beat_name": "Task A", "target_act_name": "Work"},
-            raw_input="Move Task A to Work",
-        )
-
-        args = intent_engine._build_tool_args(intent, "cairn_move_beat_to_act")
-
-        assert args.get("beat_name") == "Task A"
-        assert args.get("target_act_name") == "Work"
 
 
 # =============================================================================
@@ -518,9 +121,7 @@ class TestBuildToolArgs:
 class TestHallucinationDetection:
     """Test _verify_no_hallucination method."""
 
-    def test_detect_platform_hallucination(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
+    def test_detect_platform_hallucination(self, intent_engine: CairnIntentEngine) -> None:
         """Detect wrong platform mentions."""
         is_valid, reason = intent_engine._verify_no_hallucination(
             response="On macOS, you can use Finder",
@@ -536,9 +137,7 @@ class TestHallucinationDetection:
         assert is_valid is False
         assert "platform" in reason.lower()
 
-    def test_detect_event_hallucination_on_empty(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
+    def test_detect_event_hallucination_on_empty(self, intent_engine: CairnIntentEngine) -> None:
         """Detect fabricated events when calendar is empty."""
         is_valid, reason = intent_engine._verify_no_hallucination(
             response="You have a meeting with John at 10:00 AM",
@@ -578,9 +177,7 @@ class TestHallucinationDetection:
 class TestResponseGeneration:
     """Test response generation methods."""
 
-    def test_generate_safe_calendar_response_empty(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
+    def test_generate_safe_calendar_response_empty(self, intent_engine: CairnIntentEngine) -> None:
         """Generate safe response for empty calendar."""
         intent = ExtractedIntent(
             category=IntentCategory.CALENDAR,
@@ -624,68 +221,121 @@ class TestResponseGeneration:
 
 
 # =============================================================================
-# Full Process Flow Tests
+# Feedback Handling Tests
 # =============================================================================
 
 
-class TestProcessFlow:
-    """Test full process() method flow."""
+class TestFeedbackHandling:
+    """Test _handle_feedback method."""
 
-    def test_process_calendar_query(
-        self, intent_engine: CairnIntentEngine, mock_llm: MagicMock
+    def test_handle_repetition_complaint(self, intent_engine: CairnIntentEngine) -> None:
+        """Handle 'you're repeating yourself' feedback."""
+        intent = ExtractedIntent(
+            category=IntentCategory.FEEDBACK,
+            action=IntentAction.UNKNOWN,
+            target="",
+            raw_input="You're repeating yourself",
+        )
+        response = intent_engine._handle_feedback(intent)
+        assert "apologize" in response.lower() or "repeating" in response.lower()
+
+    def test_handle_misunderstanding(self, intent_engine: CairnIntentEngine) -> None:
+        """Handle misunderstanding feedback."""
+        intent = ExtractedIntent(
+            category=IntentCategory.FEEDBACK,
+            action=IntentAction.UNKNOWN,
+            target="",
+            raw_input="That's not what I meant",
+        )
+        response = intent_engine._handle_feedback(intent)
+        assert "rephrase" in response.lower() or "misunderstanding" in response.lower()
+
+    def test_handle_positive_feedback(self, intent_engine: CairnIntentEngine) -> None:
+        """Handle positive feedback."""
+        intent = ExtractedIntent(
+            category=IntentCategory.FEEDBACK,
+            action=IntentAction.UNKNOWN,
+            target="",
+            raw_input="That was helpful, thanks!",
+        )
+        response = intent_engine._handle_feedback(intent)
+        assert "glad" in response.lower() or "help" in response.lower()
+
+
+# =============================================================================
+# Conversation Handling Tests
+# =============================================================================
+
+
+class TestConversationHandling:
+    """Test _handle_conversation method."""
+
+    def test_conversation_uses_llm(
+        self,
+        intent_engine: CairnIntentEngine,
+        mock_llm: MagicMock,
     ) -> None:
-        """Process a calendar query end-to-end."""
-        mock_execute_tool = MagicMock(
-            return_value={"count": 1, "events": [{"title": "Meeting", "start": "2026-01-15T10:00:00"}]}
+        """Conversation handler calls LLM."""
+        mock_llm.chat_text.return_value = "Good morning! How can I help?"
+        intent = ExtractedIntent(
+            category=IntentCategory.CONVERSATION,
+            action=IntentAction.UNKNOWN,
+            target="",
+            raw_input="Good morning!",
         )
+        response = intent_engine._handle_conversation(intent)
+        mock_llm.chat_text.assert_called()
+        assert len(response) > 0
 
-        result = intent_engine.process(
-            "What's on my calendar today?",
-            execute_tool=mock_execute_tool,
-        )
-
-        assert isinstance(result, IntentResult)
-        assert result.verified_intent.verified is True
-        # Tool should have been called
-        mock_execute_tool.assert_called()
-
-    def test_process_personal_question_no_tool(
-        self, intent_engine: CairnIntentEngine, mock_llm: MagicMock
+    def test_conversation_fallback(
+        self,
+        intent_engine: CairnIntentEngine,
+        mock_llm: MagicMock,
     ) -> None:
-        """Process personal question without tool call."""
-        mock_execute_tool = MagicMock()
+        """Conversation handler falls back on LLM error."""
+        mock_llm.chat_text.side_effect = Exception("LLM unavailable")
+        intent = ExtractedIntent(
+            category=IntentCategory.CONVERSATION,
+            action=IntentAction.UNKNOWN,
+            target="",
+            raw_input="Hi there!",
+        )
+        response = intent_engine._handle_conversation(intent)
+        assert "Hello" in response or "help" in response.lower()
 
-        result = intent_engine.process(
-            "Tell me about my goals",
-            execute_tool=mock_execute_tool,
-            persona_context="User goal: Learn Python",
+
+# =============================================================================
+# Repetition Detection Tests
+# =============================================================================
+
+
+class TestRepetitionDetection:
+    """Test _is_response_repetitive method."""
+
+    def test_exact_duplicate_detected(self, intent_engine: CairnIntentEngine) -> None:
+        """Detect exact duplicate responses."""
+        intent_engine._track_response("Here is my response about the calendar.")
+        assert intent_engine._is_response_repetitive("Here is my response about the calendar.")
+
+    def test_similar_response_detected(self, intent_engine: CairnIntentEngine) -> None:
+        """Detect highly similar responses."""
+        intent_engine._track_response(
+            "You have three events today: a meeting, lunch, and a review."
+        )
+        assert intent_engine._is_response_repetitive(
+            "You have three events today: a meeting, a lunch, and a review."
         )
 
-        assert isinstance(result, IntentResult)
-        # Tool should NOT have been called for PERSONAL category
-        # (but the mock might still be called for other reasons)
-
-    def test_process_with_tool_error_attempts_recovery(
-        self, intent_engine: CairnIntentEngine, mock_llm: MagicMock
-    ) -> None:
-        """Process handles tool errors and attempts recovery."""
-        # First call fails, second (recovery) succeeds
-        mock_execute_tool = MagicMock(
-            side_effect=[
-                {"error": "Beat not found"},  # First call fails
-                {"beats": [{"title": "Task A"}]},  # Recovery call succeeds
-            ]
+    def test_different_response_not_flagged(self, intent_engine: CairnIntentEngine) -> None:
+        """Don't flag genuinely different responses."""
+        intent_engine._track_response("Your calendar is empty today.")
+        assert not intent_engine._is_response_repetitive(
+            "You have 5 meetings scheduled for tomorrow."
         )
 
-        intent_engine.available_tools.add("cairn_move_beat_to_act")
-
-        result = intent_engine.process(
-            "Move Task A to Career",
-            execute_tool=mock_execute_tool,
-        )
-
-        # Should have attempted recovery
-        assert isinstance(result, IntentResult)
+    def test_no_history_not_repetitive(self, intent_engine: CairnIntentEngine) -> None:
+        """No history means nothing is repetitive."""
+        assert not intent_engine._is_response_repetitive("Any response")
 
 
 # =============================================================================
@@ -757,9 +407,7 @@ class TestParseResponse:
         assert response == "Hello, world!"
         assert thinking == []
 
-    def test_parse_response_with_thinking(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
+    def test_parse_response_with_thinking(self, intent_engine: CairnIntentEngine) -> None:
         """Parse response with thinking tags."""
         raw = """<thinking>
 Step 1: Consider options
@@ -773,9 +421,7 @@ Here is my response."""
         assert "Here is my response" in response
         assert len(thinking) > 0
 
-    def test_parse_response_with_answer_tags(
-        self, intent_engine: CairnIntentEngine
-    ) -> None:
+    def test_parse_response_with_answer_tags(self, intent_engine: CairnIntentEngine) -> None:
         """Parse response with answer tags."""
         raw = """<thinking>Some thinking</thinking>
 <answer>The actual answer</answer>"""
@@ -807,12 +453,10 @@ class TestEventFormatting:
 
         assert "January" in formatted
         assert "15" in formatted
-        # Should not include time
         assert "14:30" not in formatted
 
     def test_format_invalid_time(self, intent_engine: CairnIntentEngine) -> None:
         """Handle invalid time formats gracefully."""
         formatted = intent_engine._format_event_time("not a date")
 
-        # Should return original on error
         assert formatted == "not a date"

@@ -15,32 +15,36 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
 
 
 class DestinationType(str, Enum):
     """Where the operation output goes."""
-    STREAM = "stream"    # Ephemeral output, displayed once
-    FILE = "file"        # Persistent storage
+
+    STREAM = "stream"  # Ephemeral output, displayed once
+    FILE = "file"  # Persistent storage
     PROCESS = "process"  # Spawns a system process
 
 
 class ConsumerType(str, Enum):
     """Who consumes the operation result."""
-    HUMAN = "human"      # Human reads and interprets
+
+    HUMAN = "human"  # Human reads and interprets
     MACHINE = "machine"  # Machine processes further
 
 
 class ExecutionSemantics(str, Enum):
     """What action the operation takes."""
-    READ = "read"        # Retrieve existing data
+
+    READ = "read"  # Retrieve existing data
     INTERPRET = "interpret"  # Analyze or transform data
     EXECUTE = "execute"  # Perform side-effecting action
 
 
 class OperationStatus(str, Enum):
     """Status of an atomic operation."""
+
     CLASSIFYING = "classifying"
     AWAITING_VERIFICATION = "awaiting_verification"
     AWAITING_APPROVAL = "awaiting_approval"
@@ -52,6 +56,7 @@ class OperationStatus(str, Enum):
 
 class VerificationLayer(str, Enum):
     """The 5-layer verification system."""
+
     SYNTAX = "syntax"
     SEMANTIC = "semantic"
     BEHAVIORAL = "behavioral"
@@ -61,6 +66,7 @@ class VerificationLayer(str, Enum):
 
 class FeedbackType(str, Enum):
     """Types of user feedback."""
+
     CORRECTION = "correction"
     APPROVAL = "approval"
     REJECTION = "rejection"
@@ -69,17 +75,22 @@ class FeedbackType(str, Enum):
 @dataclass
 class Classification:
     """Result of classifying an operation."""
+
     destination: DestinationType
     consumer: ConsumerType
     semantics: ExecutionSemantics
     confident: bool = True
     reasoning: str = ""
-
+    # calendar, play, system, conversation, personal, tasks,
+    # contacts, knowledge, undo, feedback
+    domain: str | None = None
+    action_hint: str | None = None  # view, create, update, delete, search, status
 
 
 @dataclass
 class VerificationResult:
     """Result of a single verification layer."""
+
     layer: VerificationLayer
     passed: bool
     confidence: float
@@ -91,8 +102,9 @@ class VerificationResult:
 @dataclass
 class ExecutionResult:
     """Result of executing an operation."""
+
     success: bool
-    exit_code: Optional[int] = None
+    exit_code: int | None = None
     stdout: str = ""
     stderr: str = ""
     duration_ms: int = 0
@@ -103,6 +115,7 @@ class ExecutionResult:
 @dataclass
 class StateSnapshot:
     """Captured state before/after execution."""
+
     timestamp: datetime = field(default_factory=datetime.now)
     files: dict[str, dict] = field(default_factory=dict)  # path -> {exists, hash, backup_path}
     processes: list[dict] = field(default_factory=list)
@@ -112,8 +125,9 @@ class StateSnapshot:
 @dataclass
 class ReversibilityInfo:
     """Information about whether an operation can be undone."""
+
     reversible: bool
-    method: Optional[str] = None  # 'restore_backup', 'inverse_command', etc.
+    method: str | None = None  # 'restore_backup', 'inverse_command', etc.
     undo_commands: list[str] = field(default_factory=list)
     backup_files: dict[str, str] = field(default_factory=dict)  # original -> backup
     reason: str = ""
@@ -127,20 +141,21 @@ class AtomicOperation:
     each classified by the 3x2x3 taxonomy and tracked through verification,
     execution, and feedback collection.
     """
+
     # Identity
     id: str = field(default_factory=lambda: str(uuid4()))
-    block_id: Optional[str] = None  # Links to blocks table
+    block_id: str | None = None  # Links to blocks table
 
     # User input
     user_request: str = ""
     user_id: str = ""
 
     # Classification
-    classification: Optional[Classification] = None
+    classification: Classification | None = None
 
     # Decomposition
     is_decomposed: bool = False
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     child_ids: list[str] = field(default_factory=list)
 
     # Verification
@@ -148,28 +163,28 @@ class AtomicOperation:
 
     # Execution
     status: OperationStatus = OperationStatus.CLASSIFYING
-    execution_result: Optional[ExecutionResult] = None
-    state_before: Optional[StateSnapshot] = None
-    state_after: Optional[StateSnapshot] = None
-    reversibility: Optional[ReversibilityInfo] = None
+    execution_result: ExecutionResult | None = None
+    state_before: StateSnapshot | None = None
+    state_after: StateSnapshot | None = None
+    reversibility: ReversibilityInfo | None = None
 
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
     # Agent source
     source_agent: str = ""  # 'cairn', 'reos', 'riva'
 
     @property
-    def destination(self) -> Optional[DestinationType]:
+    def destination(self) -> DestinationType | None:
         return self.classification.destination if self.classification else None
 
     @property
-    def consumer(self) -> Optional[ConsumerType]:
+    def consumer(self) -> ConsumerType | None:
         return self.classification.consumer if self.classification else None
 
     @property
-    def semantics(self) -> Optional[ExecutionSemantics]:
+    def semantics(self) -> ExecutionSemantics | None:
         return self.classification.semantics if self.classification else None
 
     @property
@@ -214,23 +229,22 @@ class AtomicOperation:
 @dataclass
 class UserFeedback:
     """User feedback on an operation."""
+
     id: str = field(default_factory=lambda: str(uuid4()))
     operation_id: str = ""
     user_id: str = ""
     feedback_type: FeedbackType = FeedbackType.APPROVAL
 
     # Correction fields
-    system_classification: Optional[dict] = None
-    user_corrected_destination: Optional[str] = None
-    user_corrected_consumer: Optional[str] = None
-    user_corrected_semantics: Optional[str] = None
-    correction_reasoning: Optional[str] = None
+    system_classification: dict | None = None
+    user_corrected_destination: str | None = None
+    user_corrected_consumer: str | None = None
+    user_corrected_semantics: str | None = None
+    correction_reasoning: str | None = None
 
     # Approval fields
-    approved: Optional[bool] = None
-    time_to_decision_ms: Optional[int] = None
+    approved: bool | None = None
+    time_to_decision_ms: int | None = None
 
     # Meta
     created_at: datetime = field(default_factory=datetime.now)
-
-
