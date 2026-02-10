@@ -8,6 +8,25 @@ Taxonomy:
 - Destination: stream | file | process
 - Consumer: human | machine
 - Semantics: read | interpret | execute
+
+Confidence Semantics
+====================
+Two distinct confidence systems coexist by design:
+
+**Classification confidence** — binary (Classification.confident: bool).
+  True = "I understand this request well enough to proceed."
+  False = "I need clarification before proceeding."
+  Used by the classifier (LLM or keyword fallback) and by the bridge
+  to decide whether to auto-approve or ask the user.
+
+**Verification confidence** — float 0.0–1.0 (VerificationResult.confidence).
+  Each of the 5 RIVA layers (syntax, semantic, behavioral, safety, intent)
+  produces a float score. These are aggregated by AtomicOperation
+  .overall_verification_confidence() with equal 0.2 weights.
+
+The AtomicOperation.confidence property bridges the two systems for
+backward compatibility, mapping confident=True → 0.9, False → 0.3.
+Remove it once agent.py speaks the new type system directly.
 """
 
 from __future__ import annotations

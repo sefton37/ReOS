@@ -418,3 +418,25 @@ class TestBackwardCompatConfidence:
 
         op = AtomicOperation(user_request="test", user_id="u")
         assert op.confidence == 0.0
+
+
+class TestPromptTemplateSafety:
+    """Test that the classification prompt template handles edge cases."""
+
+    def test_prompt_no_format_errors_without_corrections(self) -> None:
+        """Prompt renders correctly with empty corrections block."""
+        from reos.atomic_ops.classifier import CLASSIFICATION_SYSTEM_PROMPT
+
+        result = CLASSIFICATION_SYSTEM_PROMPT.replace("{corrections_block}", "")
+        assert "destination" in result
+        assert "{" in result  # JSON examples should have literal braces
+
+    def test_prompt_handles_braces_in_corrections(self) -> None:
+        """Corrections containing braces don't break the prompt."""
+        from reos.atomic_ops.classifier import CLASSIFICATION_SYSTEM_PROMPT
+
+        nasty = 'User said "{fix this}" and it broke'
+        result = CLASSIFICATION_SYSTEM_PROMPT.replace("{corrections_block}", nasty)
+        assert nasty in result
+        # JSON examples should still be intact
+        assert '"destination"' in result

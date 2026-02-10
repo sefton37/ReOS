@@ -134,7 +134,12 @@ class AtomicOpsProcessor:
         stored_operations = []
         for op in decomp_result.operations:
             if not op.is_decomposed:
-                # Re-classify with corrections context if we have corrections
+                # Re-classify with corrections context.
+                # The decomposer already classified this operation to decide
+                # whether decomposition was needed. Now we re-classify with
+                # the user's past corrections as few-shot examples, producing
+                # a more accurate classification for execution.
+                # This intentionally overwrites the decomposer's classification.
                 if corrections and op.classification:
                     result = self.classifier.classify(op.user_request, corrections=corrections)
                     op.classification = result.classification

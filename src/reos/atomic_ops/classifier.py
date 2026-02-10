@@ -80,37 +80,37 @@ CRITICAL RULES:
 
 EXAMPLES (showing input → output JSON):
 "good morning":
-  {{"destination":"stream","consumer":"human","semantics":"interpret",
-    "confident":true,"domain":"conversation","action_hint":null}}
+  {"destination":"stream","consumer":"human","semantics":"interpret",
+    "confident":true,"domain":"conversation","action_hint":null}
 "show memory usage":
-  {{"destination":"stream","consumer":"human","semantics":"read",
-    "confident":true,"domain":"system","action_hint":"view"}}
+  {"destination":"stream","consumer":"human","semantics":"read",
+    "confident":true,"domain":"system","action_hint":"view"}
 "run pytest":
-  {{"destination":"process","consumer":"machine",
+  {"destination":"process","consumer":"machine",
     "semantics":"execute","confident":true,
-    "domain":"system","action_hint":null}}
+    "domain":"system","action_hint":null}
 "what's on my calendar?":
-  {{"destination":"stream","consumer":"human","semantics":"read",
-    "confident":true,"domain":"calendar","action_hint":"view"}}
+  {"destination":"stream","consumer":"human","semantics":"read",
+    "confident":true,"domain":"calendar","action_hint":"view"}
 "move Job Search to Career":
-  {{"destination":"file","consumer":"human","semantics":"execute",
-    "confident":true,"domain":"play","action_hint":"update"}}
+  {"destination":"file","consumer":"human","semantics":"execute",
+    "confident":true,"domain":"play","action_hint":"update"}
 "undo that":
-  {{"destination":"file","consumer":"human","semantics":"execute",
-    "confident":true,"domain":"undo","action_hint":null}}
+  {"destination":"file","consumer":"human","semantics":"execute",
+    "confident":true,"domain":"undo","action_hint":null}
 "you're repeating yourself":
-  {{"destination":"stream","consumer":"human",
+  {"destination":"stream","consumer":"human",
     "semantics":"interpret","confident":true,
-    "domain":"feedback","action_hint":null}}
+    "domain":"feedback","action_hint":null}
 "tell me about my goals":
-  {{"destination":"stream","consumer":"human",
+  {"destination":"stream","consumer":"human",
     "semantics":"interpret","confident":true,
-    "domain":"personal","action_hint":"view"}}
+    "domain":"personal","action_hint":"view"}
 {corrections_block}
 Return ONLY a JSON object:
-{{"destination":"...","consumer":"...","semantics":"...",
+{"destination":"...","consumer":"...","semantics":"...",
   "confident":true/false,"reasoning":"...",
-  "domain":"...or null","action_hint":"...or null"}}
+  "domain":"...or null","action_hint":"...or null"}
 
 Set confident=false if you are genuinely unsure which category fits best."""
 
@@ -187,7 +187,9 @@ class AtomicClassifier:
                 )
             corrections_block = "\n".join(lines)
 
-        system = CLASSIFICATION_SYSTEM_PROMPT.format(corrections_block=corrections_block)
+        system = CLASSIFICATION_SYSTEM_PROMPT.replace(
+            "{corrections_block}", corrections_block
+        )
         user = f'Classify this request: "{request}"'
 
         raw = self.llm.chat_json(system=system, user=user, temperature=0.1, top_p=0.9)
