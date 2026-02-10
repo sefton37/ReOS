@@ -136,7 +136,7 @@ I am a software engineer who values building tools that help people.
         encoding="utf-8",
     )
 
-    # Create act directories with scenes (beats are stored within scenes.json)
+    # Create act directories with scenes
     tr_act = acts_path / "talking-rock"
     tr_act.mkdir()
     (tr_act / "scenes.json").write_text(
@@ -150,20 +150,6 @@ I am a software engineer who values building tools that help people.
                         "status": "in_progress",
                         "time_horizon": "2 weeks",
                         "notes": "Core surfacing algorithm and coherence kernel",
-                        "beats": [
-                            {
-                                "beat_id": "coherence-kernel",
-                                "title": "Implement Coherence Kernel",
-                                "status": "completed",
-                                "notes": "Recursive verification mirroring RIVA pattern",
-                            },
-                            {
-                                "beat_id": "surfacing-algo",
-                                "title": "Build Surfacing Algorithm",
-                                "status": "in_progress",
-                                "notes": "Priority and time-aware surfacing",
-                            },
-                        ],
                     },
                     {
                         "scene_id": "riva-impl",
@@ -172,7 +158,6 @@ I am a software engineer who values building tools that help people.
                         "status": "completed",
                         "time_horizon": "done",
                         "notes": "Recursive intent verification complete",
-                        "beats": [],
                     },
                 ]
             },
@@ -509,18 +494,6 @@ class TestPlayKnowledgeBaseE2E:
             scene_titles = [s.title for s in scenes]
             assert "Implement CAIRN" in scene_titles
             assert "Implement RIVA" in scene_titles
-
-    @pytest.mark.skip(reason="play_fs.list_beats now reads from play_db, not JSON files")
-    def test_list_beats_for_scene(self, temp_play_root: Path) -> None:
-        """Test listing beats within a scene."""
-        from reos import play_fs
-
-        with patch.object(play_fs, "play_root", return_value=temp_play_root):
-            beats = play_fs.list_beats(act_id="talking-rock", scene_id="cairn-impl")
-
-            assert len(beats) == 2
-            beat_titles = [b.title for b in beats]
-            assert "Implement Coherence Kernel" in beat_titles
 
     def test_kb_list_and_read_files(self, temp_play_root: Path) -> None:
         """Test listing and reading KB files."""

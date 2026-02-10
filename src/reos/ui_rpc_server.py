@@ -15,244 +15,451 @@ catalog so the UI can reuse those capabilities.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import sys
 import threading
 import uuid
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 from . import auth
-from .agent import ChatAgent
-from .context_sources import VALID_SOURCE_NAMES, DISABLEABLE_SOURCES
 from .db import Database, get_db
 from .mcp_tools import ToolError, call_tool, list_tools
-from .security import (
-    ValidationError,
-    validate_service_name,
-    validate_container_id,
-    escape_shell_arg,
-    is_command_safe,
-    check_rate_limit,
-    RateLimitExceeded,
-    audit_log,
-    AuditEventType,
-    get_auditor,
-    configure_auditor,
-    get_rate_limiter,
-    DANGEROUS_PATTERNS,
-    INJECTION_PATTERNS,
-    MAX_COMMAND_LEN,
-    MAX_SERVICE_NAME_LEN,
-    MAX_CONTAINER_ID_LEN,
-    MAX_PACKAGE_NAME_LEN,
-)
-from .play_fs import list_acts as play_list_acts
-from .play_fs import read_me_markdown as play_read_me_markdown
-from .context_meter import calculate_context_stats, estimate_tokens
-from .knowledge_store import KnowledgeStore
-
-# Play RPC handlers (extracted to separate module)
-from .rpc_handlers.play import (
-    get_current_play_path,
-    handle_play_me_read as _handle_play_me_read,
-    handle_play_me_write as _handle_play_me_write,
-    handle_play_acts_list as _handle_play_acts_list,
-    handle_play_acts_set_active as _handle_play_acts_set_active,
-    handle_play_acts_create as _handle_play_acts_create,
-    handle_play_acts_update as _handle_play_acts_update,
-    handle_play_acts_assign_repo as _handle_play_acts_assign_repo,
-    handle_play_scenes_list as _handle_play_scenes_list,
-    handle_play_scenes_list_all as _handle_play_scenes_list_all,
-    handle_play_scenes_create as _handle_play_scenes_create,
-    handle_play_scenes_update as _handle_play_scenes_update,
-    handle_play_kb_list as _handle_play_kb_list,
-    handle_play_kb_read as _handle_play_kb_read,
-    handle_play_kb_write_preview as _handle_play_kb_write_preview,
-    handle_play_kb_write_apply as _handle_play_kb_write_apply,
-    handle_play_attachments_list as _handle_play_attachments_list,
-    handle_play_attachments_add as _handle_play_attachments_add,
-    handle_play_attachments_remove as _handle_play_attachments_remove,
-    handle_play_pages_list as _handle_play_pages_list,
-    handle_play_pages_tree as _handle_play_pages_tree,
-    handle_play_pages_create as _handle_play_pages_create,
-    handle_play_pages_update as _handle_play_pages_update,
-    handle_play_pages_delete as _handle_play_pages_delete,
-    handle_play_pages_move as _handle_play_pages_move,
-    handle_play_pages_content_read as _handle_play_pages_content_read,
-    handle_play_pages_content_write as _handle_play_pages_content_write,
-)
-
-# Provider RPC handlers (extracted to separate module)
-from .rpc_handlers.providers import (
-    detect_system_hardware as _detect_system_hardware,
-    handle_ollama_status as _handle_ollama_status,
-    handle_ollama_set_url as _handle_ollama_set_url,
-    handle_ollama_set_model as _handle_ollama_set_model,
-    handle_ollama_model_info as _handle_ollama_model_info,
-    handle_ollama_set_gpu as _handle_ollama_set_gpu,
-    handle_ollama_set_context as _handle_ollama_set_context,
-    handle_ollama_pull_start as _handle_ollama_pull_start,
-    handle_ollama_pull_status as _handle_ollama_pull_status,
-    handle_ollama_test_connection as _handle_ollama_test_connection,
-    handle_ollama_check_installed as _handle_ollama_check_installed,
-    handle_providers_list as _handle_providers_list,
-    handle_providers_set as _handle_providers_set,
-)
-
-# Archive RPC handlers (extracted to separate module)
-from .rpc_handlers.archive import (
-    handle_conversation_archive_preview as _handle_conversation_archive_preview,
-    handle_conversation_archive_confirm as _handle_conversation_archive_confirm,
-    handle_conversation_archive as _handle_conversation_archive,
-    handle_conversation_delete as _handle_conversation_delete,
-    handle_archive_list as _handle_archive_list,
-    handle_archive_get as _handle_archive_get,
-    handle_archive_assess as _handle_archive_assess,
-    handle_archive_feedback as _handle_archive_feedback,
-    handle_archive_learning_stats as _handle_archive_learning_stats,
-)
-
-# Safety RPC handlers (extracted to separate module)
-from .rpc_handlers.safety import (
-    handle_safety_settings as _handle_safety_settings,
-    handle_safety_set_rate_limit as _handle_safety_set_rate_limit,
-    handle_safety_set_sudo_limit as _handle_safety_set_sudo_limit,
-    handle_safety_set_command_length as _handle_safety_set_command_length,
-    handle_safety_set_max_iterations as _handle_safety_set_max_iterations,
-    handle_safety_set_wall_clock_timeout as _handle_safety_set_wall_clock_timeout,
-)
-
-# Persona RPC handlers (extracted to separate module)
-from .rpc_handlers.personas import (
-    handle_personas_list as _handle_personas_list,
-    handle_persona_get as _handle_persona_get,
-    handle_persona_upsert as _handle_persona_upsert,
-    handle_persona_set_active as _handle_persona_set_active,
-)
-
-# Context RPC handlers (extracted to separate module)
-from .rpc_handlers.context import (
-    handle_context_stats as _handle_context_stats,
-    handle_context_toggle_source as _handle_context_toggle_source,
-)
-
-# System/Thunderbird/Autostart RPC handlers (extracted to separate module)
-from .rpc_handlers.system import (
-    handle_system_live_state as _handle_system_live_state,
-    handle_system_open_terminal as _handle_system_open_terminal,
-    handle_cairn_thunderbird_status as _handle_cairn_thunderbird_status,
-    handle_thunderbird_check as _handle_thunderbird_check,
-    handle_thunderbird_configure as _handle_thunderbird_configure,
-    handle_thunderbird_decline as _handle_thunderbird_decline,
-    handle_thunderbird_reset as _handle_thunderbird_reset,
-    handle_autostart_get as _handle_autostart_get,
-    handle_autostart_set as _handle_autostart_set,
-    handle_cairn_attention as _handle_cairn_attention,
+from .rpc_handlers import RpcError
+from .rpc_handlers.approvals import (
+    handle_approval_explain as _handle_approval_explain,
 )
 
 # Approval RPC handlers (extracted to separate module)
 from .rpc_handlers.approvals import (
     handle_approval_pending as _handle_approval_pending,
+)
+from .rpc_handlers.approvals import (
     handle_approval_respond as _handle_approval_respond,
-    handle_approval_explain as _handle_approval_explain,
+)
+from .rpc_handlers.archive import (
+    handle_archive_assess as _handle_archive_assess,
+)
+from .rpc_handlers.archive import (
+    handle_archive_feedback as _handle_archive_feedback,
+)
+from .rpc_handlers.archive import (
+    handle_archive_get as _handle_archive_get,
+)
+from .rpc_handlers.archive import (
+    handle_archive_learning_stats as _handle_archive_learning_stats,
+)
+from .rpc_handlers.archive import (
+    handle_archive_list as _handle_archive_list,
+)
+from .rpc_handlers.archive import (
+    handle_conversation_archive as _handle_conversation_archive,
+)
+from .rpc_handlers.archive import (
+    handle_conversation_archive_confirm as _handle_conversation_archive_confirm,
 )
 
-# Chat RPC handlers (extracted to separate module)
-from .rpc_handlers.chat import (
-    handle_chat_respond as _handle_chat_respond,
-    handle_chat_clear as _handle_chat_clear,
+# Archive RPC handlers (extracted to separate module)
+from .rpc_handlers.archive import (
+    handle_conversation_archive_preview as _handle_conversation_archive_preview,
 )
-
-# Consciousness/CAIRN chat RPC handlers (extracted to separate module)
-from .rpc_handlers.consciousness import (
-    handle_consciousness_start as _handle_consciousness_start,
-    handle_consciousness_poll as _handle_consciousness_poll,
-    handle_consciousness_snapshot as _handle_consciousness_snapshot,
-    handle_consciousness_persist as _handle_consciousness_persist,
-    handle_cairn_chat_async as _handle_cairn_chat_async,
-    handle_cairn_chat_status as _handle_cairn_chat_status,
-    handle_handoff_validate_all as _handle_handoff_validate_all,
+from .rpc_handlers.archive import (
+    handle_conversation_delete as _handle_conversation_delete,
 )
-
-# Reasoning chain RPC handlers (RLHF feedback system)
-from .rpc_handlers.reasoning import (
-    handle_reasoning_feedback as _handle_reasoning_feedback,
-    handle_reasoning_chain_get as _handle_reasoning_chain_get,
-    handle_reasoning_chains_list as _handle_reasoning_chains_list,
-)
-
-# Execution RPC handlers (extracted to separate module)
-from .rpc_handlers.execution import (
-    handle_plan_preview as _handle_plan_preview,
-    handle_execution_status as _handle_execution_status,
-    handle_execution_kill as _handle_execution_kill,
-    handle_code_diff_apply as _handle_code_diff_apply,
-    handle_code_diff_reject as _handle_code_diff_reject,
-    handle_code_plan_approve as _handle_code_plan_approve,
-    handle_code_exec_state as _handle_code_exec_state,
-    handle_code_plan_start as _handle_code_plan_start,
-    handle_code_plan_state as _handle_code_plan_state,
-    handle_code_plan_result as _handle_code_plan_result,
+from .rpc_handlers.blocks import (
+    handle_blocks_ancestors as _handle_blocks_ancestors,
 )
 
 # Blocks RPC handlers (extracted to separate module)
 from .rpc_handlers.blocks import (
     handle_blocks_create as _handle_blocks_create,
-    handle_blocks_get as _handle_blocks_get,
-    handle_blocks_list as _handle_blocks_list,
-    handle_blocks_update as _handle_blocks_update,
-    handle_blocks_delete as _handle_blocks_delete,
-    handle_blocks_move as _handle_blocks_move,
-    handle_blocks_reorder as _handle_blocks_reorder,
-    handle_blocks_ancestors as _handle_blocks_ancestors,
-    handle_blocks_descendants as _handle_blocks_descendants,
-    handle_blocks_page_tree as _handle_blocks_page_tree,
-    handle_blocks_page_markdown as _handle_blocks_page_markdown,
-    handle_blocks_import_markdown as _handle_blocks_import_markdown,
+)
+from .rpc_handlers.blocks import (
     handle_blocks_create_scene as _handle_blocks_create_scene,
-    handle_blocks_validate_scene as _handle_blocks_validate_scene,
-    handle_blocks_rich_text_get as _handle_blocks_rich_text_get,
-    handle_blocks_rich_text_set as _handle_blocks_rich_text_set,
-    handle_blocks_property_get as _handle_blocks_property_get,
-    handle_blocks_property_set as _handle_blocks_property_set,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_delete as _handle_blocks_delete,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_descendants as _handle_blocks_descendants,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_get as _handle_blocks_get,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_import_markdown as _handle_blocks_import_markdown,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_list as _handle_blocks_list,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_move as _handle_blocks_move,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_page_markdown as _handle_blocks_page_markdown,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_page_tree as _handle_blocks_page_tree,
+)
+from .rpc_handlers.blocks import (
     handle_blocks_property_delete as _handle_blocks_property_delete,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_property_get as _handle_blocks_property_get,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_property_set as _handle_blocks_property_set,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_reorder as _handle_blocks_reorder,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_rich_text_get as _handle_blocks_rich_text_get,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_rich_text_set as _handle_blocks_rich_text_set,
+)
+from .rpc_handlers.blocks import (
     handle_blocks_search as _handle_blocks_search,
+)
+from .rpc_handlers.blocks import (
     handle_blocks_unchecked_todos as _handle_blocks_unchecked_todos,
 )
+from .rpc_handlers.blocks import (
+    handle_blocks_update as _handle_blocks_update,
+)
+from .rpc_handlers.blocks import (
+    handle_blocks_validate_scene as _handle_blocks_validate_scene,
+)
+from .rpc_handlers.chat import (
+    handle_chat_clear as _handle_chat_clear,
+)
 
-# Memory RPC handlers (hybrid vector-graph memory system)
-from .rpc_handlers.memory import (
-    handle_memory_relationships_create as _handle_memory_relationships_create,
-    handle_memory_relationships_list as _handle_memory_relationships_list,
-    handle_memory_relationships_update as _handle_memory_relationships_update,
-    handle_memory_relationships_delete as _handle_memory_relationships_delete,
-    handle_memory_search as _handle_memory_search,
-    handle_memory_related as _handle_memory_related,
-    handle_memory_path as _handle_memory_path,
-    handle_memory_index_block as _handle_memory_index_block,
-    handle_memory_index_batch as _handle_memory_index_batch,
-    handle_memory_remove_index as _handle_memory_remove_index,
-    handle_memory_extract_relationships as _handle_memory_extract_relationships,
-    handle_memory_learn_from_feedback as _handle_memory_learn_from_feedback,
-    handle_memory_auto_link as _handle_memory_auto_link,
-    handle_memory_stats as _handle_memory_stats,
+# Chat RPC handlers (extracted to separate module)
+from .rpc_handlers.chat import (
+    handle_chat_respond as _handle_chat_respond,
+)
+from .rpc_handlers.consciousness import (
+    handle_cairn_chat_async as _handle_cairn_chat_async,
+)
+from .rpc_handlers.consciousness import (
+    handle_cairn_chat_status as _handle_cairn_chat_status,
+)
+from .rpc_handlers.consciousness import (
+    handle_consciousness_persist as _handle_consciousness_persist,
+)
+from .rpc_handlers.consciousness import (
+    handle_consciousness_poll as _handle_consciousness_poll,
+)
+from .rpc_handlers.consciousness import (
+    handle_consciousness_snapshot as _handle_consciousness_snapshot,
+)
+
+# Consciousness/CAIRN chat RPC handlers (extracted to separate module)
+from .rpc_handlers.consciousness import (
+    handle_consciousness_start as _handle_consciousness_start,
+)
+from .rpc_handlers.consciousness import (
+    handle_handoff_validate_all as _handle_handoff_validate_all,
+)
+
+# Context RPC handlers (extracted to separate module)
+from .rpc_handlers.context import (
+    handle_context_stats as _handle_context_stats,
+)
+from .rpc_handlers.context import (
+    handle_context_toggle_source as _handle_context_toggle_source,
+)
+from .rpc_handlers.documents import (
+    handle_documents_delete as _handle_documents_delete,
+)
+from .rpc_handlers.documents import (
+    handle_documents_get as _handle_documents_get,
+)
+from .rpc_handlers.documents import (
+    handle_documents_get_chunks as _handle_documents_get_chunks,
 )
 
 # Documents RPC handlers (knowledge base document management)
 from .rpc_handlers.documents import (
     handle_documents_insert as _handle_documents_insert,
+)
+from .rpc_handlers.documents import (
     handle_documents_list as _handle_documents_list,
-    handle_documents_get as _handle_documents_get,
-    handle_documents_delete as _handle_documents_delete,
-    handle_documents_get_chunks as _handle_documents_get_chunks,
+)
+from .rpc_handlers.execution import (
+    handle_code_diff_apply as _handle_code_diff_apply,
+)
+from .rpc_handlers.execution import (
+    handle_code_diff_reject as _handle_code_diff_reject,
+)
+from .rpc_handlers.execution import (
+    handle_code_exec_state as _handle_code_exec_state,
+)
+from .rpc_handlers.execution import (
+    handle_code_plan_approve as _handle_code_plan_approve,
+)
+from .rpc_handlers.execution import (
+    handle_code_plan_result as _handle_code_plan_result,
+)
+from .rpc_handlers.execution import (
+    handle_code_plan_start as _handle_code_plan_start,
+)
+from .rpc_handlers.execution import (
+    handle_code_plan_state as _handle_code_plan_state,
+)
+from .rpc_handlers.execution import (
+    handle_execution_kill as _handle_execution_kill,
+)
+from .rpc_handlers.execution import (
+    handle_execution_status as _handle_execution_status,
 )
 
-from .rpc_handlers import RpcError
+# Execution RPC handlers (extracted to separate module)
+from .rpc_handlers.execution import (
+    handle_plan_preview as _handle_plan_preview,
+)
+from .rpc_handlers.memory import (
+    handle_memory_auto_link as _handle_memory_auto_link,
+)
+from .rpc_handlers.memory import (
+    handle_memory_extract_relationships as _handle_memory_extract_relationships,
+)
+from .rpc_handlers.memory import (
+    handle_memory_index_batch as _handle_memory_index_batch,
+)
+from .rpc_handlers.memory import (
+    handle_memory_index_block as _handle_memory_index_block,
+)
+from .rpc_handlers.memory import (
+    handle_memory_learn_from_feedback as _handle_memory_learn_from_feedback,
+)
+from .rpc_handlers.memory import (
+    handle_memory_path as _handle_memory_path,
+)
+from .rpc_handlers.memory import (
+    handle_memory_related as _handle_memory_related,
+)
+
+# Memory RPC handlers (hybrid vector-graph memory system)
+from .rpc_handlers.memory import (
+    handle_memory_relationships_create as _handle_memory_relationships_create,
+)
+from .rpc_handlers.memory import (
+    handle_memory_relationships_delete as _handle_memory_relationships_delete,
+)
+from .rpc_handlers.memory import (
+    handle_memory_relationships_list as _handle_memory_relationships_list,
+)
+from .rpc_handlers.memory import (
+    handle_memory_relationships_update as _handle_memory_relationships_update,
+)
+from .rpc_handlers.memory import (
+    handle_memory_remove_index as _handle_memory_remove_index,
+)
+from .rpc_handlers.memory import (
+    handle_memory_search as _handle_memory_search,
+)
+from .rpc_handlers.memory import (
+    handle_memory_stats as _handle_memory_stats,
+)
+from .rpc_handlers.personas import (
+    handle_persona_upsert as _handle_persona_upsert,
+)
+
+# Persona RPC handlers (extracted to separate module)
+from .rpc_handlers.personas import (
+    handle_personas_list as _handle_personas_list,
+)
+
+# Play RPC handlers (extracted to separate module)
+from .rpc_handlers.play import (
+    handle_play_acts_assign_repo as _handle_play_acts_assign_repo,
+)
+from .rpc_handlers.play import (
+    handle_play_acts_create as _handle_play_acts_create,
+)
+from .rpc_handlers.play import (
+    handle_play_acts_list as _handle_play_acts_list,
+)
+from .rpc_handlers.play import (
+    handle_play_acts_set_active as _handle_play_acts_set_active,
+)
+from .rpc_handlers.play import (
+    handle_play_acts_update as _handle_play_acts_update,
+)
+from .rpc_handlers.play import (
+    handle_play_attachments_add as _handle_play_attachments_add,
+)
+from .rpc_handlers.play import (
+    handle_play_attachments_list as _handle_play_attachments_list,
+)
+from .rpc_handlers.play import (
+    handle_play_attachments_remove as _handle_play_attachments_remove,
+)
+from .rpc_handlers.play import (
+    handle_play_kb_list as _handle_play_kb_list,
+)
+from .rpc_handlers.play import (
+    handle_play_kb_read as _handle_play_kb_read,
+)
+from .rpc_handlers.play import (
+    handle_play_kb_write_apply as _handle_play_kb_write_apply,
+)
+from .rpc_handlers.play import (
+    handle_play_kb_write_preview as _handle_play_kb_write_preview,
+)
+from .rpc_handlers.play import (
+    handle_play_me_read as _handle_play_me_read,
+)
+from .rpc_handlers.play import (
+    handle_play_me_write as _handle_play_me_write,
+)
+from .rpc_handlers.play import (
+    handle_play_pages_content_read as _handle_play_pages_content_read,
+)
+from .rpc_handlers.play import (
+    handle_play_pages_content_write as _handle_play_pages_content_write,
+)
+from .rpc_handlers.play import (
+    handle_play_pages_create as _handle_play_pages_create,
+)
+from .rpc_handlers.play import (
+    handle_play_pages_delete as _handle_play_pages_delete,
+)
+from .rpc_handlers.play import (
+    handle_play_pages_list as _handle_play_pages_list,
+)
+from .rpc_handlers.play import (
+    handle_play_pages_move as _handle_play_pages_move,
+)
+from .rpc_handlers.play import (
+    handle_play_pages_tree as _handle_play_pages_tree,
+)
+from .rpc_handlers.play import (
+    handle_play_pages_update as _handle_play_pages_update,
+)
+from .rpc_handlers.play import (
+    handle_play_scenes_create as _handle_play_scenes_create,
+)
+from .rpc_handlers.play import (
+    handle_play_scenes_list as _handle_play_scenes_list,
+)
+from .rpc_handlers.play import (
+    handle_play_scenes_list_all as _handle_play_scenes_list_all,
+)
+from .rpc_handlers.play import (
+    handle_play_scenes_update as _handle_play_scenes_update,
+)
+
+# Provider RPC handlers (extracted to separate module)
+from .rpc_handlers.providers import (
+    handle_ollama_check_installed as _handle_ollama_check_installed,
+)
+from .rpc_handlers.providers import (
+    handle_ollama_model_info as _handle_ollama_model_info,
+)
+from .rpc_handlers.providers import (
+    handle_ollama_pull_start as _handle_ollama_pull_start,
+)
+from .rpc_handlers.providers import (
+    handle_ollama_pull_status as _handle_ollama_pull_status,
+)
+from .rpc_handlers.providers import (
+    handle_ollama_set_context as _handle_ollama_set_context,
+)
+from .rpc_handlers.providers import (
+    handle_ollama_set_gpu as _handle_ollama_set_gpu,
+)
+from .rpc_handlers.providers import (
+    handle_ollama_set_model as _handle_ollama_set_model,
+)
+from .rpc_handlers.providers import (
+    handle_ollama_set_url as _handle_ollama_set_url,
+)
+from .rpc_handlers.providers import (
+    handle_ollama_status as _handle_ollama_status,
+)
+from .rpc_handlers.providers import (
+    handle_ollama_test_connection as _handle_ollama_test_connection,
+)
+from .rpc_handlers.providers import (
+    handle_providers_list as _handle_providers_list,
+)
+from .rpc_handlers.providers import (
+    handle_providers_set as _handle_providers_set,
+)
+from .rpc_handlers.reasoning import (
+    handle_reasoning_chain_get as _handle_reasoning_chain_get,
+)
+from .rpc_handlers.reasoning import (
+    handle_reasoning_chains_list as _handle_reasoning_chains_list,
+)
+
+# Reasoning chain RPC handlers (RLHF feedback system)
+from .rpc_handlers.reasoning import (
+    handle_reasoning_feedback as _handle_reasoning_feedback,
+)
+from .rpc_handlers.safety import (
+    handle_safety_set_command_length as _handle_safety_set_command_length,
+)
+from .rpc_handlers.safety import (
+    handle_safety_set_max_iterations as _handle_safety_set_max_iterations,
+)
+from .rpc_handlers.safety import (
+    handle_safety_set_rate_limit as _handle_safety_set_rate_limit,
+)
+from .rpc_handlers.safety import (
+    handle_safety_set_sudo_limit as _handle_safety_set_sudo_limit,
+)
+from .rpc_handlers.safety import (
+    handle_safety_set_wall_clock_timeout as _handle_safety_set_wall_clock_timeout,
+)
+
+# Safety RPC handlers (extracted to separate module)
+from .rpc_handlers.safety import (
+    handle_safety_settings as _handle_safety_settings,
+)
+from .rpc_handlers.system import (
+    handle_autostart_get as _handle_autostart_get,
+)
+from .rpc_handlers.system import (
+    handle_autostart_set as _handle_autostart_set,
+)
+from .rpc_handlers.system import (
+    handle_cairn_attention as _handle_cairn_attention,
+)
+from .rpc_handlers.system import (
+    handle_cairn_thunderbird_status as _handle_cairn_thunderbird_status,
+)
+
+# System/Thunderbird/Autostart RPC handlers (extracted to separate module)
+from .rpc_handlers.system import (
+    handle_system_live_state as _handle_system_live_state,
+)
+from .rpc_handlers.system import (
+    handle_system_open_terminal as _handle_system_open_terminal,
+)
+from .rpc_handlers.system import (
+    handle_thunderbird_check as _handle_thunderbird_check,
+)
+from .rpc_handlers.system import (
+    handle_thunderbird_configure as _handle_thunderbird_configure,
+)
+from .rpc_handlers.system import (
+    handle_thunderbird_decline as _handle_thunderbird_decline,
+)
+from .rpc_handlers.system import (
+    handle_thunderbird_reset as _handle_thunderbird_reset,
+)
+from .security import (
+    AuditEventType,
+    RateLimitExceeded,
+    audit_log,
+    check_rate_limit,
+)
 
 _JSON = dict[str, Any]
 
@@ -289,14 +496,6 @@ def _write(obj: Any) -> None:
 # -------------------------------------------------------------------------
 
 
-
-
-
-
-
-
-
-
 def _tools_list() -> dict[str, Any]:
     return {
         "tools": [
@@ -322,12 +521,6 @@ def _handle_tools_call(db: Database, *, name: str, arguments: dict[str, Any] | N
 # -------------------------------------------------------------------------
 # Conversation management handlers
 # -------------------------------------------------------------------------
-
-
-
-
-
-
 
 
 # -------------------------------------------------------------------------
@@ -357,20 +550,6 @@ def _get_handoff_handler():
     return _handoff_state["handler"]
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _handle_handoff_validate_all(_db: Database) -> dict[str, Any]:
     """Validate all agent manifests (15-tool cap check)."""
     from reos.handoff import validate_all_manifests
@@ -382,7 +561,7 @@ def _handle_handoff_validate_all(_db: Database) -> dict[str, Any]:
 # RPC Handler Registry - Simple handlers dispatched via lookup
 # -------------------------------------------------------------------------
 
-from typing import Callable
+from collections.abc import Callable
 
 # Handlers with no params - just call handler(db)
 _SIMPLE_HANDLERS: dict[str, Callable[[Database], Any]] = {
@@ -426,6 +605,7 @@ _INT_PARAM_HANDLERS: dict[str, tuple[Callable, str]] = {
     "safety/set_wall_clock_timeout": (_handle_safety_set_wall_clock_timeout, "timeout_seconds"),
     "consciousness/poll": (_handle_consciousness_poll, "since_index"),
 }
+
 
 def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any] | None:
     method = req.get("method")
@@ -541,6 +721,7 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                 raise RpcError(code=-32602, message="params must be an object")
             msg = params.get("msg", "")
             import sys
+
             print(f"[JS] {msg}", file=sys.stderr, flush=True)
             return _jsonrpc_result(req_id=req_id, result={"ok": True})
 
@@ -563,7 +744,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             conversation_id = params.get("conversation_id")
             use_code_mode = params.get("use_code_mode", False)  # Default is conversational (CAIRN)
             agent_type = params.get("agent_type")  # 'cairn', 'riva', 'reos', or None
-            extended_thinking = params.get("extended_thinking")  # None=auto, True=force, False=disable
+            extended_thinking = params.get(
+                "extended_thinking"
+            )  # None=auto, True=force, False=disable
             if not isinstance(text, str) or not text.strip():
                 raise RpcError(code=-32602, message="text is required")
             if conversation_id is not None and not isinstance(conversation_id, str):
@@ -695,18 +878,19 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             persona = params.get("persona")
             if not isinstance(persona, dict):
                 raise RpcError(code=-32602, message="persona must be an object")
-            return _jsonrpc_result(req_id=req_id, result=_handle_persona_upsert(db, persona=persona))
+            return _jsonrpc_result(
+                req_id=req_id, result=_handle_persona_upsert(db, persona=persona)
+            )
 
         # --- Ollama Settings ---
-
-
 
         if method == "ollama/test_connection":
             if not isinstance(params, dict):
                 params = {}
             url = params.get("url")
-            return _jsonrpc_result(req_id=req_id, result=_handle_ollama_test_connection(db, url=url))
-
+            return _jsonrpc_result(
+                req_id=req_id, result=_handle_ollama_test_connection(db, url=url)
+            )
 
         if method == "ollama/set_gpu":
             if not isinstance(params, dict):
@@ -714,7 +898,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             enabled = params.get("enabled")
             if not isinstance(enabled, bool):
                 raise RpcError(code=-32602, message="enabled must be a boolean")
-            return _jsonrpc_result(req_id=req_id, result=_handle_ollama_set_gpu(db, enabled=enabled))
+            return _jsonrpc_result(
+                req_id=req_id, result=_handle_ollama_set_gpu(db, enabled=enabled)
+            )
 
         if method == "autostart/set":
             if not isinstance(params, dict):
@@ -730,9 +916,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             num_ctx = params.get("num_ctx")
             if not isinstance(num_ctx, int):
                 raise RpcError(code=-32602, message="num_ctx must be an integer")
-            return _jsonrpc_result(req_id=req_id, result=_handle_ollama_set_context(db, num_ctx=num_ctx))
-
-
+            return _jsonrpc_result(
+                req_id=req_id, result=_handle_ollama_set_context(db, num_ctx=num_ctx)
+            )
 
         if method == "providers/set":
             if not isinstance(params, dict):
@@ -740,9 +926,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             provider = params.get("provider")
             if not isinstance(provider, str) or not provider:
                 raise RpcError(code=-32602, message="provider is required")
-            return _jsonrpc_result(req_id=req_id, result=_handle_providers_set(db, provider=provider))
-
-
+            return _jsonrpc_result(
+                req_id=req_id, result=_handle_providers_set(db, provider=provider)
+            )
 
         if method == "play/me/read":
             return _jsonrpc_result(req_id=req_id, result=_handle_play_me_read(db))
@@ -755,7 +941,6 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                 raise RpcError(code=-32602, message="text is required")
             return _jsonrpc_result(req_id=req_id, result=_handle_play_me_write(db, text=text))
 
-
         if method == "play/acts/create":
             if not isinstance(params, dict):
                 raise RpcError(code=-32602, message="params must be an object")
@@ -765,7 +950,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                 raise RpcError(code=-32602, message="title is required")
             if notes is not None and not isinstance(notes, str):
                 raise RpcError(code=-32602, message="notes must be a string or null")
-            return _jsonrpc_result(req_id=req_id, result=_handle_play_acts_create(db, title=title, notes=notes))
+            return _jsonrpc_result(
+                req_id=req_id, result=_handle_play_acts_create(db, title=title, notes=notes)
+            )
 
         if method == "play/acts/update":
             if not isinstance(params, dict):
@@ -784,7 +971,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                 raise RpcError(code=-32602, message="color must be a string or null")
             return _jsonrpc_result(
                 req_id=req_id,
-                result=_handle_play_acts_update(db, act_id=act_id, title=title, notes=notes, color=color),
+                result=_handle_play_acts_update(
+                    db, act_id=act_id, title=title, notes=notes, color=color
+                ),
             )
 
         if method == "play/acts/set_active":
@@ -794,7 +983,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             # act_id can be null to clear the active act
             if act_id is not None and (not isinstance(act_id, str) or not act_id):
                 raise RpcError(code=-32602, message="act_id must be a non-empty string or null")
-            return _jsonrpc_result(req_id=req_id, result=_handle_play_acts_set_active(db, act_id=act_id))
+            return _jsonrpc_result(
+                req_id=req_id, result=_handle_play_acts_set_active(db, act_id=act_id)
+            )
 
         if method == "play/acts/assign_repo":
             if not isinstance(params, dict):
@@ -816,7 +1007,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             act_id = params.get("act_id")
             if not isinstance(act_id, str) or not act_id:
                 raise RpcError(code=-32602, message="act_id is required")
-            return _jsonrpc_result(req_id=req_id, result=_handle_play_scenes_list(db, act_id=act_id))
+            return _jsonrpc_result(
+                req_id=req_id, result=_handle_play_scenes_list(db, act_id=act_id)
+            )
 
         if method == "play/scenes/list_all":
             return _jsonrpc_result(req_id=req_id, result=_handle_play_scenes_list_all(db))
@@ -1099,8 +1292,7 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
             return _jsonrpc_result(
                 req_id=req_id,
                 result=_handle_play_pages_create(
-                    db, act_id=act_id, title=title.strip(),
-                    parent_page_id=parent_page_id, icon=icon
+                    db, act_id=act_id, title=title.strip(), parent_page_id=parent_page_id, icon=icon
                 ),
             )
 
@@ -1178,7 +1370,9 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
                 raise RpcError(code=-32602, message="text is required")
             return _jsonrpc_result(
                 req_id=req_id,
-                result=_handle_play_pages_content_write(db, act_id=act_id, page_id=page_id, text=text),
+                result=_handle_play_pages_content_write(
+                    db, act_id=act_id, page_id=page_id, text=text
+                ),
             )
 
         # --- Blocks (Notion-style block editor) ---
@@ -1984,7 +2178,6 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
 
         # --- Code Mode Diff Preview ---
 
-
         if method == "code/plan/approve":
             if not isinstance(params, dict):
                 raise RpcError(code=-32602, message="params must be an object")
@@ -2073,10 +2266,8 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
         # CAIRN (Attention Minder)
         # -------------------------------------------------------------------------
 
-
         if method == "thunderbird/decline":
             return _jsonrpc_result(req_id=req_id, result=_handle_thunderbird_decline(db))
-
 
         if method == "cairn/attention":
             if not isinstance(params, dict):
@@ -2091,7 +2282,6 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
         # -------------------------------------------------------------------------
         # Safety & Security Settings
         # -------------------------------------------------------------------------
-
 
         if method == "safety/set_rate_limit":
             if not isinstance(params, dict):
@@ -2220,6 +2410,7 @@ def _handle_jsonrpc_request(db: Database, req: dict[str, Any]) -> dict[str, Any]
     except Exception as exc:  # noqa: BLE001
         # Convert domain errors to structured RPC errors
         from .errors import TalkingRockError, get_error_code, record_error
+
         if isinstance(exc, TalkingRockError):
             logger.warning(
                 "RPC domain error [%s] method=%s: %s",
@@ -2260,8 +2451,7 @@ def _load_persisted_safety_settings(db: Database) -> None:
 
     This ensures user's safety settings persist across restarts.
     """
-    from . import linux_tools
-    from . import security
+    from . import linux_tools, security
     from .code_mode import executor as code_executor
 
     # Load sudo limit
@@ -2303,7 +2493,9 @@ def _load_persisted_safety_settings(db: Database) -> None:
 
 def run_stdio_server() -> None:
     """Run the UI kernel server over stdio."""
-    print("[ui_rpc_server] ========== PYTHON BACKEND STARTING ==========", file=sys.stderr, flush=True)
+    print(
+        "[ui_rpc_server] ========== PYTHON BACKEND STARTING ==========", file=sys.stderr, flush=True
+    )
 
     db = get_db()
     db.migrate()

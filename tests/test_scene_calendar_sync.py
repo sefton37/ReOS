@@ -707,31 +707,3 @@ class TestCreateDeleteWithCalendarSync:
 # =============================================================================
 
 
-class TestBackwardCompatibility:
-    """Test backward compatibility aliases."""
-
-    def test_beat_aliases_exist(self) -> None:
-        """Beat-named aliases exist for Scene functions."""
-        from reos.cairn import scene_calendar_sync
-
-        # These aliases should exist
-        assert hasattr(scene_calendar_sync, "refresh_all_recurring_beats")
-        assert hasattr(scene_calendar_sync, "sync_calendar_to_beats")
-        assert hasattr(scene_calendar_sync, "sync_beat_to_calendar")
-        assert hasattr(scene_calendar_sync, "update_beat_calendar_event")
-        assert hasattr(scene_calendar_sync, "delete_beat_calendar_event")
-        assert hasattr(scene_calendar_sync, "create_beat_with_calendar_sync")
-        assert hasattr(scene_calendar_sync, "delete_beat_with_calendar_sync")
-
-    def test_beat_alias_is_same_function(self) -> None:
-        """Beat aliases point to the same functions."""
-        from reos.cairn import scene_calendar_sync
-
-        assert (
-            scene_calendar_sync.refresh_all_recurring_beats
-            == scene_calendar_sync.refresh_all_recurring_scenes
-        )
-        assert (
-            scene_calendar_sync.sync_calendar_to_beats
-            == scene_calendar_sync.sync_calendar_to_scenes
-        )

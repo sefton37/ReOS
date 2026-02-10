@@ -14,22 +14,56 @@ from typing import Any
 from reos.db import Database
 from reos.play_fs import (
     add_attachment as play_add_attachment,
+)
+from reos.play_fs import (
     assign_repo_to_act as play_assign_repo_to_act,
+)
+from reos.play_fs import (
     create_act as play_create_act,
+)
+from reos.play_fs import (
     create_scene as play_create_scene,
+)
+from reos.play_fs import (
     kb_list_files as play_kb_list_files,
+)
+from reos.play_fs import (
     kb_read as play_kb_read,
+)
+from reos.play_fs import (
     kb_write_apply as play_kb_write_apply,
+)
+from reos.play_fs import (
     kb_write_preview as play_kb_write_preview,
+)
+from reos.play_fs import (
     list_acts as play_list_acts,
+)
+from reos.play_fs import (
     list_attachments as play_list_attachments,
+)
+from reos.play_fs import (
     list_scenes as play_list_scenes,
+)
+from reos.play_fs import (
     play_root,
+)
+from reos.play_fs import (
     read_me_markdown as play_read_me_markdown,
+)
+from reos.play_fs import (
     remove_attachment as play_remove_attachment,
+)
+from reos.play_fs import (
     set_active_act_id as play_set_active_act_id,
+)
+from reos.play_fs import (
     update_act as play_update_act,
+)
+from reos.play_fs import (
     update_scene as play_update_scene,
+)
+from reos.play_fs import (
     write_me_markdown as play_write_me_markdown,
 )
 
@@ -84,7 +118,14 @@ def handle_play_acts_list(_db: Database) -> dict[str, Any]:
     return {
         "active_act_id": active_id,
         "acts": [
-            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path, "color": a.color}
+            {
+                "act_id": a.act_id,
+                "title": a.title,
+                "active": bool(a.active),
+                "notes": a.notes,
+                "repo_path": a.repo_path,
+                "color": a.color,
+            }
             for a in acts
         ],
     }
@@ -99,13 +140,22 @@ def handle_play_acts_set_active(_db: Database, *, act_id: str | None) -> dict[st
     return {
         "active_act_id": active_id,
         "acts": [
-            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path, "color": a.color}
+            {
+                "act_id": a.act_id,
+                "title": a.title,
+                "active": bool(a.active),
+                "notes": a.notes,
+                "repo_path": a.repo_path,
+                "color": a.color,
+            }
             for a in acts
         ],
     }
 
 
-def handle_play_acts_create(_db: Database, *, title: str, notes: str | None = None) -> dict[str, Any]:
+def handle_play_acts_create(
+    _db: Database, *, title: str, notes: str | None = None
+) -> dict[str, Any]:
     """Create a new act."""
     try:
         acts, created_id = play_create_act(title=title, notes=notes or "")
@@ -114,7 +164,13 @@ def handle_play_acts_create(_db: Database, *, title: str, notes: str | None = No
     return {
         "created_act_id": created_id,
         "acts": [
-            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path}
+            {
+                "act_id": a.act_id,
+                "title": a.title,
+                "active": bool(a.active),
+                "notes": a.notes,
+                "repo_path": a.repo_path,
+            }
             for a in acts
         ],
     }
@@ -136,7 +192,14 @@ def handle_play_acts_update(
     return {
         "active_act_id": active_id,
         "acts": [
-            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path, "color": a.color}
+            {
+                "act_id": a.act_id,
+                "title": a.title,
+                "active": bool(a.active),
+                "notes": a.notes,
+                "repo_path": a.repo_path,
+                "color": a.color,
+            }
             for a in acts
         ],
     }
@@ -164,9 +227,14 @@ def handle_play_acts_assign_repo(
         # Create initial commit to have a valid repo
         readme = path / "README.md"
         if not readme.exists():
-            readme.write_text(f"# Project\n\nCreated by ReOS\n")
+            readme.write_text("# Project\n\nCreated by ReOS\n")
         subprocess.run(["git", "add", "."], cwd=str(path), capture_output=True, check=True)
-        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=str(path), capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "Initial commit"],
+            cwd=str(path),
+            capture_output=True,
+            check=True,
+        )
 
     try:
         acts, _active_id = play_assign_repo_to_act(act_id=act_id, repo_path=str(path))
@@ -177,7 +245,13 @@ def handle_play_acts_assign_repo(
         "success": True,
         "repo_path": str(path),
         "acts": [
-            {"act_id": a.act_id, "title": a.title, "active": bool(a.active), "notes": a.notes, "repo_path": a.repo_path}
+            {
+                "act_id": a.act_id,
+                "title": a.title,
+                "active": bool(a.active),
+                "notes": a.notes,
+                "repo_path": a.repo_path,
+            }
             for a in acts
         ],
     }
@@ -231,11 +305,14 @@ def handle_play_scenes_list_all(db: Database) -> dict[str, Any]:
             cairn_db_path = Path(play_path) / ".cairn" / "cairn.db"
             if cairn_db_path.exists():
                 from reos.cairn.store import CairnStore
+
                 store = CairnStore(cairn_db_path)
                 from reos.cairn.thunderbird import ThunderbirdBridge
+
                 thunderbird = ThunderbirdBridge.auto_detect()
                 if thunderbird and thunderbird.has_calendar():
                     from reos.cairn.scene_calendar_sync import sync_calendar_to_scenes
+
                     # Sync with 5-year window to capture all future events
                     sync_calendar_to_scenes(thunderbird, store, hours=43800)
         except Exception as e:
@@ -259,7 +336,9 @@ def handle_play_scenes_list_all(db: Database) -> dict[str, Any]:
                     else:
                         start_dt = start_str
                     # Compute next occurrence from NOW
-                    next_occ = get_next_occurrence(recurrence_rule, start_dt, after=now - timedelta(hours=1))
+                    next_occ = get_next_occurrence(
+                        recurrence_rule, start_dt, after=now - timedelta(hours=1)
+                    )
                     scene["next_occurrence"] = next_occ.isoformat() if next_occ else None
                 except Exception:
                     pass  # Keep existing next_occurrence
@@ -277,10 +356,26 @@ def handle_play_scenes_list_all(db: Database) -> dict[str, Any]:
         # Title-based classification
         # Holidays: common holiday patterns
         holiday_keywords = [
-            "day", "eve", "christmas", "thanksgiving", "easter", "independence",
-            "memorial", "labor", "veterans", "mlk", "president", "columbus",
-            "new year", "valentine", "st. patrick", "mother's day", "father's day",
-            "halloween", "juneteenth", "indigenous"
+            "day",
+            "eve",
+            "christmas",
+            "thanksgiving",
+            "easter",
+            "independence",
+            "memorial",
+            "labor",
+            "veterans",
+            "mlk",
+            "president",
+            "columbus",
+            "new year",
+            "valentine",
+            "st. patrick",
+            "mother's day",
+            "father's day",
+            "halloween",
+            "juneteenth",
+            "indigenous",
         ]
         if any(kw in title for kw in holiday_keywords) and "'s birthday" not in title:
             if not any(title.endswith(f"'s {kw}") for kw in ["meeting", "call", "appointment"]):
@@ -297,6 +392,7 @@ def handle_play_scenes_list_all(db: Database) -> dict[str, Any]:
 
     # Enrich scenes with computed fields (effective_stage, is_unscheduled, is_overdue)
     from reos.play_computed import enrich_scene_for_display
+
     enriched_scenes = [enrich_scene_for_display(scene) for scene in scenes]
 
     return {"scenes": enriched_scenes}
@@ -346,7 +442,7 @@ def handle_play_scenes_create(
                 "disable_auto_complete": s.disable_auto_complete,
             }
             for s in scenes
-        ]
+        ],
     }
 
 
@@ -399,8 +495,6 @@ def handle_play_scenes_update(
     }
 
 
-
-
 # =============================================================================
 # KB (Knowledge Base) Handlers
 # =============================================================================
@@ -448,7 +542,9 @@ def handle_play_kb_write_preview(
 ) -> dict[str, Any]:
     """Preview KB write (get current hash for conflict detection)."""
     try:
-        res = play_kb_write_preview(act_id=act_id, scene_id=scene_id, path=path, text=text, _debug_source=_debug_source)
+        res = play_kb_write_preview(
+            act_id=act_id, scene_id=scene_id, path=path, text=text, _debug_source=_debug_source
+        )
     except ValueError as exc:
         raise RpcError(code=-32602, message=str(exc)) from exc
     return {
@@ -583,9 +679,12 @@ def handle_play_attachments_remove(
 # =============================================================================
 
 
-def handle_play_pages_list(_db: Database, *, act_id: str, parent_page_id: str | None = None) -> dict[str, Any]:
+def handle_play_pages_list(
+    _db: Database, *, act_id: str, parent_page_id: str | None = None
+) -> dict[str, Any]:
     """List pages for an act, optionally filtered by parent."""
     from reos import play_db
+
     pages = play_db.list_pages(act_id, parent_page_id)
     return {"pages": pages}
 
@@ -593,26 +692,34 @@ def handle_play_pages_list(_db: Database, *, act_id: str, parent_page_id: str | 
 def handle_play_pages_tree(_db: Database, *, act_id: str) -> dict[str, Any]:
     """Get the full page tree for an act."""
     from reos import play_db
+
     pages = play_db.get_page_tree(act_id)
     return {"pages": pages}
 
 
-def handle_play_pages_create(_db: Database, *, act_id: str, title: str,
-                              parent_page_id: str | None = None,
-                              icon: str | None = None) -> dict[str, Any]:
+def handle_play_pages_create(
+    _db: Database,
+    *,
+    act_id: str,
+    title: str,
+    parent_page_id: str | None = None,
+    icon: str | None = None,
+) -> dict[str, Any]:
     """Create a new page."""
     from reos import play_db
+
     pages, page_id = play_db.create_page(
         act_id=act_id, title=title, parent_page_id=parent_page_id, icon=icon
     )
     return {"pages": pages, "created_page_id": page_id}
 
 
-def handle_play_pages_update(_db: Database, *, page_id: str,
-                              title: str | None = None,
-                              icon: str | None = None) -> dict[str, Any]:
+def handle_play_pages_update(
+    _db: Database, *, page_id: str, title: str | None = None, icon: str | None = None
+) -> dict[str, Any]:
     """Update a page's metadata."""
     from reos import play_db
+
     page = play_db.update_page(page_id=page_id, title=title, icon=icon)
     if not page:
         raise RpcError(code=-32602, message="Page not found")
@@ -622,18 +729,26 @@ def handle_play_pages_update(_db: Database, *, page_id: str,
 def handle_play_pages_delete(_db: Database, *, page_id: str) -> dict[str, Any]:
     """Delete a page and its descendants."""
     from reos import play_db
+
     deleted = play_db.delete_page(page_id)
     if not deleted:
         raise RpcError(code=-32602, message="Page not found")
     return {"deleted": True}
 
 
-def handle_play_pages_move(_db: Database, *, page_id: str,
-                            new_parent_id: str | None = None,
-                            new_position: int | None = None) -> dict[str, Any]:
+def handle_play_pages_move(
+    _db: Database,
+    *,
+    page_id: str,
+    new_parent_id: str | None = None,
+    new_position: int | None = None,
+) -> dict[str, Any]:
     """Move a page to a new parent or position."""
     from reos import play_db
-    page = play_db.move_page(page_id=page_id, new_parent_id=new_parent_id, new_position=new_position)
+
+    page = play_db.move_page(
+        page_id=page_id, new_parent_id=new_parent_id, new_position=new_position
+    )
     if not page:
         raise RpcError(code=-32602, message="Page not found")
     return {"page": page}
@@ -642,12 +757,16 @@ def handle_play_pages_move(_db: Database, *, page_id: str,
 def handle_play_pages_content_read(_db: Database, *, act_id: str, page_id: str) -> dict[str, Any]:
     """Read page content."""
     from reos import play_db
+
     text = play_db.read_page_content(act_id, page_id)
     return {"text": text}
 
 
-def handle_play_pages_content_write(_db: Database, *, act_id: str, page_id: str, text: str) -> dict[str, Any]:
+def handle_play_pages_content_write(
+    _db: Database, *, act_id: str, page_id: str, text: str
+) -> dict[str, Any]:
     """Write page content."""
     from reos import play_db
+
     play_db.write_page_content(act_id, page_id, text)
     return {"ok": True}

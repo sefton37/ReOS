@@ -377,86 +377,6 @@ class PlayService:
             target_act_id=target_act_id,
         )
 
-    # --- Beats (Backward Compatibility) ---
-    # In v4, Beats have been merged into Scenes. These methods wrap Scene operations.
-
-    def list_beats(self, act_id: str, scene_id: str | None = None) -> list[BeatInfo]:
-        """List beats (scenes) under an act.
-
-        DEPRECATED: Use list_scenes instead.
-        The scene_id parameter is ignored in v4.
-        """
-        scenes = self.list_scenes(act_id)
-        return [BeatInfo.from_scene_info(s) for s in scenes]
-
-    def create_beat(
-        self,
-        act_id: str,
-        scene_id: str,  # Ignored in v4
-        title: str,
-        stage: str = "",
-        notes: str = "",
-        link: str | None = None,
-    ) -> list[BeatInfo]:
-        """Create a new beat (scene) under an act.
-
-        DEPRECATED: Use create_scene instead.
-        The scene_id parameter is ignored in v4.
-
-        Returns:
-            Updated list of beats (scenes)
-        """
-        scenes, _ = self.create_scene(
-            act_id=act_id,
-            title=title,
-            stage=stage,
-            notes=notes,
-            link=link,
-        )
-        return [BeatInfo.from_scene_info(s) for s in scenes]
-
-    def update_beat(
-        self,
-        act_id: str,
-        scene_id: str,  # Ignored in v4
-        beat_id: str,
-        title: str | None = None,
-        stage: str | None = None,
-        notes: str | None = None,
-        link: str | None = None,
-    ) -> list[BeatInfo]:
-        """Update a beat's (scene's) fields.
-
-        DEPRECATED: Use update_scene instead.
-
-        Returns:
-            Updated list of beats (scenes)
-        """
-        scenes = self.update_scene(
-            act_id=act_id,
-            scene_id=beat_id,  # beat_id is now scene_id
-            title=title,
-            stage=stage,
-            notes=notes,
-            link=link,
-        )
-        return [BeatInfo.from_scene_info(s) for s in scenes]
-
-    def delete_beat(
-        self,
-        act_id: str,
-        scene_id: str,  # Ignored in v4
-        beat_id: str,
-    ) -> list[BeatInfo]:
-        """Delete a beat (scene).
-
-        DEPRECATED: Use delete_scene instead.
-
-        Returns:
-            Updated list of beats (scenes)
-        """
-        scenes = self.delete_scene(act_id=act_id, scene_id=beat_id)
-        return [BeatInfo.from_scene_info(s) for s in scenes]
 
     # --- Knowledge Base (KB) Files ---
 
@@ -464,21 +384,19 @@ class PlayService:
         self,
         act_id: str,
         scene_id: str | None = None,
-        beat_id: str | None = None,
     ) -> list[str]:
         """List KB files at the specified level.
 
         Returns:
             List of relative file paths
         """
-        return play_fs.kb_list_files(act_id=act_id, scene_id=scene_id, beat_id=beat_id)
+        return play_fs.kb_list_files(act_id=act_id, scene_id=scene_id)
 
     def read_kb_file(
         self,
         act_id: str,
         path: str = "kb.md",
         scene_id: str | None = None,
-        beat_id: str | None = None,
     ) -> str:
         """Read a KB file.
 
@@ -486,7 +404,6 @@ class PlayService:
             act_id: The act ID
             path: Relative file path (default: kb.md)
             scene_id: Optional scene ID
-            beat_id: Optional beat ID
 
         Returns:
             File content as string
@@ -494,7 +411,6 @@ class PlayService:
         return play_fs.kb_read(
             act_id=act_id,
             scene_id=scene_id,
-            beat_id=beat_id,
             path=path,
         )
 
@@ -504,7 +420,6 @@ class PlayService:
         path: str,
         text: str,
         scene_id: str | None = None,
-        beat_id: str | None = None,
     ) -> dict[str, Any]:
         """Preview a KB file write (diff, hashes).
 
@@ -514,7 +429,6 @@ class PlayService:
         return play_fs.kb_write_preview(
             act_id=act_id,
             scene_id=scene_id,
-            beat_id=beat_id,
             path=path,
             text=text,
         )
@@ -526,7 +440,6 @@ class PlayService:
         text: str,
         expected_sha256: str,
         scene_id: str | None = None,
-        beat_id: str | None = None,
     ) -> dict[str, Any]:
         """Apply a KB file write with hash verification.
 
@@ -539,7 +452,6 @@ class PlayService:
         return play_fs.kb_write_apply(
             act_id=act_id,
             scene_id=scene_id,
-            beat_id=beat_id,
             path=path,
             text=text,
             expected_sha256_current=expected_sha256,
@@ -551,7 +463,6 @@ class PlayService:
         self,
         act_id: str | None = None,
         scene_id: str | None = None,
-        beat_id: str | None = None,
     ) -> list[AttachmentInfo]:
         """List attachments at the specified level.
 
@@ -564,7 +475,6 @@ class PlayService:
         attachments = play_fs.list_attachments(
             act_id=act_id,
             scene_id=scene_id,
-            beat_id=beat_id,
         )
         return [AttachmentInfo.from_play_fs(a) for a in attachments]
 
@@ -574,7 +484,6 @@ class PlayService:
         file_name: str | None = None,
         act_id: str | None = None,
         scene_id: str | None = None,
-        beat_id: str | None = None,
     ) -> list[AttachmentInfo]:
         """Add a file attachment.
 
@@ -589,7 +498,6 @@ class PlayService:
         attachments = play_fs.add_attachment(
             act_id=act_id,
             scene_id=scene_id,
-            beat_id=beat_id,
             file_path=file_path,
             file_name=file_name,
         )
@@ -600,7 +508,6 @@ class PlayService:
         attachment_id: str,
         act_id: str | None = None,
         scene_id: str | None = None,
-        beat_id: str | None = None,
     ) -> list[AttachmentInfo]:
         """Remove a file attachment.
 
@@ -610,7 +517,6 @@ class PlayService:
         attachments = play_fs.remove_attachment(
             act_id=act_id,
             scene_id=scene_id,
-            beat_id=beat_id,
             attachment_id=attachment_id,
         )
         return [AttachmentInfo.from_play_fs(a) for a in attachments]

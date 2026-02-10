@@ -69,11 +69,6 @@ class TestSceneStageEnum:
         assert SceneStage.AWAITING_DATA.value == "awaiting_data"
         assert SceneStage.COMPLETE.value == "complete"
 
-    def test_beat_stage_alias(self) -> None:
-        """BeatStage should be alias for SceneStage."""
-        from reos.play_fs import SceneStage, BeatStage
-
-        assert BeatStage is SceneStage
 
 
 class TestActDataclass:
@@ -145,24 +140,6 @@ class TestSceneDataclass:
         assert scene.thunderbird_event_id == "tb-event-1"
 
 
-class TestBeatDataclass:
-    """Test Beat dataclass (backward compatibility)."""
-
-    def test_beat_creation(self) -> None:
-        """Beat should store all fields."""
-        from reos.play_fs import Beat
-
-        beat = Beat(
-            beat_id="beat-123",
-            title="Test Beat",
-            stage="planning",
-            notes="Beat notes",
-            link="https://example.com/task",
-        )
-
-        assert beat.beat_id == "beat-123"
-        assert beat.title == "Test Beat"
-        assert beat.stage == "planning"
 
 
 class TestFileAttachmentDataclass:
@@ -377,29 +354,6 @@ class TestDictConversions:
 
         assert scene.stage == SceneStage.PLANNING.value
 
-    def test_dict_to_beat(self) -> None:
-        """Should convert dict to Beat."""
-        from reos.play_fs import _dict_to_beat
-
-        data = {
-            "beat_id": "beat-1",
-            "title": "Beat Title",
-            "stage": "in_progress",
-            "notes": "Notes",
-        }
-        beat = _dict_to_beat(data)
-
-        assert beat.beat_id == "beat-1"
-        assert beat.stage == "in_progress"
-
-    def test_dict_to_beat_accepts_scene_id(self) -> None:
-        """Should accept scene_id as fallback for beat_id."""
-        from reos.play_fs import _dict_to_beat
-
-        data = {"scene_id": "scene-as-beat"}
-        beat = _dict_to_beat(data)
-
-        assert beat.beat_id == "scene-as-beat"
 
 
 # =============================================================================
@@ -519,13 +473,6 @@ class TestKbRootFor:
         path = _kb_root_for(act_id="act-1", scene_id="scene-1")
         assert path == play_root() / "kb" / "acts" / "act-1" / "scenes" / "scene-1"
 
-    def test_beat_level(self, temp_data_dir: Path) -> None:
-        """Should return Beat-level KB root."""
-        from reos.play_fs import _kb_root_for, play_root
-
-        path = _kb_root_for(act_id="act-1", scene_id="scene-1", beat_id="beat-1")
-        expected = play_root() / "kb" / "acts" / "act-1" / "scenes" / "scene-1" / "beats" / "beat-1"
-        assert path == expected
 
 
 class TestResolveKbFile:
