@@ -86,7 +86,7 @@ class TestIntentEnums:
         """All expected categories are defined."""
         expected = [
             "CALENDAR", "CONTACTS", "SYSTEM", "CODE", "PERSONAL",
-            "TASKS", "KNOWLEDGE", "PLAY", "UNDO", "FEEDBACK", "UNKNOWN",
+            "TASKS", "KNOWLEDGE", "PLAY", "UNDO", "FEEDBACK", "CONVERSATION", "UNKNOWN",
         ]
         actual = [c.name for c in IntentCategory]
         assert set(expected) == set(actual)

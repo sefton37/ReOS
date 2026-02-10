@@ -48,6 +48,7 @@ class IntentCategory(Enum):
     PLAY = auto()  # The Play hierarchy (Acts, Scenes, Beats)
     UNDO = auto()  # User wants to undo/revert last action
     FEEDBACK = auto()  # Meta-commentary about CAIRN's responses
+    CONVERSATION = auto()  # Greetings, small talk, acknowledgments
     UNKNOWN = auto()  # Cannot determine
 
 
@@ -277,6 +278,13 @@ INTENT_PATTERNS: dict[IntentCategory, list[str]] = {
         "don't do that",
         "you should",
         "you shouldn't",
+    ],
+    IntentCategory.CONVERSATION: [
+        r"^(?:hi|hello|hey|good\s*(?:morning|afternoon|evening|night))(?:\s|!|$)",
+        r"^(?:thanks|thank you|bye|goodbye|see you)",
+        r"^(?:how are you|what's up|sup|yo)\b",
+        r"^(?:i'm (?:not asking|just (?:saying|chatting|talking)))\b",
+        r"^(?:nice|cool|ok(?:ay)?|sure|alright|great|awesome)(?:\s|!|$)",
     ],
 }
 
@@ -570,7 +578,13 @@ class CairnIntentEngine:
         # Fast path: pattern matching for common cases
         for category, patterns in INTENT_PATTERNS.items():
             for pattern in patterns:
-                if pattern in user_lower:
+                # CONVERSATION uses regex (anchored patterns); all others use substring
+                matched = (
+                    bool(re.search(pattern, user_lower))
+                    if category == IntentCategory.CONVERSATION
+                    else (pattern in user_lower)
+                )
+                if matched:
                     # Special handling for CODE category: require code-related nouns
                     # to avoid misclassifying "formatting" as code
                     if category == IntentCategory.CODE:
@@ -635,7 +649,7 @@ class CairnIntentEngine:
 
 Return ONLY a JSON object with these fields:
 {
-    "category": "CALENDAR|CONTACTS|SYSTEM|CODE|TASKS|PERSONAL|KNOWLEDGE|UNDO|FEEDBACK|UNKNOWN",
+    "category": "CALENDAR|CONTACTS|SYSTEM|CODE|TASKS|PERSONAL|KNOWLEDGE|UNDO|FEEDBACK|CONVERSATION|UNKNOWN",
     "action": "VIEW|SEARCH|CREATE|UPDATE|DELETE|STATUS|UNKNOWN",
     "target": "what they're asking about (string)",
     "confidence": 0.0-1.0,
@@ -658,6 +672,9 @@ Categories:
 - FEEDBACK: Meta-commentary about YOUR responses or behavior
         (e.g., "you're repeating yourself", "that's wrong", "not what I meant",
          "that was helpful", "confusing", "why did you say that")
+- CONVERSATION: Greetings, small talk, social niceties, acknowledgments,
+        or statements that aren't requests (e.g., "hi", "good morning",
+        "thanks", "how are you", "I'm just chatting")
 - UNKNOWN: Cannot determine
 
 Actions:
@@ -724,6 +741,15 @@ Be precise. Output ONLY valid JSON."""
                 verified=True,
                 tool_name=None,  # No tool needed
                 reason="Meta-feedback about CAIRN behavior",
+            )
+
+        # For CONVERSATION category, no tool needed - respond naturally
+        if intent.category == IntentCategory.CONVERSATION:
+            return VerifiedIntent(
+                intent=intent,
+                verified=True,
+                tool_name=None,
+                reason="Conversational message - respond naturally",
             )
 
         # Check if the tool is available
@@ -1430,6 +1456,12 @@ IMPORTANT:
         if verified_intent.intent.category == IntentCategory.FEEDBACK:
             return self._handle_feedback(verified_intent.intent), []
 
+        # Handle CONVERSATION category - greetings, small talk, acknowledgments
+        if verified_intent.intent.category == IntentCategory.CONVERSATION:
+            return self._handle_conversation(
+                verified_intent.intent, persona_context, conversation_context
+            ), []
+
         # Build a strict prompt that prevents hallucination
         conversation_section = ""
         if conversation_context:
@@ -1736,6 +1768,51 @@ No data was retrieved. Explain that you couldn't get the requested information."
 
         # Generic feedback acknowledgment
         return "Thank you for the feedback. I'll try to do better. How can I help you?"
+
+    def _handle_conversation(
+        self,
+        intent: ExtractedIntent,
+        persona_context: str = "",
+        conversation_context: str = "",
+    ) -> str:
+        """Handle conversational messages — greetings, small talk, acknowledgments.
+
+        Uses the LLM with a lightweight conversational prompt to generate a warm,
+        natural response. Falls back to a canned greeting if the LLM is unavailable.
+        """
+        conversation_section = ""
+        if conversation_context:
+            conversation_section = (
+                f"\nRECENT CONVERSATION:\n{conversation_context}\n"
+            )
+
+        persona_section = ""
+        if persona_context:
+            persona_section = (
+                f"\nABOUT THE USER:\n{persona_context}\n"
+            )
+
+        system = (
+            "You are CAIRN, a friendly local AI assistant. "
+            "The user is making casual conversation — a greeting, acknowledgment, "
+            "or social nicety. Respond warmly and briefly (1-2 sentences). "
+            "You can offer to help but don't be pushy. "
+            "Never mention tools, APIs, or technical internals."
+            f"{persona_section}{conversation_section}"
+        )
+
+        user = intent.raw_input
+
+        try:
+            raw = self.llm.chat_text(system=system, user=user, temperature=0.7, top_p=0.9)
+            response, _ = self._parse_response(raw)
+            if response:
+                self._track_response(response)
+                return response
+        except Exception as e:
+            logger.warning("Conversation LLM call failed: %s", e)
+
+        return "Hello! How can I help you today?"
 
     def _is_response_repetitive(self, response: str) -> bool:
         """Check if a response is too similar to recent responses.
