@@ -43,7 +43,6 @@ import type {
   PlayMeReadResult,
   PlayActsListResult,
   PlayScenesListResult,
-  PlayBeatsListResult,
   PlayActsCreateResult,
   PlayKbListResult,
   PlayKbReadResult,
@@ -618,7 +617,7 @@ function buildUi() {
             );
           }
 
-          // Refresh attention items after CAIRN chat - beat moves may have changed act assignments
+          // Refresh attention items after CAIRN chat - scene moves may have changed act assignments
           void refreshAttentionItems();
         } else if (statusResult.status === 'error') {
           chatComplete = true;
@@ -798,10 +797,8 @@ function buildUi() {
   let activeActId: string | null = null;
   let actsCache: PlayActsListResult['acts'] = [];
   let selectedSceneId: string | null = null;
-  let selectedBeatId: string | null = null;
 
   let scenesCache: PlayScenesListResult['scenes'] = [];
-  let beatsCache: PlayBeatsListResult['beats'] = [];
 
   let kbSelectedPath = 'kb.md';
   let kbTextDraft = '';
@@ -988,20 +985,13 @@ function buildUi() {
   // Helper functions (rowHeader, label, textInput, textArea, smallButton)
   // are now imported from ./dom.ts
 
-  async function refreshBeats(actId: string, sceneId: string) {
-    const res = (await kernelRequest('play/beats/list', { act_id: actId, scene_id: sceneId })) as PlayBeatsListResult;
-    beatsCache = res.beats ?? [];
-  }
-
   async function refreshKbForSelection() {
     if (!activeActId) return;
     const sceneId = selectedSceneId ?? undefined;
-    const beatId = selectedBeatId ?? undefined;
 
     const filesRes = (await kernelRequest('play/kb/list', {
       act_id: activeActId,
-      scene_id: sceneId,
-      beat_id: beatId
+      scene_id: sceneId
     })) as PlayKbListResult;
 
     const files = filesRes.files ?? [];
@@ -1013,7 +1003,6 @@ function buildUi() {
       const readRes = (await kernelRequest('play/kb/read', {
         act_id: activeActId,
         scene_id: sceneId,
-        beat_id: beatId,
         path: kbSelectedPath
       })) as PlayKbReadResult;
       kbTextDraft = readRes.text ?? '';
@@ -1051,7 +1040,6 @@ function buildUi() {
           const res = (await kernelRequest('play/acts/create', { title })) as PlayActsCreateResult;
           activeActId = res.created_act_id;
           selectedSceneId = null;
-          selectedBeatId = null;
           await refreshActs();
           if (activeActId) await refreshScenes(activeActId);
         })();
@@ -1065,11 +1053,9 @@ function buildUi() {
     status.style.fontSize = '12px';
     status.style.opacity = '0.85';
     status.style.marginBottom = '8px';
-    status.textContent = selectedBeatId
-      ? `Act → Scene → Beat`
-      : selectedSceneId
-        ? `Act → Scene`
-        : `Act`;
+    status.textContent = selectedSceneId
+      ? `Act → Scene`
+      : `Act`;
     inspectionBody.appendChild(status);
 
     // Act editor + create
@@ -1212,7 +1198,6 @@ function buildUi() {
         const res = (await kernelRequest('play/acts/create', { title })) as PlayActsCreateResult;
         activeActId = res.created_act_id;
         selectedSceneId = null;
-        selectedBeatId = null;
         await refreshActs();
         if (activeActId) await refreshScenes(activeActId);
       })();
@@ -1241,9 +1226,6 @@ function buildUi() {
     const sceneDetails = el('div');
     inspectionBody.appendChild(sceneDetails);
 
-    const beatsDetails = el('div');
-    inspectionBody.appendChild(beatsDetails);
-
     const kbSection = el('div');
     inspectionBody.appendChild(kbSection);
 
@@ -1261,10 +1243,8 @@ function buildUi() {
         btn.style.textAlign = 'left';
         btn.addEventListener('click', () => {
           selectedSceneId = s.scene_id;
-          selectedBeatId = null;
           void (async () => {
             if (activeActId) {
-              await refreshBeats(activeActId, s.scene_id);
               await refreshKbForSelection();
             }
             renderPlayInspector();
@@ -1318,121 +1298,6 @@ function buildUi() {
       });
     };
 
-    const renderBeats = () => {
-      beatsDetails.innerHTML = '';
-      if (!activeActId || !selectedSceneId) return;
-
-      beatsDetails.appendChild(rowHeader('Beats'));
-
-      const createRow = el('div');
-      createRow.style.display = 'flex';
-      createRow.style.gap = '8px';
-      const newTitle = textInput('');
-      newTitle.placeholder = 'New beat title';
-      const newStatus = textInput('');
-      newStatus.placeholder = 'status';
-      const createBtn = smallButton('Create');
-      createRow.appendChild(newTitle);
-      createRow.appendChild(newStatus);
-      createRow.appendChild(createBtn);
-      beatsDetails.appendChild(createRow);
-
-      const list = el('div');
-      list.style.display = 'flex';
-      list.style.flexDirection = 'column';
-      list.style.gap = '6px';
-      list.style.marginTop = '8px';
-      beatsDetails.appendChild(list);
-
-      const detail = el('div');
-      beatsDetails.appendChild(detail);
-
-      const renderList = () => {
-        list.innerHTML = '';
-        if (beatsCache.length === 0) {
-          const empty = el('div');
-          empty.textContent = '(no beats yet)';
-          empty.style.opacity = '0.7';
-          list.appendChild(empty);
-          return;
-        }
-        for (const b of beatsCache) {
-          const btn = smallButton(selectedBeatId === b.beat_id ? `• ${b.title}` : b.title);
-          btn.style.textAlign = 'left';
-          btn.addEventListener('click', () => {
-            selectedBeatId = b.beat_id;
-            void (async () => {
-              await refreshKbForSelection();
-              renderPlayInspector();
-            })();
-          });
-          list.appendChild(btn);
-        }
-      };
-
-      const renderDetail = () => {
-        detail.innerHTML = '';
-        if (!selectedBeatId) return;
-        const b = beatsCache.find((x) => x.beat_id === selectedBeatId);
-        if (!b) return;
-
-        detail.appendChild(rowHeader('Beat Details'));
-        const tTitle = textInput(b.title ?? '');
-        const tStage = textInput(b.stage ?? '');
-        const tLink = textInput(b.link ?? '');
-        const tNotes = textArea(b.notes ?? '', 80);
-        const save = smallButton('Save Beat');
-
-        detail.appendChild(label('Title'));
-        detail.appendChild(tTitle);
-        detail.appendChild(label('Stage'));
-        detail.appendChild(tStage);
-        detail.appendChild(label('Link'));
-        detail.appendChild(tLink);
-        detail.appendChild(label('Notes'));
-        detail.appendChild(tNotes);
-        detail.appendChild(save);
-
-        save.addEventListener('click', () => {
-          void (async () => {
-            if (!activeActId || !selectedSceneId || !selectedBeatId) return;
-            await kernelRequest('play/beats/update', {
-              act_id: activeActId,
-              scene_id: selectedSceneId,
-              beat_id: selectedBeatId,
-              title: tTitle.value,
-              stage: tStage.value,
-              link: tLink.value || null,
-              notes: tNotes.value
-            });
-            await refreshBeats(activeActId, selectedSceneId);
-            void refreshAttentionItems();  // Refresh attention items after beat update
-            renderPlayInspector();
-          })();
-        });
-      };
-
-      createBtn.addEventListener('click', () => {
-        void (async () => {
-          const title = newTitle.value.trim();
-          if (!title) return;
-          if (!activeActId || !selectedSceneId) return;
-          await kernelRequest('play/beats/create', {
-            act_id: activeActId,
-            scene_id: selectedSceneId,
-            title,
-            status: newStatus.value
-          });
-          await refreshBeats(activeActId, selectedSceneId);
-          void refreshAttentionItems();  // Refresh attention items after beat create
-          renderPlayInspector();
-        })();
-      });
-
-      renderList();
-      renderDetail();
-    };
-
     const renderKb = () => {
       kbSection.innerHTML = '';
       kbSection.appendChild(rowHeader('Mini Knowledgebase'));
@@ -1441,11 +1306,9 @@ function buildUi() {
       who.style.fontSize = '12px';
       who.style.opacity = '0.8';
       who.style.marginBottom = '6px';
-      who.textContent = selectedBeatId
-        ? `Beat KB`
-        : selectedSceneId
-          ? `Scene KB`
-          : `Act KB`;
+      who.textContent = selectedSceneId
+        ? `Scene KB`
+        : `Act KB`;
       kbSection.appendChild(who);
 
       const fileRow = el('div');
@@ -1519,7 +1382,6 @@ function buildUi() {
             const res = (await kernelRequest('play/kb/write_preview', {
               act_id: activeActId,
               scene_id: selectedSceneId,
-              beat_id: selectedBeatId,
               path: kbSelectedPath,
               text: editor.value
             })) as PlayKbWritePreviewResult;
@@ -1543,7 +1405,6 @@ function buildUi() {
             const res = (await kernelRequest('play/kb/write_apply', {
               act_id: activeActId,
               scene_id: selectedSceneId,
-              beat_id: selectedBeatId,
               path: kbSelectedPath,
               text: editor.value,
               expected_sha256_current: kbPreview.expected_sha256_current
@@ -1567,8 +1428,7 @@ function buildUi() {
           if (!activeActId) return;
           const filesRes = (await kernelRequest('play/kb/list', {
             act_id: activeActId,
-            scene_id: selectedSceneId,
-            beat_id: selectedBeatId
+            scene_id: selectedSceneId
           })) as PlayKbListResult;
           const files = filesRes.files ?? [];
           listWrap.innerHTML = '';
@@ -1601,7 +1461,6 @@ function buildUi() {
 
     renderScenesList();
     renderSceneDetails();
-    renderBeats();
     void (async () => {
       await refreshKbForSelection();
       renderKb();
@@ -1624,14 +1483,6 @@ function buildUi() {
     scenesCache = res.scenes ?? [];
     if (selectedSceneId && !scenesCache.some((s) => s.scene_id === selectedSceneId)) {
       selectedSceneId = null;
-      selectedBeatId = null;
-    }
-    if (activeActId) {
-      if (selectedSceneId) {
-        await refreshBeats(activeActId, selectedSceneId);
-      } else {
-        beatsCache = [];
-      }
     }
     // Only render The Play inspector if the user has activated it
     if (playInspectorActive) {

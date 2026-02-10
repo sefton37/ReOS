@@ -356,13 +356,13 @@ export type PlayActsListResult = {
   acts: Array<{ act_id: string; title: string; active: boolean; notes: string; repo_path: string | null; color: string | null }>;
 };
 
-// Scene stage types (formerly BeatStage)
+// Scene stage types
 export type SceneStage = 'planning' | 'in_progress' | 'awaiting_data' | 'complete';
 
 // Display stage includes 'need_attention' virtual column (computed in backend)
 export type DisplayStage = SceneStage | 'need_attention';
 
-// PlayScene is the todo/calendar item level (formerly PlayBeat)
+// PlayScene is the todo/calendar item level
 export type PlayScene = {
   scene_id: string;
   act_id: string;
@@ -384,11 +384,6 @@ export type PlayScenesListResult = {
   scenes: PlayScene[];
 };
 
-// Backward compatibility aliases
-export type BeatStage = SceneStage;
-export type PlayBeat = PlayScene;
-export type PlayBeatsListResult = PlayScenesListResult;
-
 export type PlayActsCreateResult = {
   created_act_id: string;
   acts: Array<{ act_id: string; title: string; active: boolean; notes: string; repo_path: string | null }>;
@@ -403,9 +398,6 @@ export type PlayActsAssignRepoResult = {
 export type PlayScenesMutationResult = {
   scenes: PlayScene[];
 };
-
-// Backward compatibility alias
-export type PlayBeatsMutationResult = PlayScenesMutationResult;
 
 // Play Page types (nested pages in Act knowledgebase)
 export type PlayPage = {
