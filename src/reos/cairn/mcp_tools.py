@@ -2794,15 +2794,12 @@ class CairnToolHandler:
         """
         # Map tool names to methods
         tool_methods = {
-            "cairn_move_beat_to_act": self._move_beat_to_act,
             "cairn_update_act": self._update_act,
             "cairn_update_scene": self._update_scene,
-            "cairn_update_beat": self._update_beat,
             "cairn_set_priority": self._set_priority,
             "cairn_set_kanban_state": self._set_kanban_state,
             "cairn_delete_act": self._delete_act,  # For undoing create
             "cairn_delete_scene": self._delete_scene,  # For undoing create
-            "cairn_delete_beat": self._delete_beat,  # For undoing create
         }
 
         method = tool_methods.get(tool_name)
@@ -2868,7 +2865,6 @@ class CairnToolHandler:
 
         # Dispatch to the appropriate tool
         tool_methods = {
-            "cairn_delete_beat": self._delete_beat,
             "cairn_delete_act": self._delete_act,
             "cairn_delete_scene": self._delete_scene,
         }

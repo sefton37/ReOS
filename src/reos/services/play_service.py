@@ -7,7 +7,7 @@ The Play hierarchy (Acts, Scenes, Beats, KB files, Attachments).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from .. import play_fs

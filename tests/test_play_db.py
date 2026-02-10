@@ -742,49 +742,6 @@ class TestPagesCRUD:
         assert moved["parent_page_id"] == parent2_id
 
 
-# =============================================================================
-# Backward Compatibility Tests (Beat aliases)
-# =============================================================================
-
-
-class TestBackwardCompatibility:
-    """Test beat_* alias functions for backward compatibility."""
-
-    def test_create_beat_alias(self, initialized_db) -> None:
-        """create_beat creates scene and returns beat-compatible format."""
-        _, act_id = initialized_db.create_act(title="Test Act")
-
-        beats, beat_id = initialized_db.create_beat(
-            act_id=act_id, title="Test Beat"
-        )
-
-        assert beat_id.startswith("scene-")
-        assert len(beats) == 1
-        assert "beat_id" in beats[0]
-        assert beats[0]["title"] == "Test Beat"
-
-    def test_get_beat_alias(self, initialized_db) -> None:
-        """get_beat returns scene in beat format."""
-        _, act_id = initialized_db.create_act(title="Test Act")
-        _, scene_id = initialized_db.create_scene(act_id=act_id, title="Test Scene")
-
-        beat = initialized_db.get_beat(scene_id)
-
-        assert beat is not None
-        assert beat["beat_id"] == scene_id
-        assert beat["title"] == "Test Scene"
-
-    def test_find_beat_by_calendar_event_alias(self, initialized_db) -> None:
-        """find_beat_by_calendar_event works as alias."""
-        _, act_id = initialized_db.create_act(title="Test Act")
-        _, scene_id = initialized_db.create_scene(
-            act_id=act_id, title="Cal Beat", calendar_event_id="cal-alias-test"
-        )
-
-        beat = initialized_db.find_beat_by_calendar_event("cal-alias-test")
-
-        assert beat is not None
-        assert beat["beat_id"] == scene_id
 
 
 # =============================================================================

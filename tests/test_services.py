@@ -272,17 +272,6 @@ class TestPlayService:
             scenes = play_service.list_scenes(act_id=active_id)
             assert isinstance(scenes, list)
 
-    def test_list_beats(self, play_service) -> None:
-        """Should list beats (may be empty)."""
-        # list_beats requires act_id and scene_id parameters
-        acts, active_id = play_service.list_acts()
-        if active_id:
-            scenes = play_service.list_scenes(act_id=active_id)
-            if scenes:
-                # SceneInfo is a dataclass, use .scene_id attribute
-                scene_id = getattr(scenes[0], "scene_id", None) or getattr(scenes[0], "id", "")
-                beats = play_service.list_beats(act_id=active_id, scene_id=scene_id)
-                assert isinstance(beats, list)
 
     def test_read_me_markdown(self, play_service) -> None:
         """Should read the Play markdown."""

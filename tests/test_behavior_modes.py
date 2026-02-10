@@ -207,25 +207,6 @@ class TestToolSelectors:
         )
         assert _play_tool_selector(ctx) == "cairn_list_acts"
 
-    def test_play_tool_selector_list_beats(self) -> None:
-        """Play tool selector returns cairn_list_beats for beat queries."""
-        ctx = BehaviorModeContext(
-            user_input="Show me all my beats",
-            classification=_make_classification(
-                semantics="read", domain="play", action_hint="view"
-            ),
-        )
-        assert _play_tool_selector(ctx) == "cairn_list_beats"
-
-    def test_play_tool_selector_move_beat(self) -> None:
-        """Play tool selector returns cairn_move_beat_to_act for move."""
-        ctx = BehaviorModeContext(
-            user_input="Move Job Search to Career act",
-            classification=_make_classification(
-                semantics="execute", domain="play", action_hint="update"
-            ),
-        )
-        assert _play_tool_selector(ctx) == "cairn_move_beat_to_act"
 
     def test_play_tool_selector_create_act(self) -> None:
         """Play tool selector returns cairn_create_act for creation."""
