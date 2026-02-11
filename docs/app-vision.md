@@ -87,6 +87,7 @@ The only report goes to the only stakeholder that matters: you.
   - Calendar sync with Thunderbird (including recurring events)
   - Priority surfacing without guilt-tripping
   - Coherence kernel filtering (blocks distractions based on identity)
+  - Health monitoring across 3 axes (context freshness, calibration alignment, system integrity) — surfaces findings through chat ("how are you doing?") and a passive UI indicator, never nagging
 
 - **Navigation**:
   - Tree view of Acts/Scenes

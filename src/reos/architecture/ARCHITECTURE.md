@@ -340,6 +340,51 @@ class ReOSAgent:
 4. Implement `_select_*_tool()` method if multiple tools
 5. Add argument extraction in `_build_tool_args()`
 
+## Health Pulse (Dialectical Health Framework)
+
+**Purpose:** Monitor system health across three axes without becoming intrusive.
+
+**Master Dialectic:** *The system genuinely needs you AND must never coerce you.*
+
+### Three Health Axes
+
+**1. Context Health (Engagement)**
+- Context freshness (data staleness)
+- Pattern currency (behavioral drift detection)
+- Act vitality (dormant narrative detection)
+
+**2. Calibration Health**
+- Signal quality (feedback genuineness)
+- Stated vs. demonstrated preferences
+- Correction intake (error visibility)
+
+**3. System Health (Integrity)**
+- Software currency (dependency updates)
+- Data integrity (SQLite health)
+- Security posture (zero-trust guarantees)
+
+### Anti-Nag Protocol
+
+Health findings are surfaced through:
+- **Rate limiting** — Max 2 surfacings per day
+- **Deduplication** — Dismissed items silenced for 7 days
+- **Snooze detection** — No surfacing during flow states
+- **Acknowledgment tracking** — Never repeat acknowledged items
+- **Reframing** — "My context may be outdated" vs. "You haven't logged in"
+
+### Access Patterns
+
+- **Chat-invokable** — "How are you doing?" returns full health report
+- **Passive UI indicator** — Colored badge in nav (green/yellow/red)
+- **Startup greeting** — Optional single-line mention if needed
+
+**Key Files:**
+- `cairn/health/pulse.py` - Unified health assessment
+- `cairn/health/checks/` - Individual axis checks
+- `cairn/health/anti_nag.py` - Surfacing protocol
+
+---
+
 ## New Package Structure
 
 As of the LLM-first directory restructure, six new top-level packages exist alongside `src/reos/`:

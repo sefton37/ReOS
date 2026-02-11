@@ -81,6 +81,8 @@ CRITICAL RULES:
 - "Run pytest" → process/machine/execute, domain="system"
 - "create a new scene in Career":
   file/human/execute, domain="play", action_hint="create"
+- "how am I doing?" / "health check" / "system health":
+  stream/human/read, domain="health", action_hint="view"
 - When uncertain, bias toward stream/human/interpret
 
 EXAMPLES (showing input → output JSON):
@@ -278,6 +280,8 @@ class AtomicClassifier:
             domain = "tasks"
         elif words & {"undo", "revert", "reverse"}:
             domain = "undo"
+        elif words & {"health", "checkup", "wellness", "vitality", "freshness", "integrity"}:
+            domain = "health"
         elif words & {"hi", "hello", "hey", "morning", "afternoon", "evening", "thanks", "bye"}:
             domain = "conversation"
 

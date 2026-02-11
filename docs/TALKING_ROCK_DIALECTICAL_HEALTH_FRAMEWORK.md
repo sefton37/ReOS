@@ -1249,13 +1249,35 @@ And then it steps back.
 
 ---
 
-**Document Metadata:**  
-Title: Talking Rock Dialectical Health Framework  
-Project: Talking Rock  
-Component: Cross-system (CAIRN, ReOS, Infrastructure)  
-Version: 1.0  
-Date: February 2026  
-Status: Design specification  
-Theoretical Basis: Dialectical Behavioral Therapy (Linehan, 1993)  
-Related: PROJECT_ETHOS.md, TALKING_ROCK_WHITEPAPER.md, PLAY_KNOWLEDGEBASE_SPEC.md, CLAUDE_CODE_IMPLEMENTATION_GUIDE_V2.md  
+---
+
+## Appendix: Schema Corrections
+
+**Note:** The SQL examples in this framework document were written during design specification and contain misalignments with the actual implemented schema. During implementation, all SQL was rewritten to match the actual database structure. Key differences:
+
+### Acts Table
+- **Framework uses:** `acts.id`, `acts.name`, `acts.status`
+- **Actual schema:** `act_id` (TEXT PRIMARY KEY), `title` (TEXT NOT NULL), `active` (INTEGER 0/1, not TEXT status)
+
+### Scenes Table
+- **Framework uses:** `scenes.start_time`, `scenes.end_time`, `scenes.status`
+- **Actual schema:** `calendar_event_start` (TIMESTAMP), `calendar_event_end` (TIMESTAMP), `stage` (TEXT: 'planning', 'in_progress', 'awaiting_data', 'complete')
+
+### User Feedback Table
+- **Framework references:** `user_feedback.pattern_key`, `user_feedback.feedback_confidence`
+- **Actual schema:** The `user_feedback` table is used exclusively for atomic operations classification feedback and does not contain `pattern_key` or `feedback_confidence` columns as described in the framework examples.
+
+All conceptual health checks described in this framework remain valid; only the specific SQL queries needed adjustment to reflect the actual schema during implementation.
+
+---
+
+**Document Metadata:**
+Title: Talking Rock Dialectical Health Framework
+Project: Talking Rock
+Component: Cross-system (CAIRN, ReOS, Infrastructure)
+Version: 1.0
+Date: February 2026
+Status: Design specification
+Theoretical Basis: Dialectical Behavioral Therapy (Linehan, 1993)
+Related: PROJECT_ETHOS.md, TALKING_ROCK_WHITEPAPER.md, PLAY_KNOWLEDGEBASE_SPEC.md, CLAUDE_CODE_IMPLEMENTATION_GUIDE_V2.md
 License: MIT

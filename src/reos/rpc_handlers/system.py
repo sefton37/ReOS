@@ -410,6 +410,24 @@ def handle_cairn_attention(
     acts, _ = play_fs.list_acts()
     act_info = {a.act_id: {"title": a.title, "color": a.color} for a in acts}
 
+    # Run critical health checks at startup (data integrity only)
+    health_warnings: list[dict] = []
+    try:
+        from reos.cairn.health.checks.data_integrity import DataIntegrityCheck
+        from reos.cairn.health.runner import Severity
+        integrity_check = DataIntegrityCheck(cairn_db_path)
+        integrity_results = integrity_check.run()
+        for result in integrity_results:
+            if result.severity == Severity.CRITICAL:
+                health_warnings.append({
+                    "check": result.check_name,
+                    "severity": result.severity.value,
+                    "title": result.title,
+                    "details": result.details,
+                })
+    except Exception as e:
+        logger.debug("Health check at startup failed: %s", e)
+
     return {
         "count": len(items),
         "items": [
@@ -431,6 +449,7 @@ def handle_cairn_attention(
             }
             for item in items
         ],
+        "health_warnings": health_warnings,
     }
 
 

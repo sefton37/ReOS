@@ -318,6 +318,100 @@ function buildUi() {
 
   navContent.appendChild(navContextMeter);
   navContent.appendChild(systemSection);
+
+  // Health Pulse indicator (hidden by default, appears when findings exist)
+  const healthIndicator = el('div');
+  healthIndicator.className = 'health-indicator';
+  healthIndicator.style.display = 'none';
+  healthIndicator.style.cssText = `
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    margin-top: 8px;
+    margin-bottom: 4px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+    transition: background 0.2s;
+  `;
+  healthIndicator.addEventListener('mouseenter', () => {
+    healthIndicator.style.background = 'rgba(0, 0, 0, 0.3)';
+  });
+  healthIndicator.addEventListener('mouseleave', () => {
+    healthIndicator.style.background = 'rgba(0, 0, 0, 0.2)';
+  });
+  healthIndicator.addEventListener('click', () => {
+    void handleCairnMessage('health report');
+  });
+
+  const healthDot = el('span');
+  healthDot.className = 'health-dot';
+  healthDot.style.cssText = `
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  `;
+
+  const healthText = el('span');
+  healthText.className = 'health-text';
+
+  healthIndicator.appendChild(healthDot);
+  healthIndicator.appendChild(healthText);
+  navContent.appendChild(healthIndicator);
+
+  // Health status polling
+  async function refreshHealthStatus(): Promise<void> {
+    try {
+      const status = (await kernelRequest('health/status', {})) as {
+        overall_severity: string;
+        finding_count: number;
+        unacknowledged_count: number;
+      };
+
+      if (status.finding_count > 0) {
+        healthIndicator.style.display = 'flex';
+        healthText.textContent = `${status.finding_count} health finding${status.finding_count === 1 ? '' : 's'}`;
+
+        // Set dot color based on severity
+        const colors: Record<string, string> = {
+          critical: '#ef4444',
+          warning: '#f59e0b',
+          healthy: '#22c55e',
+        };
+        healthDot.style.background = colors[status.overall_severity] || colors.healthy;
+
+        // Pulse animation for critical
+        if (status.overall_severity === 'critical') {
+          healthDot.style.animation = 'healthPulse 2s ease-in-out infinite';
+        } else {
+          healthDot.style.animation = 'none';
+        }
+      } else {
+        healthIndicator.style.display = 'none';
+      }
+    } catch {
+      // Silently ignore health polling errors
+    }
+  }
+
+  // Poll health every 60s, piggyback on activity tracking
+  function scheduleHealthPoll(): void {
+    const isIdle = Date.now() - lastActivityTime > IDLE_THRESHOLD;
+    const interval = isIdle ? 120000 : 60000;  // 2min idle, 1min active
+    setTimeout(() => {
+      void refreshHealthStatus().then(scheduleHealthPoll);
+    }, interval);
+  }
+  // Initial health check after 5s delay
+  setTimeout(() => {
+    void refreshHealthStatus().then(scheduleHealthPoll);
+  }, 5000);
+
   navContent.appendChild(dashboardBtn);
   navContent.appendChild(playBtn);
 

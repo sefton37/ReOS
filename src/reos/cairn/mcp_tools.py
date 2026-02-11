@@ -1040,6 +1040,33 @@ def list_tools() -> list[Tool]:
                 "required": ["page_id"],
             },
         ),
+        # =====================================================================
+        # Health Pulse
+        # =====================================================================
+        Tool(
+            name="cairn_health_report",
+            description=(
+                "Get a health report for the system. Checks data freshness, "
+                "act vitality, database integrity, and more. "
+                "Use when the user asks 'how am I doing?', 'health check', "
+                "or 'system health'."
+            ),
+            input_schema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="cairn_acknowledge_health",
+            description="Acknowledge (dismiss) a health finding by its log ID.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "log_id": {
+                        "type": "string",
+                        "description": "The health finding log ID to acknowledge",
+                    },
+                },
+                "required": ["log_id"],
+            },
+        ),
     ]
 
 
@@ -1296,6 +1323,15 @@ class CairnToolHandler:
 
         if name == "cairn_export_page_markdown":
             return self._export_page_markdown(args)
+
+        # =====================================================================
+        # Health Pulse
+        # =====================================================================
+        if name == "cairn_health_report":
+            return self._health_report()
+
+        if name == "cairn_acknowledge_health":
+            return self._acknowledge_health(args)
 
         raise CairnToolError(
             code="unknown_tool",
@@ -3302,3 +3338,77 @@ class CairnToolHandler:
             "markdown": markdown,
             "block_count": len(blocks),
         }
+
+    # =========================================================================
+    # Health Pulse
+    # =========================================================================
+
+    def _health_report(self) -> dict[str, Any]:
+        """Run all health checks and return a report."""
+        from reos.cairn.health.anti_nag import AntiNagProtocol
+        from reos.cairn.health.checks.act_vitality import ActVitalityCheck
+        from reos.cairn.health.checks.context_freshness import ContextFreshnessCheck
+        from reos.cairn.health.checks.data_integrity import DataIntegrityCheck
+        from reos.cairn.health.runner import HealthCheckRunner
+
+        runner = HealthCheckRunner()
+        runner.register(ContextFreshnessCheck(self.store))
+        runner.register(ActVitalityCheck(self.store))
+        runner.register(DataIntegrityCheck(self.store.db_path))
+
+        # Register Phase 2+ checks if available
+        try:
+            from reos.cairn.health.checks.correction_intake import CorrectionIntakeCheck
+            runner.register(CorrectionIntakeCheck(None))  # type: ignore[arg-type]
+        except (ImportError, TypeError):
+            pass
+        try:
+            from reos.cairn.health.checks.software_currency import SoftwareCurrencyCheck
+            runner.register(SoftwareCurrencyCheck())
+        except ImportError:
+            pass
+        try:
+            from reos.cairn.health.checks.security_posture import SecurityPostureCheck
+            runner.register(SecurityPostureCheck())
+        except ImportError:
+            pass
+
+        results = runner.run_all_checks()
+        findings = runner.get_findings()
+        status = runner.get_status_summary()
+
+        # Filter through anti-nag
+        conn = self.store._get_connection()
+        anti_nag = AntiNagProtocol(conn)
+        surfaced = []
+        for finding in findings:
+            if anti_nag.should_surface(
+                finding.check_name, finding.severity.value, finding.finding_key
+            ):
+                log_id = anti_nag.log_surfaced(
+                    finding.check_name,
+                    finding.severity.value,
+                    finding.finding_key,
+                    finding.title,
+                    finding.details,
+                )
+                surfaced.append({**finding.to_dict(), "log_id": log_id})
+
+        return {
+            "full_results": [r.to_dict() for r in results],
+            "surfaced_messages": surfaced,
+            "summary": status.to_dict(),
+        }
+
+    def _acknowledge_health(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Acknowledge a health finding."""
+        from reos.cairn.health.anti_nag import AntiNagProtocol
+
+        log_id = args.get("log_id")
+        if not log_id:
+            raise CairnToolError(code="missing_param", message="log_id is required")
+
+        conn = self.store._get_connection()
+        anti_nag = AntiNagProtocol(conn)
+        success = anti_nag.acknowledge(log_id)
+        return {"success": success}

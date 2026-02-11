@@ -153,6 +153,7 @@ This structure lets CAIRN understand context. When you say "what's next?", it kn
 - **Waiting-on tracking** — Knows what you're blocked on
 - **Document knowledge base** — Import PDFs, Word docs, and more for semantic search
 - **Coherence Kernel** — Filters distractions based on your stated identity and goals
+- **Health Pulse** — Monitors data freshness, calibration alignment, and system health across three axes; surfaces findings through chat ("how are you doing?") and a passive UI indicator without intrusive nagging
 
 ### Conclusion
 

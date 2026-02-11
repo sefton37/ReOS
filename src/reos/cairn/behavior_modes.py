@@ -415,6 +415,21 @@ KNOWLEDGE_QUERY_MODE = BehaviorMode(
     verification_mode="FAST",
 )
 
+HEALTH_QUERY_MODE = BehaviorMode(
+    name="health_query",
+    needs_tool=True,
+    tool_selector=_static_tool("cairn_health_report"),
+    arg_extractor=_no_args,
+    system_prompt_template=(
+        "You are CAIRN, the Attention Minder. "
+        "Present the health report findings clearly and helpfully.\n"
+        "Frame issues as system limitations, never user failures. "
+        "Suggest specific actions for each finding."
+    ),
+    needs_hallucination_check=True,
+    verification_mode="FAST",
+)
+
 PLAY_QUERY_MODE = BehaviorMode(
     name="play_query",
     needs_tool=True,
@@ -512,7 +527,12 @@ def create_default_registry() -> BehaviorModeRegistry:
     reg.register("stream", "human", "execute", "undo", UNDO_MODE)
     reg.register("stream", "human", "interpret", "undo", UNDO_MODE)
 
+    # Health
+    reg.register("stream", "human", "read", "health", HEALTH_QUERY_MODE)
+    reg.register("stream", "human", "interpret", "health", HEALTH_QUERY_MODE)
+
     # Domain-level defaults (catch-all for unregistered combos within a domain)
+    reg.register_domain("health", HEALTH_QUERY_MODE)
     reg.register_domain("conversation", CONVERSATION_MODE)
     reg.register_domain("personal", PERSONAL_QUERY_MODE)
     reg.register_domain("feedback", FEEDBACK_MODE)

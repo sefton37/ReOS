@@ -165,6 +165,17 @@ from .rpc_handlers.consciousness import (
     handle_handoff_validate_all as _handle_handoff_validate_all,
 )
 
+# Health Pulse RPC handlers
+from .rpc_handlers.health import (
+    handle_health_acknowledge as _handle_health_acknowledge,
+)
+from .rpc_handlers.health import (
+    handle_health_findings as _handle_health_findings,
+)
+from .rpc_handlers.health import (
+    handle_health_status as _handle_health_status,
+)
+
 # Context RPC handlers (extracted to separate module)
 from .rpc_handlers.context import (
     handle_context_stats as _handle_context_stats,
@@ -579,6 +590,8 @@ _SIMPLE_HANDLERS: dict[str, Callable[[Database], Any]] = {
     "autostart/get": _handle_autostart_get,
     "consciousness/start": _handle_consciousness_start,
     "consciousness/snapshot": _handle_consciousness_snapshot,
+    "health/status": _handle_health_status,
+    "health/findings": _handle_health_findings,
 }
 
 # Handlers with single required string param: (handler, param_name)
@@ -590,6 +603,7 @@ _STRING_PARAM_HANDLERS: dict[str, tuple[Callable, str]] = {
     "thunderbird/configure": (_handle_thunderbird_configure, "db_path"),
     "code/diff/apply": (_handle_code_diff_apply, "preview_id"),
     "code/diff/reject": (_handle_code_diff_reject, "preview_id"),
+    "health/acknowledge": (_handle_health_acknowledge, "log_id"),
 }
 
 # Handlers with NO db param, single string param: (handler, param_name)
