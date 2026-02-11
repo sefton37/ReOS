@@ -882,7 +882,7 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
                 ),
             )
 
-            # Load scenes for this act (these contain beats in old structure)
+            # Load scenes for this act (old JSON had a nested "beats" array per scene)
             scenes_json = play_root / "acts" / act_id / "scenes.json"
             if scenes_json.exists():
                 try:
@@ -896,18 +896,18 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
                         if not isinstance(old_scene, dict):
                             continue
 
-                        # Load beats from this old scene and convert to new scenes
-                        beats_list = old_scene.get("beats", [])
-                        for beat in beats_list:
-                            if not isinstance(beat, dict):
+                        # Old JSON had nested "beats" per scene; each becomes a scene row
+                        old_items = old_scene.get("beats", [])
+                        for old_item in old_items:
+                            if not isinstance(old_item, dict):
                                 continue
 
-                            beat_id = beat.get("beat_id", "")
-                            if not beat_id:
+                            item_id = old_item.get("beat_id", "")
+                            if not item_id:
                                 continue
 
-                            # Migrate status to stage if needed
-                            stage = beat.get("stage") or beat.get("status", "planning")
+                            # Migrate legacy status values to stage
+                            stage = old_item.get("stage") or old_item.get("status", "planning")
                             if stage in ("pending", "todo"):
                                 stage = "planning"
                             elif stage in ("blocked", "waiting"):
@@ -915,7 +915,7 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
                             elif stage in ("completed", "done"):
                                 stage = "complete"
 
-                            # Insert as new scene (beat_id becomes scene_id)
+                            # Insert as scene (old beat_id becomes scene_id)
                             conn.execute(
                                 """
                                 INSERT OR IGNORE INTO scenes
@@ -924,15 +924,15 @@ def _migrate_from_json(conn: sqlite3.Connection) -> None:
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                                 (
-                                    beat_id,  # beat_id becomes scene_id
+                                    item_id,
                                     act_id,
-                                    beat.get("title", "Untitled"),
+                                    old_item.get("title", "Untitled"),
                                     stage,
-                                    beat.get("notes", ""),
-                                    beat.get("link"),
-                                    beat.get("calendar_event_id"),
-                                    beat.get("recurrence_rule"),
-                                    beat.get("thunderbird_event_id"),
+                                    old_item.get("notes", ""),
+                                    old_item.get("link"),
+                                    old_item.get("calendar_event_id"),
+                                    old_item.get("recurrence_rule"),
+                                    old_item.get("thunderbird_event_id"),
                                     scene_position,
                                     now,
                                     now,

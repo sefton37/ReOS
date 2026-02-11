@@ -2,7 +2,7 @@
 
 Tests the filesystem layer for The Play:
 - Path utilities and helpers
-- Act/Scene/Beat dataclass conversions
+- Act/Scene dataclass conversions
 - KB file operations (list, read, write preview/apply)
 - me.md (Your Story) operations
 - File attachment operations

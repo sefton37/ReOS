@@ -313,7 +313,7 @@ class TestListingFilters:
         """list_metadata filters by entity_type."""
         cairn_store.get_or_create_metadata("act", "a1")
         cairn_store.get_or_create_metadata("scene", "s1")
-        cairn_store.get_or_create_metadata("beat", "b1")
+        cairn_store.get_or_create_metadata("scene", "b1")
 
         acts = cairn_store.list_metadata(entity_type="act")
         assert len(acts) == 1
@@ -682,19 +682,19 @@ class TestStoreEdgeCases:
     def test_orphaned_activity_log_cleanup(self, cairn_store: CairnStore) -> None:
         """Activity logs for deleted metadata are orphaned (soft reference)."""
         # Create metadata and touch it
-        cairn_store.get_or_create_metadata("beat", "orphan-test")
-        cairn_store.touch("beat", "orphan-test", ActivityType.EDITED)
-        cairn_store.touch("beat", "orphan-test", ActivityType.VIEWED)
+        cairn_store.get_or_create_metadata("item", "orphan-test")
+        cairn_store.touch("item", "orphan-test", ActivityType.EDITED)
+        cairn_store.touch("item", "orphan-test", ActivityType.VIEWED)
 
         # Verify activity log exists
-        log = cairn_store.get_activity_log("beat", "orphan-test")
+        log = cairn_store.get_activity_log("item", "orphan-test")
         assert len(log) >= 2
 
         # Delete metadata
-        cairn_store.delete_metadata("beat", "orphan-test")
+        cairn_store.delete_metadata("item", "orphan-test")
 
         # Metadata gone
-        assert cairn_store.get_metadata("beat", "orphan-test") is None
+        assert cairn_store.get_metadata("item", "orphan-test") is None
 
         # Activity log may still exist (depends on CASCADE policy)
         # This is expected behavior - logs are historical record
@@ -703,12 +703,12 @@ class TestStoreEdgeCases:
         """Test handling many metadata records."""
         # Create many items
         for i in range(100):
-            cairn_store.get_or_create_metadata("beat", f"batch-{i}")
-            cairn_store.set_kanban_state("beat", f"batch-{i}", KanbanState.ACTIVE)
-            cairn_store.set_priority("beat", f"batch-{i}", i % 5 + 1)
+            cairn_store.get_or_create_metadata("item", f"batch-{i}")
+            cairn_store.set_kanban_state("item", f"batch-{i}", KanbanState.ACTIVE)
+            cairn_store.set_priority("item", f"batch-{i}", i % 5 + 1)
 
         # Query all active items
-        active = cairn_store.list_metadata(entity_type="beat", kanban_state=KanbanState.ACTIVE)
+        active = cairn_store.list_metadata(entity_type="item", kanban_state=KanbanState.ACTIVE)
         assert len(active) == 100
 
     def test_metadata_with_null_optional_fields(self, cairn_store: CairnStore) -> None:
@@ -739,11 +739,11 @@ class TestStoreEdgeCases:
         ]
 
         for entity_id in special_ids:
-            meta = cairn_store.get_or_create_metadata("beat", entity_id)
+            meta = cairn_store.get_or_create_metadata("item", entity_id)
             assert meta.entity_id == entity_id
 
-            cairn_store.touch("beat", entity_id)
-            retrieved = cairn_store.get_metadata("beat", entity_id)
+            cairn_store.touch("item", entity_id)
+            retrieved = cairn_store.get_metadata("item", entity_id)
             assert retrieved is not None
             assert retrieved.touch_count >= 1
 
@@ -760,12 +760,12 @@ class TestStoreEdgeCases:
 
     def test_very_long_reason_field(self, cairn_store: CairnStore) -> None:
         """Very long priority_reason field is handled."""
-        meta = cairn_store.get_or_create_metadata("beat", "long-reason")
+        meta = cairn_store.get_or_create_metadata("item", "long-reason")
         meta.priority_reason = "x" * 5000  # 5K characters
 
         cairn_store.save_metadata(meta)
 
-        retrieved = cairn_store.get_metadata("beat", "long-reason")
+        retrieved = cairn_store.get_metadata("item", "long-reason")
         assert retrieved is not None
         assert len(retrieved.priority_reason) == 5000
 
@@ -773,10 +773,10 @@ class TestStoreEdgeCases:
         """Priority boundary values (1-5) are handled."""
         # Valid priorities
         for priority in [1, 2, 3, 4, 5]:
-            cairn_store.get_or_create_metadata("beat", f"priority-{priority}")
-            cairn_store.set_priority("beat", f"priority-{priority}", priority)
+            cairn_store.get_or_create_metadata("item", f"priority-{priority}")
+            cairn_store.set_priority("item", f"priority-{priority}", priority)
 
-            meta = cairn_store.get_metadata("beat", f"priority-{priority}")
+            meta = cairn_store.get_metadata("item", f"priority-{priority}")
             assert meta is not None
             assert meta.priority == priority
 

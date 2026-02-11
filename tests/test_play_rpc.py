@@ -74,7 +74,7 @@ def test_play_rpc_create_scene_and_kb_write_flow(tmp_path, monkeypatch, isolated
     assert len(scenes) == 1
     scene_id = scenes[0]["scene_id"]
     assert isinstance(scene_id, str)
-    # Scenes now have stage, notes, link fields (formerly beat fields)
+    # Scenes have stage, notes, link fields
     assert "stage" in scenes[0]
     assert scenes[0]["stage"] == "planning"  # Default stage
 
