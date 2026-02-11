@@ -9,7 +9,7 @@ import re
 import uuid
 from typing import Any
 
-from reos.agent import ChatAgent
+from agents import ChatAgent
 from reos.db import Database
 
 from .approvals import handle_approval_respond

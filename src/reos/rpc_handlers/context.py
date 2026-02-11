@@ -35,7 +35,7 @@ def handle_context_stats(
     include_breakdown: bool = False,
 ) -> dict[str, Any]:
     """Get context usage statistics for a conversation."""
-    from reos.agent import ChatAgent
+    from agents import ChatAgent
     from reos.system_state import SteadyStateCollector
 
     messages: list[dict[str, Any]] = []

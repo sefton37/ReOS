@@ -1,7 +1,12 @@
 """LLM Providers - Pluggable backend support for LLM services.
 
-This package provides a unified interface for LLM providers:
-- Ollama: Local inference, runs on your machine (privacy-first)
+.. deprecated::
+    For new code, prefer importing from the ``llm`` package::
+
+        from llm import LLMProvider, OllamaProvider, get_provider
+
+    This module remains for backward compatibility and provides
+    provider-management functions not in the ``llm`` facade.
 
 Usage:
     from reos.providers import get_provider, LLMProvider

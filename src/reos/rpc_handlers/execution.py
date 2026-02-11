@@ -430,7 +430,7 @@ def handle_code_plan_approve(
     # Get LLM provider
     llm = None
     try:
-        from reos.providers import get_provider
+        from llm import get_provider
         llm = get_provider(db)
     except Exception as e:
         logger.warning("Failed to get LLM provider, falling back to Ollama: %s", e)
@@ -559,7 +559,7 @@ def handle_code_plan_start(
     from reos.code_mode.intent import IntentDiscoverer
     from reos.code_mode.contract import ContractBuilder
     from reos.code_mode import CodeSandbox, CodePlanner
-    from reos.providers import get_provider, check_provider_health
+    from llm import get_provider, check_provider_health
     from reos.play_fs import list_acts
 
     # Get the active act

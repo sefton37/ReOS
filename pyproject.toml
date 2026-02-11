@@ -59,10 +59,10 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=reos --cov-report=term-missing --cov-fail-under=45"
+addopts = "--cov=reos --cov=llm --cov=classification --cov=agents --cov=routing --cov=verification --cov=search --cov-report=term-missing --cov-fail-under=45"
 
 [tool.coverage.run]
-source = ["src/reos"]
+source = ["src/reos", "src/llm", "src/classification", "src/agents", "src/routing", "src/verification", "src/search"]
 branch = true
 omit = [
   "*/tests/*",

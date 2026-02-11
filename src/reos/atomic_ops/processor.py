@@ -1,5 +1,10 @@
 """Atomic Operations Processor - The main pipeline.
 
+.. deprecated::
+    For new code, prefer importing from the ``routing`` package::
+
+        from routing import RequestRouter
+
 This module orchestrates the full atomic operations pipeline:
 1. Classification into 3x2x3 taxonomy (LLM-native)
 2. Decomposition of complex requests (LLM-based)

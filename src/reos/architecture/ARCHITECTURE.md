@@ -340,6 +340,64 @@ class ReOSAgent:
 4. Implement `_select_*_tool()` method if multiple tools
 5. Add argument extraction in `_build_tool_args()`
 
+## New Package Structure
+
+As of the LLM-first directory restructure, six new top-level packages exist alongside `src/reos/`:
+
+### Top-Level Packages
+
+| Package | Purpose | Wraps |
+|---------|---------|-------|
+| `llm/` | LLM inference layer | `reos.providers` |
+| `classification/` | Request classification | `reos.atomic_ops.classifier` |
+| `agents/` | Agent abstractions | Core agent interfaces |
+| `routing/` | Request routing | `reos.atomic_ops.processor` |
+| `verification/` | Verification pipeline + LLM-as-judge | New infrastructure |
+| `search/` | Semantic search | `reos.memory.embeddings` |
+
+### Import Guidance
+
+New code should prefer the new packages for cleaner dependencies:
+
+```python
+# Preferred (new)
+from llm import OllamaProvider, get_provider
+from classification import LLMClassifier
+from agents import CAIRNAgent, ReOSAgent
+from routing import RequestRouter
+from verification import LLMIntentVerifier
+
+# Legacy (still works)
+from reos.providers import OllamaProvider
+from reos.atomic_ops.classifier import AtomicClassifier
+```
+
+### Package Files
+
+**llm/**
+- `base.py` - `LLMProvider` interface
+- `ollama.py` - `OllamaProvider` implementation
+- `factory.py` - `get_provider()` singleton
+
+**classification/**
+- `base.py` - `Classifier` interface
+- `llm_classifier.py` - `LLMClassifier` (wraps atomic ops)
+
+**agents/**
+- `base.py` - `BaseAgent` interface
+- `cairn.py` - `CAIRNAgent`
+- `reos.py` - `ReOSAgent`
+
+**routing/**
+- `router.py` - `RequestRouter` (wraps atomic ops processor)
+
+**verification/**
+- `verifier.py` - `LLMIntentVerifier` (LLM-as-judge)
+- `pipeline.py` - Verification pipeline orchestration
+
+**search/**
+- `semantic.py` - Semantic search (wraps embeddings)
+
 ---
 
-*This document is auto-loaded into CAIRN context. Last updated: 2026-01-17*
+*This document is auto-loaded into CAIRN context. Last updated: 2026-02-11*
