@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reos"
+version = "0.1.0"
+description = "ReOS by Talking Rock — natural language Linux system control"
+authors = [{ name = "Talking Rock" }]
+requires-python = ">=3.12"
+dependencies = [
+  "talkingrock-core>=0.1.0",
+  "textual>=0.80.0,<1.0.0",
+  "psutil>=5.9.0,<7.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.6.0,<0.8.0",
+  "mypy>=1.11.0,<1.13.0",
+  "pytest>=8.3.0,<9.0.0",
+  "pytest-cov>=4.1.0,<6.0.0",
+]
+
+[project.scripts]
+reos = "reos.__main__:main"
+reos-tui = "reos.tui.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not slow'"
+markers = [
+  "slow: tests that require running Ollama",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
