@@ -2,7 +2,7 @@
 
 ReOS translates natural language requests into safe system operations.
 Commands are proposed, not executed — the user must approve before execution.
-Designed for 1-3B models with structured prompts.
+Designed for 3-8B models with structured prompts.
 """
 
 from __future__ import annotations
