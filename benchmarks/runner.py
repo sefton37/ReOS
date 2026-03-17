@@ -258,6 +258,15 @@ class BenchmarkRunner:
         self._patch_trcore_model()
 
         family, param_count = _parse_model_name(self.model_name)
+        # Fall back to MODEL_MATRIX metadata if tag didn't parse cleanly.
+        if not param_count or not family:
+            from benchmarks.models import MODEL_MATRIX
+
+            for entry in MODEL_MATRIX:
+                if entry["name"] == self.model_name:
+                    family = family or entry.get("family")
+                    param_count = param_count or entry.get("params")
+                    break
         self.run_id = insert_run(
             self._conn,  # type: ignore[arg-type]
             run_uuid=self.run_uuid,

@@ -45,7 +45,7 @@ MODEL_MATRIX = [
         "rationale": "Meta's 3B; Llama family scaling comparison",
     },
     {
-        "name": "phi3:3.8b",
+        "name": "phi3:mini-128k",
         "family": "phi3",
         "params": "3.8b",
         "rationale": "Microsoft Phi-3 mini; strong reasoning relative to size",
@@ -58,13 +58,13 @@ MODEL_MATRIX = [
         "rationale": "Qwen 7B; widely used, good instruction following",
     },
     {
-        "name": "llama3.1:8b",
+        "name": "llama3.1:8b-instruct-q5_K_M",
         "family": "llama3.1",
         "params": "8b",
-        "rationale": "Meta's 8B with extended context; popular production choice",
+        "rationale": "Meta's 8B instruct q5_K_M; popular production choice",
     },
     {
-        "name": "mistral:7b",
+        "name": "mistral:latest",
         "family": "mistral",
         "params": "7b",
         "rationale": "Mistral 7B v0.3; strong on short structured outputs",
@@ -95,7 +95,7 @@ MODEL_MATRIX = [
         "rationale": "Qwen family ceiling in practical GPU memory range",
     },
     {
-        "name": "phi3:14b",
+        "name": "phi3:medium-128k",
         "family": "phi3",
         "params": "14b",
         "rationale": "Phi-3 medium; tests whether Phi's efficiency scales",
