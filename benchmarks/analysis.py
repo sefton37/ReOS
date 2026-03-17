@@ -98,6 +98,21 @@ def mode_comparison(conn: sqlite3.Connection) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def rag_comparison(conn: sqlite3.Connection) -> list[dict]:
+    """Return per-model, per-pipeline-mode RAG metrics from v_rag_comparison.
+
+    Args:
+        conn: Open benchmark database connection.
+
+    Returns:
+        List of dicts with keys: model_name, model_param_count, pipeline_mode,
+        total_cases, exact_match_pct, fuzzy_match_pct, behavior_correct_pct,
+        safety_correct_pct, avg_latency_ms, rag_hit_rate_pct, avg_rag_distance.
+    """
+    rows = conn.execute("SELECT * FROM v_rag_comparison").fetchall()
+    return [dict(row) for row in rows]
+
+
 def failure_patterns(
     conn: sqlite3.Connection,
     model_name: str,
@@ -292,4 +307,87 @@ def print_mode_comparison(conn: sqlite3.Connection) -> None:
         for r in rows
     ]
     _table(headers, table_rows)
+    print()
+
+
+def print_rag_comparison(conn: sqlite3.Connection) -> None:
+    """Print RAG vs no-RAG accuracy comparison per model and pipeline mode.
+
+    Groups results by pipeline_mode (reactive_rag vs reactive,
+    conversational_rag vs conversational) and shows accuracy deltas so the
+    impact of semantic layer retrieval is immediately visible.
+
+    Args:
+        conn: Open benchmark database connection.
+    """
+    rows = rag_comparison(conn)
+    if not rows:
+        print("No RAG comparison data (need at least one RAG and one no-RAG run).")
+        return
+
+    print("\n=== RAG vs No-RAG Comparison ===")
+    headers = [
+        "Model",
+        "Mode",
+        "Cases",
+        "Exact%",
+        "Fuzzy%",
+        "Behavior%",
+        "Safety%",
+        "Avg ms",
+        "RAG Hit%",
+        "Avg Dist",
+    ]
+    table_rows = [
+        [
+            r["model_name"],
+            r["pipeline_mode"],
+            str(r["total_cases"]),
+            f"{r['exact_match_pct'] or 0:.1f}",
+            f"{r['fuzzy_match_pct'] or 0:.1f}",
+            f"{r['behavior_correct_pct'] or 0:.1f}",
+            f"{r['safety_correct_pct'] or 0:.1f}",
+            str(int(r["avg_latency_ms"] or 0)),
+            f"{r['rag_hit_rate_pct'] or 0:.1f}",
+            f"{r['avg_rag_distance']:.3f}" if r["avg_rag_distance"] is not None else "—",
+        ]
+        for r in rows
+    ]
+    _table(headers, table_rows)
+
+    # Print delta summary: for each model, compute RAG vs no-RAG exact_match delta.
+    # Group rows by model_name, then pair rag vs no-rag modes.
+    from collections import defaultdict
+
+    by_model: dict[str, dict[str, dict]] = defaultdict(dict)
+    for r in rows:
+        by_model[r["model_name"]][r["pipeline_mode"]] = r
+
+    deltas = []
+    rag_pairs = [
+        ("reactive_rag", "reactive"),
+        ("conversational_rag", "conversational"),
+    ]
+    for model, modes in sorted(by_model.items()):
+        for rag_mode, norag_mode in rag_pairs:
+            if rag_mode in modes and norag_mode in modes:
+                rag_r = modes[rag_mode]
+                norag_r = modes[norag_mode]
+                exact_delta = (rag_r["exact_match_pct"] or 0) - (norag_r["exact_match_pct"] or 0)
+                fuzzy_delta = (rag_r["fuzzy_match_pct"] or 0) - (norag_r["fuzzy_match_pct"] or 0)
+                latency_delta = (rag_r["avg_latency_ms"] or 0) - (norag_r["avg_latency_ms"] or 0)
+                deltas.append([
+                    model,
+                    rag_mode.replace("_rag", ""),
+                    f"{exact_delta:+.1f}",
+                    f"{fuzzy_delta:+.1f}",
+                    f"{latency_delta:+.0f}",
+                ])
+
+    if deltas:
+        print("\n=== RAG Impact Delta (RAG minus no-RAG) ===")
+        _table(
+            ["Model", "Pipeline", "Exact%", "Fuzzy%", "Latency ms"],
+            deltas,
+        )
     print()

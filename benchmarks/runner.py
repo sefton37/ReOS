@@ -195,6 +195,7 @@ class BenchmarkRunner:
         ollama_url: Ollama server URL.
         no_context: If True, disable shell context gathering during the run.
         timeout: Per-case timeout in seconds (0 = unlimited).
+        no_rag: If True, disable semantic layer RAG retrieval via REOS_RAG_DISABLED env var.
     """
 
     def __init__(
@@ -206,6 +207,7 @@ class BenchmarkRunner:
         ollama_url: str | None = None,
         no_context: bool = False,
         timeout: int = 120,
+        no_rag: bool = False,
     ) -> None:
         self.model_name = model_name
         self.corpus_filter = corpus_filter
@@ -214,6 +216,7 @@ class BenchmarkRunner:
         self.ollama_url = ollama_url or _DEFAULT_OLLAMA_URL
         self.no_context = no_context
         self.timeout = timeout
+        self.no_rag = no_rag
 
         self.run_uuid: str = str(uuid.uuid4())
         self.run_id: int = 0
@@ -289,6 +292,11 @@ class BenchmarkRunner:
                     family = family or entry.get("family")
                     param_count = param_count or entry.get("params")
                     break
+
+        pipeline_mode = "reactive"
+        if not self.no_rag:
+            pipeline_mode = "reactive_rag"
+
         self.run_id = insert_run(
             self._conn,  # type: ignore[arg-type]
             run_uuid=self.run_uuid,
@@ -298,6 +306,7 @@ class BenchmarkRunner:
             model_family=family,
             model_param_count=param_count,
             host_info=_host_info(),
+            pipeline_mode=pipeline_mode,
         )
 
     def _patch_trcore_model(self) -> None:
@@ -352,20 +361,22 @@ class BenchmarkRunner:
         return cases
 
     def _already_done(self) -> set[str]:
-        """Return the set of case_ids already recorded for this model (for --resume)."""
+        """Return the set of case_ids already recorded for this model and pipeline_mode (for --resume)."""
         if not self.resume:
             return set()
         import sqlite3
 
         conn: sqlite3.Connection = self._conn  # type: ignore[assignment]
+        pipeline_mode = "reactive_rag" if not self.no_rag else "reactive"
         rows = conn.execute(
             """
             SELECT br.case_id
             FROM benchmark_results br
             JOIN benchmark_runs r ON r.id = br.run_id
             WHERE r.model_name = ?
+              AND r.pipeline_mode = ?
             """,
-            (self.model_name,),
+            (self.model_name, pipeline_mode),
         ).fetchall()
         return {row[0] for row in rows}
 
@@ -431,6 +442,12 @@ class BenchmarkRunner:
             fields["sanitize_multiline"] = int(trace.sanitize_multiline)
             fields["sanitize_meta_rejection"] = int(trace.sanitize_meta_rejection)
 
+            # RAG retrieval fields
+            fields["rag_retrieved"] = int(getattr(trace, 'rag_retrieved', False))
+            fields["rag_top_distance"] = getattr(trace, 'rag_top_distance', None)
+            fields["rag_pattern_used"] = getattr(trace, 'rag_pattern_used', None)
+            fields["rag_safety_level"] = getattr(trace, 'rag_safety_level', None)
+
             # Soft-risky detection
             is_risky, risky_reason = _detect_soft_risky(trace.command)
             fields["is_soft_risky"] = int(is_risky)
@@ -489,6 +506,14 @@ class BenchmarkRunner:
                 return provider  # type: ignore[return-value]
 
             _factory._create_ollama_provider = _instrumented_create  # type: ignore[assignment]
+
+        # Set RAG mode for this call
+        import os as _os
+
+        if self.no_rag:
+            _os.environ["REOS_RAG_DISABLED"] = "1"
+        elif "REOS_RAG_DISABLED" in _os.environ:
+            del _os.environ["REOS_RAG_DISABLED"]
 
         try:
             trace = propose_command_with_trace(case.prompt)
@@ -603,6 +628,10 @@ class ConversationalBenchmarkRunner(BenchmarkRunner):
                     param_count = param_count or entry.get("params")
                     break
 
+        pipeline_mode = "conversational"
+        if not self.no_rag:
+            pipeline_mode = "conversational_rag"
+
         self.run_id = insert_run(
             self._conn,  # type: ignore[arg-type]
             run_uuid=self.run_uuid,
@@ -612,7 +641,7 @@ class ConversationalBenchmarkRunner(BenchmarkRunner):
             model_family=family,
             model_param_count=param_count,
             host_info=_host_info(),
-            pipeline_mode="conversational",
+            pipeline_mode=pipeline_mode,
         )
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -622,23 +651,24 @@ class ConversationalBenchmarkRunner(BenchmarkRunner):
     def _already_done(self) -> set[str]:
         """Return case_ids already completed by a conversational run of this model.
 
-        Overrides the base implementation to filter by pipeline_mode='conversational',
-        preventing --resume from treating reactive completions as done.
+        Overrides the base implementation to filter by pipeline_mode so that
+        --resume does not conflate conversational/conversational_rag completions.
         """
         if not self.resume:
             return set()
         import sqlite3
 
         conn: sqlite3.Connection = self._conn  # type: ignore[assignment]
+        pipeline_mode = "conversational_rag" if not self.no_rag else "conversational"
         rows = conn.execute(
             """
             SELECT br.case_id
               FROM benchmark_results br
               JOIN benchmark_runs r ON r.id = br.run_id
              WHERE r.model_name = ?
-               AND r.pipeline_mode = 'conversational'
+               AND r.pipeline_mode = ?
             """,
-            (self.model_name,),
+            (self.model_name, pipeline_mode),
         ).fetchall()
         return {row[0] for row in rows}
 
@@ -759,6 +789,9 @@ class ConversationalBenchmarkRunner(BenchmarkRunner):
             fields["turn_type"] = turn.turn_type
             fields["classification_intent"] = turn.classification_intent
             fields["classification_confident"] = int(turn.classification_confident)
+
+            # RAG info (from the underlying propose trace, if available)
+            fields["rag_retrieved"] = 0  # Will be populated once converse exposes it
 
             # Accuracy scoring (uses conversational-specific scorers)
             fields["match_exact"] = int(

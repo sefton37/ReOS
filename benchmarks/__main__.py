@@ -65,8 +65,13 @@ def _make_runners(
     ollama_url: str | None,
     no_context: bool,
     timeout: int,
+    no_rag: bool = False,
+    rag_mode: str = "rag",
 ) -> list:
     """Instantiate benchmark runner(s) for the given model and mode.
+
+    When rag_mode="both", produces runners for both with-RAG and without-RAG
+    configurations, enabling A/B comparison.
 
     Args:
         model: Ollama model name (e.g. "qwen2.5:7b").
@@ -77,26 +82,39 @@ def _make_runners(
         ollama_url: Ollama server URL (None for default).
         no_context: Whether to disable shell context gathering.
         timeout: Per-case timeout in seconds.
+        no_rag: If True, disable RAG (overridden by rag_mode).
+        rag_mode: "rag" (default), "no-rag", or "both" (runs twice for A/B).
 
     Returns:
         List of BenchmarkRunner (and/or ConversationalBenchmarkRunner) instances.
     """
     from benchmarks.runner import BenchmarkRunner, ConversationalBenchmarkRunner
 
-    kwargs = {
-        "model_name": model,
-        "corpus_filter": corpus_filter,
-        "resume": resume,
-        "db_path": db_path,
-        "ollama_url": ollama_url,
-        "no_context": no_context,
-        "timeout": timeout,
-    }
+    # Determine which RAG configurations to run.
+    # no_rag=False means RAG is enabled; no_rag=True means RAG is disabled.
+    if rag_mode == "both":
+        rag_configs = [False, True]   # [with_rag, without_rag]
+    elif rag_mode == "no-rag" or no_rag:
+        rag_configs = [True]          # no_rag=True (RAG disabled)
+    else:
+        rag_configs = [False]         # no_rag=False (RAG enabled)
+
     runners = []
-    if mode in ("reactive", "both"):
-        runners.append(BenchmarkRunner(**kwargs))
-    if mode in ("conversational", "both"):
-        runners.append(ConversationalBenchmarkRunner(**kwargs))
+    for nr in rag_configs:
+        kwargs = {
+            "model_name": model,
+            "corpus_filter": corpus_filter,
+            "resume": resume,
+            "db_path": db_path,
+            "ollama_url": ollama_url,
+            "no_context": no_context,
+            "timeout": timeout,
+            "no_rag": nr,
+        }
+        if mode in ("reactive", "both"):
+            runners.append(BenchmarkRunner(**kwargs))
+        if mode in ("conversational", "both"):
+            runners.append(ConversationalBenchmarkRunner(**kwargs))
     return runners
 
 
@@ -124,6 +142,8 @@ def _cmd_run(args: argparse.Namespace) -> None:
             ollama_url=ollama_url,
             no_context=args.no_context,
             timeout=args.timeout,
+            no_rag=args.no_rag,
+            rag_mode=args.rag_mode,
         )
         for runner in runners:
             try:
@@ -155,6 +175,9 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
 
     if args.compare_modes:
         analysis.print_mode_comparison(conn)
+
+    if args.compare_rag:
+        analysis.print_rag_comparison(conn)
 
     if model_name:
         failures = analysis.failure_patterns(conn, model_name, limit=args.failures)
@@ -277,6 +300,19 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="MODE",
         help="Pipeline to benchmark: reactive (default), conversational, or both",
     )
+    p_run.add_argument(
+        "--no-rag",
+        action="store_true",
+        default=False,
+        help="Disable semantic layer RAG retrieval",
+    )
+    p_run.add_argument(
+        "--rag-mode",
+        choices=["rag", "no-rag", "both"],
+        default="rag",
+        metavar="RAG_MODE",
+        help="RAG mode: rag (default), no-rag, or both (run twice for A/B)",
+    )
 
     # ── analyze ───────────────────────────────────────────────────────────────
     p_ana = sub.add_parser("analyze", help="Print analysis tables")
@@ -300,6 +336,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Show reactive vs conversational pipeline comparison table",
+    )
+    p_ana.add_argument(
+        "--compare-rag",
+        action="store_true",
+        default=False,
+        help="Show RAG vs no-RAG comparison table",
     )
 
     # ── export ────────────────────────────────────────────────────────────────

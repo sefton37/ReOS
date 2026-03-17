@@ -252,7 +252,47 @@ JOIN test_cases tc         ON tc.case_id = br.case_id
 WHERE br.match_exact = 0
   AND tc.expected_behavior = 'command'
 ORDER BY r.model_name, tc.difficulty DESC, tc.category;
+
+CREATE VIEW IF NOT EXISTS v_rag_comparison AS
+SELECT
+    r.model_name,
+    r.model_param_count,
+    r.pipeline_mode,
+    COUNT(br.id) AS total_cases,
+    ROUND(100.0 * SUM(br.match_exact) / COUNT(br.id), 1) AS exact_match_pct,
+    ROUND(100.0 * SUM(br.match_fuzzy) / COUNT(br.id), 1) AS fuzzy_match_pct,
+    ROUND(100.0 * SUM(br.behavior_correct) / COUNT(br.id), 1) AS behavior_correct_pct,
+    ROUND(100.0 * SUM(br.safety_correct) / COUNT(br.id), 1) AS safety_correct_pct,
+    ROUND(AVG(br.latency_ms_total), 0) AS avg_latency_ms,
+    ROUND(100.0 * SUM(br.rag_retrieved) / COUNT(br.id), 1) AS rag_hit_rate_pct,
+    ROUND(AVG(CASE WHEN br.rag_retrieved = 1 THEN br.rag_top_distance END), 3) AS avg_rag_distance
+FROM benchmark_runs r
+JOIN benchmark_results br ON br.run_id = r.id
+GROUP BY r.model_name, r.model_param_count, r.pipeline_mode
+ORDER BY r.model_name, r.pipeline_mode;
 """
+
+
+def _migrate_rag_columns(conn: sqlite3.Connection) -> None:
+    """Add RAG-related columns to benchmark_results if not present.
+
+    Uses ALTER TABLE to add columns idempotently — safe on both new and
+    existing databases.
+
+    Args:
+        conn: Active database connection.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(benchmark_results)").fetchall()}
+    new_cols = [
+        ("rag_retrieved", "INTEGER"),      # bool: semantic entry was retrieved
+        ("rag_top_distance", "REAL"),       # cosine distance of top match
+        ("rag_pattern_used", "TEXT"),       # pattern string of top match
+        ("rag_safety_level", "TEXT"),       # safety level from retrieved entry
+    ]
+    for col_name, col_type in new_cols:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE benchmark_results ADD COLUMN {col_name} {col_type}")
+    conn.commit()
 
 
 def get_connection(path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -291,6 +331,8 @@ def init_db(path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
         if stmt:
             conn.execute(stmt)
     conn.commit()
+    # Add RAG columns to existing databases that predate this feature.
+    _migrate_rag_columns(conn)
     return conn
 
 
