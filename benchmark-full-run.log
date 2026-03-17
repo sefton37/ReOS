@@ -1,4 +1,48 @@
 pysqlcipher3 not installed — databases will remain unencrypted. Install with: pip install pysqlcipher3  (requires libsqlcipher-dev)
 [qwen2.5:0.5b] Checking model availability …
 [qwen2.5:0.5b][1/415] files_ls_basic_001 … → ls -a
-[qwen2.5:0.5b][2/415] files_ls_hidden_001 …
+[qwen2.5:0.5b][2/415] files_ls_hidden_001 … → ls -a
+[qwen2.5:0.5b][3/415] files_ls_long_001 … → ls -l {directory}
+[qwen2.5:0.5b][4/415] files_cp_001 … → cp {source_file} {destination}
+[qwen2.5:0.5b][5/415] files_mv_001 … → mv {file} {destination_directory}/
+[qwen2.5:0.5b][6/415] files_mv_rename_001 … → mv {old_name} {new_name}
+[qwen2.5:0.5b][7/415] files_rm_001 … → rm -rf filename
+[qwen2.5:0.5b][8/415] files_mkdir_001 … → mkdir /new_directory
+[qwen2.5:0.5b][9/415] files_mkdir_p_001 … → mkdir -p /path/to/directory1 /path/to/directory2
+[qwen2.5:0.5b][10/415] files_touch_001 … → touch my-empty-file
+[qwen2.5:0.5b][11/415] files_cat_001 … → cat {file}
+[qwen2.5:0.5b][12/415] files_head_001 … → head -n 10 filename
+[qwen2.5:0.5b][13/415] files_tail_001 … → (none)
+[qwen2.5:0.5b][14/415] files_tail_follow_001 … → tail -f {path/to/logfile}
+[qwen2.5:0.5b][15/415] files_wc_001 … → wc -w {file}
+[qwen2.5:0.5b][16/415] files_ln_soft_001 … → ln -s {target} {link_name}
+[qwen2.5:0.5b][17/415] files_cp_dir_001 … → cp -r /path/to/source_directory /path/to/destination_directory
+[qwen2.5:0.5b][18/415] files_rm_dir_001 … → rm -d
+[qwen2.5:0.5b][19/415] files_find_name_001 … → find /var -name '*.log'
+[qwen2.5:0.5b][20/415] files_find_size_001 … → (none)
+[qwen2.5:0.5b][21/415] files_find_mtime_001 … → find ~ -type f -mtime -1
+[qwen2.5:0.5b][22/415] files_find_type_dir_001 … → find /etc -type d
+[qwen2.5:0.5b][23/415] files_find_empty_001 … → (none)
+[qwen2.5:0.5b][24/415] files_find_perm_001 … → find . -type f -exec stat -c '%a %n' {} \;
+[qwen2.5:0.5b][25/415] files_find_exec_001 … → find . -name "*.bak" -delete
+[qwen2.5:0.5b][26/415] files_locate_001 … → locate {file_name}
+[qwen2.5:0.5b][27/415] files_which_001 … → (none)
+[qwen2.5:0.5b][28/415] files_find_ext_py_001 … → find . -name "*.py"
+[qwen2.5:0.5b][29/415] files_find_ctime_001 … → find . -type f -mtime -1
+[qwen2.5:0.5b][30/415] files_find_name_case_001 … → (none)
+[qwen2.5:0.5b][31/415] files_chmod_executable_001 … → chmod +x {file}
+[qwen2.5:0.5b][32/415] files_chmod_read_001 … → chmod 644 {file} — record original mode with 'stat -c "%a %n" {file}' before changing
+[qwen2.5:0.5b][33/415] files_chmod_755_001 … → (none)
+[qwen2.5:0.5b][34/415] files_chmod_600_001 … → chmod 600 {private_key_file} -R
+[qwen2.5:0.5b][35/415] files_chown_001 … → (none)
+[qwen2.5:0.5b][36/415] files_chown_r_001 … → (none)
+[qwen2.5:0.5b][37/415] files_stat_001 … → (none)
+[qwen2.5:0.5b][38/415] files_umask_001 … → (none)
+[qwen2.5:0.5b][39/415] files_chmod_r_001 … → lsof +D /path/to/directory
+[qwen2.5:0.5b][40/415] files_getfacl_001 … → stat -c '%a %n' /path/to/file
+[qwen2.5:0.5b][41/415] files_tar_create_001 … → tar czf {archive.tar.gz} {directory}
+[qwen2.5:0.5b][42/415] files_tar_extract_001 … → tar -xzf {archive.tar.gz} --gzip
+[qwen2.5:0.5b][43/415] files_tar_list_001 … → tar tvf {archive.tar.gz}
+[qwen2.5:0.5b][44/415] files_zip_001 … → zip -r {archive.zip} {directory}
+[qwen2.5:0.5b][45/415] files_unzip_001 … → unzip {archive_file.zip} {output_directory}
+[qwen2.5:0.5b][46/415] files_tar_bz2_001 …
