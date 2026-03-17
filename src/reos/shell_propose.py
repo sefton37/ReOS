@@ -21,6 +21,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 import time
@@ -108,6 +109,13 @@ class ProposalTrace:
     sanitize_prefix: bool = False
     sanitize_multiline: bool = False
     sanitize_meta_rejection: bool = False
+
+    # RAG retrieval
+    rag_retrieved: bool = False
+    rag_top_distance: float | None = None
+    rag_pattern_used: str | None = None
+    rag_safety_level: str | None = None
+    rag_undo: dict[str, str] | None = None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -330,31 +338,25 @@ def looks_like_command(text: str) -> bool:
 
 
 def is_safe_command(command: str) -> tuple[bool, str]:
-    """
-    Check if command matches known dangerous patterns.
-
-    Returns:
-        Tuple of (is_safe, reason if unsafe)
-    """
-    dangerous_patterns = [
+    """Check if command matches known dangerous patterns."""
+    try:
+        from .semantic_rag import get_blocked_pattern_loader
+        loader = get_blocked_pattern_loader()
+        return loader.check(command)
+    except Exception:
+        pass
+    # Fallback to hardcoded patterns if semantic_rag unavailable
+    _FALLBACK_PATTERNS = [
         (r"rm\s+-rf\s+/\s*$", "Cannot remove root filesystem"),
         (r"rm\s+-rf\s+/\*", "Cannot remove root filesystem"),
-        (r"rm\s+-rf\s+~", "Cannot remove home directory"),
-        (r"dd\s+if=.*of=/dev/sd", "Cannot write directly to disk"),
         (r"dd\s+if=/dev/zero", "Cannot wipe disk with zeros"),
-        (r"dd\s+if=/dev/random", "Cannot overwrite with random data"),
-        (r"dd\s+if=/dev/urandom", "Cannot overwrite with random data"),
         (r"mkfs\s+/dev/sd", "Cannot format disk"),
-        (r"mkfs\.\w+\s+/dev/sd", "Cannot format disk"),
         (r":\(\)\s*\{.*\}", "Fork bombs are not allowed"),
-        (r">\s*/dev/sd", "Cannot write directly to disk"),
         (r"chmod\s+-R\s+777\s+/", "Cannot make all files world-writable"),
     ]
-
-    for pattern, reason in dangerous_patterns:
+    for pattern, reason in _FALLBACK_PATTERNS:
         if re.search(pattern, command, re.IGNORECASE):
             return False, reason
-
     return True, ""
 
 
@@ -381,6 +383,7 @@ RULES:
 - COMMAND line contains ONLY the bare command, nothing else
 - Use sudo when root privileges are required
 - Never suggest dangerous commands (rm -rf /, dd to block devices, etc.)
+- If "Relevant patterns from the semantic layer" appears below, prefer those patterns over generating a command from scratch. Fill the {parameter} placeholders with values from the user's request.
 
 EXAMPLES:
 
@@ -406,7 +409,7 @@ COMMAND: systemctl list-units --type=service --state=running"""
 
 CONSTRAINED_FALLBACK_PROMPT = """Output exactly one line: COMMAND: <shell command>
 If no command applies, output: COMMAND: NONE
-
+{pattern_hint}
 Task: {intent}"""
 
 
@@ -512,9 +515,51 @@ def propose_command_with_trace(
     except Exception:
         pass  # Context gathering is optional - fail open
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Semantic Layer RAG Retrieval
+    # ═══════════════════════════════════════════════════════════════════════════
+    rag_context_string = ""
+    rag_retrieved = False
+    rag_top_distance: float | None = None
+    rag_pattern_used: str | None = None
+    rag_safety_level: str | None = None
+    rag_undo: dict[str, str] | None = None
+
+    # Skip RAG if FTS5 already found a match (system context is better grounding)
+    if not (context_can_verify and context_string) and not os.environ.get("REOS_RAG_DISABLED"):
+        try:
+            from .semantic_rag import get_retriever
+
+            retriever = get_retriever()
+            if retriever is not None:
+                # Embed the cleaned intent, not the raw user string
+                query = natural_language
+                try:
+                    from .shell_context import analyze_intent
+                    verb, target = analyze_intent(natural_language)
+                    if verb and target:
+                        query = f"{verb} {target}"
+                    elif verb:
+                        query = verb
+                except Exception:
+                    pass  # Fall back to raw natural_language
+
+                entries = retriever.retrieve(query, top_k=5)
+                if entries:
+                    rag_context_string = retriever.format_for_prompt(entries)
+                    rag_retrieved = True
+                    rag_top_distance = entries[0].distance
+                    rag_pattern_used = entries[0].pattern
+                    rag_safety_level = entries[0].safety_level
+                    rag_undo = entries[0].undo
+        except Exception:
+            pass  # RAG is always fail-open
+
     # Build enriched prompt.  conversation_context (when non-empty) is injected
     # as a prefix so the model has multi-turn history for pronoun resolution.
     user_prompt = f"Input: {natural_language}"
+    if rag_context_string:
+        user_prompt = f"{rag_context_string}\n{user_prompt}"
     if context_string:
         user_prompt = f"{context_string}\n{user_prompt}"
     if conversation_context:
@@ -587,6 +632,11 @@ def propose_command_with_trace(
             looks_like_cmd_1=looks_like_cmd_1,
             context_can_verify=context_can_verify,
             context_string=context_string,
+            rag_retrieved=rag_retrieved,
+            rag_top_distance=rag_top_distance,
+            rag_pattern_used=rag_pattern_used,
+            rag_safety_level=rag_safety_level,
+            rag_undo=rag_undo,
         )
 
     # ── Attempt 2: constrained fallback prompt ───────────────────────────────
@@ -600,9 +650,13 @@ def propose_command_with_trace(
     looks_like_cmd_2 = False
 
     try:
+        pattern_hint = ""
+        if rag_pattern_used and rag_top_distance is not None and rag_top_distance < 0.20:
+            pattern_hint = f"Hint: the most likely pattern is: {rag_pattern_used}"
+
         response2 = llm.chat_text(
             system="You are a shell command generator. Output only commands.",
-            user=CONSTRAINED_FALLBACK_PROMPT.format(intent=natural_language),
+            user=CONSTRAINED_FALLBACK_PROMPT.format(intent=natural_language, pattern_hint=pattern_hint),
             temperature=0.1,  # Even lower temperature for more deterministic output
         )
 
@@ -639,6 +693,11 @@ def propose_command_with_trace(
                 sentinel_found_2=False,
                 context_can_verify=context_can_verify,
                 context_string=context_string,
+                rag_retrieved=rag_retrieved,
+                rag_top_distance=rag_top_distance,
+                rag_pattern_used=rag_pattern_used,
+                rag_safety_level=rag_safety_level,
+                rag_undo=rag_undo,
             )
 
         # Strip COMMAND: prefix if present
@@ -678,6 +737,11 @@ def propose_command_with_trace(
                     looks_like_cmd_2=looks_like_cmd_2,
                     context_can_verify=context_can_verify,
                     context_string=context_string,
+                    rag_retrieved=rag_retrieved,
+                    rag_top_distance=rag_top_distance,
+                    rag_pattern_used=rag_pattern_used,
+                    rag_safety_level=rag_safety_level,
+                    rag_undo=rag_undo,
                 )
 
             return ProposalTrace(
@@ -701,6 +765,11 @@ def propose_command_with_trace(
                 looks_like_cmd_2=looks_like_cmd_2,
                 context_can_verify=context_can_verify,
                 context_string=context_string,
+                rag_retrieved=rag_retrieved,
+                rag_top_distance=rag_top_distance,
+                rag_pattern_used=rag_pattern_used,
+                rag_safety_level=rag_safety_level,
+                rag_undo=rag_undo,
             )
 
     except Exception as e:
@@ -722,6 +791,11 @@ def propose_command_with_trace(
             latency_ms_attempt2=latency_ms_attempt2,
             context_can_verify=context_can_verify,
             context_string=context_string,
+            rag_retrieved=rag_retrieved,
+            rag_top_distance=rag_top_distance,
+            rag_pattern_used=rag_pattern_used,
+            rag_safety_level=rag_safety_level,
+            rag_undo=rag_undo,
         )
 
     elapsed_ms = int((time.monotonic() - start) * 1000)
@@ -747,6 +821,11 @@ def propose_command_with_trace(
         looks_like_cmd_2=looks_like_cmd_2,
         context_can_verify=context_can_verify,
         context_string=context_string,
+        rag_retrieved=rag_retrieved,
+        rag_top_distance=rag_top_distance,
+        rag_pattern_used=rag_pattern_used,
+        rag_safety_level=rag_safety_level,
+        rag_undo=rag_undo,
     )
 
 

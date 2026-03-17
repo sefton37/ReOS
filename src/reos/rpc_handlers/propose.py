@@ -1,10 +1,11 @@
 """RPC handler for natural language → shell command proposals.
 
-Wraps ``shell_propose.propose_command_with_meta()`` behind the Cairn RPC
+Wraps ``shell_propose.propose_command_with_trace()`` behind the Cairn RPC
 dispatch convention so the Tauri frontend can call ``reos/propose``.
 
 Returns model_name and latency_ms in the response so the frontend can include
-them in subsequent user_action telemetry events.
+them in subsequent user_action telemetry events.  Also surfaces RAG fields
+(undo_hint, rag_safety_level) from the trace when available.
 """
 
 from __future__ import annotations
@@ -40,15 +41,18 @@ def handle_reos_propose(db: Any = None, *, natural_language: str) -> dict[str, A
         model_name  : str | None — Ollama model used (None on failure)
         latency_ms  : int | None — wall-clock inference time in ms (None on failure)
     """
-    from reos.shell_propose import propose_command_with_meta
+    from reos.shell_propose import propose_command_with_trace
     from reos.telemetry import record_event
 
     try:
-        message, command, model_name, latency_ms, attempt_count = propose_command_with_meta(
-            natural_language
-        )
+        trace = propose_command_with_trace(natural_language)
+        message = trace.message
+        command = trace.command
+        model_name = trace.model_name
+        latency_ms = trace.latency_ms
+        attempt_count = trace.attempt_count
     except Exception as exc:
-        logger.warning("propose_command_with_meta failed: %s", exc)
+        logger.warning("propose_command_with_trace failed: %s", exc)
         # Fire-and-forget telemetry for the failure.
         try:
             record_event(
@@ -72,7 +76,8 @@ def handle_reos_propose(db: Any = None, *, natural_language: str) -> dict[str, A
 
         return {"message": str(exc), "command": None, "success": False,
                 "model_name": None, "latency_ms": None,
-                "is_risky": False, "risk_reason": None}
+                "is_risky": False, "risk_reason": None,
+                "undo_hint": None, "rag_safety_level": None}
 
     # Record telemetry (fire-and-forget).
     try:
@@ -118,6 +123,13 @@ def handle_reos_propose(db: Any = None, *, natural_language: str) -> dict[str, A
                     risk_reason = _msg
                     break
 
+    # RAG safety level overrides: a "dangerous" RAG classification forces is_risky.
+    rag_safety_level = trace.rag_safety_level
+    if rag_safety_level == "dangerous":
+        is_risky = True
+        if not risk_reason:
+            risk_reason = "Flagged dangerous by RAG safety classifier"
+
     return {
         "message": message,
         "command": command,  # str or None
@@ -126,4 +138,6 @@ def handle_reos_propose(db: Any = None, *, natural_language: str) -> dict[str, A
         "latency_ms": latency_ms,
         "is_risky": is_risky,
         "risk_reason": risk_reason,
+        "undo_hint": trace.rag_undo,
+        "rag_safety_level": rag_safety_level,
     }

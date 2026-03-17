@@ -434,6 +434,7 @@ def handle_reos_converse(
         "explanation": None,  # Phase 2: extract explanation from trace
         "is_risky": is_risky,
         "risk_reason": risk_reason,
+        "undo_hint": trace.rag_undo,
         "operation_id": operation_id,
         "classification": classification,
         "latency_ms": int((time.monotonic() - start) * 1000),

@@ -21,6 +21,10 @@ dev = [
   "pytest>=8.3.0,<9.0.0",
   "pytest-cov>=4.1.0,<6.0.0",
 ]
+rag = [
+  "chromadb>=0.4.0",
+  "pyyaml>=6.0",
+]
 
 [project.scripts]
 reos = "reos.__main__:main"
