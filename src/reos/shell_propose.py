@@ -31,6 +31,27 @@ from trcore.db import get_db
 from trcore.providers import get_provider
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Soft-risky patterns (shared with rpc_handlers/propose.py and converse.py)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Commands that pass hard safety validation but warrant a visual warning in the
+# frontend.  Compiled once at import time.  Both propose.py and converse.py
+# import this list so it is maintained in a single place.
+SOFT_RISKY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bsudo\b", re.IGNORECASE), "Requires elevated privileges"),
+    (re.compile(r"\brm\b.*-[rRf]", re.IGNORECASE), "Recursive or forced delete"),
+    (re.compile(r"\bdd\b", re.IGNORECASE), "Low-level disk operation"),
+    (re.compile(r"\bchmod\b.*777", re.IGNORECASE), "Makes files world-writable"),
+    (re.compile(r"\bcurl\b.*\|\s*(?:bash|sh)\b", re.IGNORECASE), "Pipes remote content to shell"),
+    (re.compile(r"\bwget\b.*\|\s*(?:bash|sh)\b", re.IGNORECASE), "Pipes remote content to shell"),
+    (
+        re.compile(r"\bsystemctl\b\s+(?:stop|disable|mask)\b", re.IGNORECASE),
+        "Modifies service state",
+    ),
+    (re.compile(r"\bapt(?:-get)?\b.*(?:remove|purge)", re.IGNORECASE), "Removes packages"),
+]
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Instrumentation types
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -451,12 +472,21 @@ def extract_conversational_response(raw: str) -> tuple[str, str | None]:
     return message, command
 
 
-def propose_command_with_trace(natural_language: str) -> ProposalTrace:
+def propose_command_with_trace(
+    natural_language: str,
+    conversation_context: str = "",
+) -> ProposalTrace:
     """Propose a conversational response and optional shell command, returning a full trace.
 
     Runs the complete pipeline (context gathering, LLM call(s), parsing, safety checks)
     and populates every field of ProposalTrace with intermediate state. Intended for
     use by the benchmark runner and any other caller that needs full pipeline visibility.
+
+    Args:
+        natural_language:    The user's natural language request.
+        conversation_context: Optional multi-turn history prefix injected before the
+                              user prompt (formatted as "User: ...\\nAssistant: ...").
+                              Empty string (default) preserves original behaviour.
 
     NEVER EXECUTES ANYTHING.
     """
@@ -482,10 +512,13 @@ def propose_command_with_trace(natural_language: str) -> ProposalTrace:
     except Exception:
         pass  # Context gathering is optional - fail open
 
-    # Build enriched prompt
+    # Build enriched prompt.  conversation_context (when non-empty) is injected
+    # as a prefix so the model has multi-turn history for pronoun resolution.
     user_prompt = f"Input: {natural_language}"
     if context_string:
         user_prompt = f"{context_string}\n{user_prompt}"
+    if conversation_context:
+        user_prompt = f"{conversation_context}\n\n{user_prompt}"
 
     start = time.monotonic()
 

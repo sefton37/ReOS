@@ -1,0 +1,870 @@
+domain: file-operations
+description: "File and directory creation, copying, moving, deletion, permissions, and metadata"
+related_domains:
+  - text-processing
+  - permissions-security
+  - storage
+
+commands:
+  - name: ls
+    description: "List directory contents with optional sorting and formatting"
+    common_intents:
+      - intent: "list files in a directory"
+        pattern: "ls {directory}"
+        example: "ls /home/user/documents"
+      - intent: "list all files including hidden files"
+        pattern: "ls -a {directory}"
+        example: "ls -a ~"
+      - intent: "list files with details (permissions, size, owner, date)"
+        pattern: "ls -l {directory}"
+        example: "ls -l /etc"
+      - intent: "list files with human-readable sizes"
+        pattern: "ls -lh {directory}"
+        example: "ls -lh /var/log"
+      - intent: "list all files including hidden with details"
+        pattern: "ls -la {directory}"
+        example: "ls -la ~"
+      - intent: "list files sorted by size largest first"
+        pattern: "ls -lS {directory}"
+        example: "ls -lS ~/Downloads"
+      - intent: "list files sorted by modification time newest first"
+        pattern: "ls -lt {directory}"
+        example: "ls -lt /tmp"
+      - intent: "list files sorted by modification time oldest first"
+        pattern: "ls -ltr {directory}"
+        example: "ls -ltr /var/log"
+      - intent: "list files one per line"
+        pattern: "ls -1 {directory}"
+        example: "ls -1 /etc"
+      - intent: "list only directories"
+        pattern: "ls -d {directory}/*/"
+        example: "ls -d /usr/*/"
+      - intent: "list files recursively in all subdirectories"
+        pattern: "ls -lR {directory}"
+        example: "ls -lR /etc/apt"
+      - intent: "show file type indicators (trailing /, @, *)"
+        pattern: "ls -F {directory}"
+        example: "ls -F ~/bin"
+    key_flags:
+      - flag: "-l"
+        meaning: "Long listing format — shows permissions, links, owner, group, size, date"
+      - flag: "-a"
+        meaning: "Show all files including hidden (dot files)"
+      - flag: "-h"
+        meaning: "Human-readable sizes (K, M, G) — requires -l"
+      - flag: "-S"
+        meaning: "Sort by file size, largest first"
+      - flag: "-t"
+        meaning: "Sort by modification time, newest first"
+      - flag: "-r"
+        meaning: "Reverse sort order"
+      - flag: "-R"
+        meaning: "Recurse into subdirectories"
+      - flag: "-d"
+        meaning: "List directories themselves, not their contents"
+      - flag: "-F"
+        meaning: "Append type indicator: / for directory, @ for symlink, * for executable"
+      - flag: "-1"
+        meaning: "List one file per line"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "listing": "no-op — ls is read-only"
+    related_commands:
+      - tree
+      - find
+      - stat
+
+  - name: cp
+    description: "Copy files and directories to a new location"
+    common_intents:
+      - intent: "copy a file to another location"
+        pattern: "cp {source_file} {destination}"
+        example: "cp report.txt /backup/report.txt"
+      - intent: "copy a file into a directory"
+        pattern: "cp {source_file} {destination_directory}/"
+        example: "cp config.yaml /etc/myapp/"
+      - intent: "copy a directory recursively"
+        pattern: "cp -r {source_directory} {destination_directory}"
+        example: "cp -r ~/projects/myapp /backup/myapp"
+      - intent: "copy preserving permissions, timestamps, and ownership"
+        pattern: "cp -a {source} {destination}"
+        example: "cp -a /etc/nginx /backup/nginx"
+      - intent: "copy multiple files into a directory"
+        pattern: "cp {file1} {file2} {destination_directory}/"
+        example: "cp *.conf /etc/myapp/"
+      - intent: "copy interactively prompting before overwrite"
+        pattern: "cp -i {source} {destination}"
+        example: "cp -i newconfig.yaml /etc/config.yaml"
+      - intent: "copy without overwriting existing files"
+        pattern: "cp -n {source} {destination}"
+        example: "cp -n *.jpg /backup/"
+      - intent: "copy verbosely showing each file copied"
+        pattern: "cp -rv {source_directory} {destination_directory}"
+        example: "cp -rv ~/data /mnt/external/data"
+      - intent: "create a timestamped backup before overwriting"
+        pattern: "cp --backup=numbered {source} {destination}"
+        example: "cp --backup=numbered config.yaml config.yaml"
+    key_flags:
+      - flag: "-r, -R, --recursive"
+        meaning: "Copy directories recursively"
+      - flag: "-a, --archive"
+        meaning: "Preserve all attributes: equivalent to -dR --preserve=all"
+      - flag: "-i, --interactive"
+        meaning: "Prompt before overwriting an existing destination file"
+      - flag: "-n, --no-clobber"
+        meaning: "Do not overwrite existing destination files"
+      - flag: "-v, --verbose"
+        meaning: "Print each file name as it is copied"
+      - flag: "-p"
+        meaning: "Preserve mode, ownership, and timestamps"
+      - flag: "-f, --force"
+        meaning: "Remove destination if it cannot be opened, then retry"
+      - flag: "--parents"
+        meaning: "Use full source path under destination, creating intermediate dirs"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "overwriting existing files without -i or -n"
+      blocked_patterns: []
+    undo:
+      "copied file": "rm {destination_file}"
+      "copied directory": "rm -r {destination_directory}"
+    distro_notes:
+      macOS: "macOS cp lacks --no-clobber (-n) behavior identical to GNU cp; test carefully"
+    related_commands:
+      - mv
+      - rsync
+      - ln
+
+  - name: mv
+    description: "Move or rename files and directories"
+    common_intents:
+      - intent: "rename a file"
+        pattern: "mv {old_name} {new_name}"
+        example: "mv report_draft.txt report_final.txt"
+      - intent: "move a file into a directory"
+        pattern: "mv {file} {destination_directory}/"
+        example: "mv invoice.pdf ~/Documents/"
+      - intent: "move multiple files into a directory"
+        pattern: "mv {file1} {file2} {destination_directory}/"
+        example: "mv *.log /var/archive/"
+      - intent: "move a directory to a new location"
+        pattern: "mv {source_directory} {destination_directory}"
+        example: "mv ~/projects/old-app ~/archive/old-app"
+      - intent: "rename a directory"
+        pattern: "mv {old_dir_name} {new_dir_name}"
+        example: "mv myproject myproject-v2"
+      - intent: "move interactively prompting before overwrite"
+        pattern: "mv -i {source} {destination}"
+        example: "mv -i config.yaml /etc/config.yaml"
+      - intent: "move without overwriting existing files"
+        pattern: "mv -n {source} {destination}"
+        example: "mv -n *.jpg /backup/"
+      - intent: "move verbosely showing what is moved"
+        pattern: "mv -v {source} {destination}"
+        example: "mv -v *.bak /tmp/trash/"
+      - intent: "move files from find output into a directory"
+        pattern: "find {path} -name '{pattern}' -print0 | xargs -0 mv -t {destination_directory}"
+        example: "find /var/log -name '*.log' -print0 | xargs -0 mv -t /archive/"
+    key_flags:
+      - flag: "-i, --interactive"
+        meaning: "Prompt before overwriting an existing destination file"
+      - flag: "-n, --no-clobber"
+        meaning: "Do not overwrite existing destination files"
+      - flag: "-f, --force"
+        meaning: "Do not prompt before overwriting"
+      - flag: "-v, --verbose"
+        meaning: "Explain what is being done"
+      - flag: "-t, --target-directory=DIR"
+        meaning: "Move all sources into DIR (useful with xargs)"
+      - flag: "--backup"
+        meaning: "Make a backup of each existing destination file"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "overwriting existing files without -i or -n"
+        - "moving system files (e.g., /etc/, /usr/)"
+      blocked_patterns: []
+    undo:
+      "renamed file": "mv {new_name} {old_name}"
+      "moved file": "mv {destination_path} {original_path}"
+    related_commands:
+      - cp
+      - rename
+      - rsync
+
+  - name: rm
+    description: "Remove files or directories permanently (no trash)"
+    common_intents:
+      - intent: "delete a file"
+        pattern: "rm {file}"
+        example: "rm old_report.txt"
+      - intent: "delete multiple files"
+        pattern: "rm {file1} {file2}"
+        example: "rm error.log debug.log"
+      - intent: "delete files by pattern"
+        pattern: "rm {*.ext}"
+        example: "rm *.tmp"
+      - intent: "delete a directory and all its contents"
+        pattern: "rm -r {directory}"
+        example: "rm -r /tmp/build-artifacts"
+      - intent: "force delete ignoring nonexistent files and no prompts"
+        pattern: "rm -f {file}"
+        example: "rm -f lockfile.pid"
+      - intent: "delete interactively prompting before each removal"
+        pattern: "rm -i {file}"
+        example: "rm -i *.bak"
+      - intent: "delete verbosely showing each removed file"
+        pattern: "rm -v {file}"
+        example: "rm -v *.log"
+      - intent: "delete an empty directory"
+        pattern: "rm -d {directory}"
+        example: "rm -d /tmp/empty-dir"
+    key_flags:
+      - flag: "-r, -R, --recursive"
+        meaning: "Remove directories and their contents recursively"
+      - flag: "-f, --force"
+        meaning: "Ignore nonexistent files, never prompt"
+      - flag: "-i"
+        meaning: "Prompt before every removal"
+      - flag: "-I"
+        meaning: "Prompt once before removing more than three files or recursively"
+      - flag: "-v, --verbose"
+        meaning: "Explain what is being done"
+      - flag: "-d, --dir"
+        meaning: "Remove empty directories"
+    safety:
+      level: dangerous
+      requires_sudo: false
+      confirmation_required_for:
+        - "rm -r (recursive directory deletion)"
+        - "rm with wildcards (*.ext, *, ?)"
+        - "rm on paths containing /etc, /home, /usr, /var, /boot"
+        - "rm -rf on any path"
+      blocked_patterns:
+        - "rm -rf /"
+        - "rm -rf /*"
+        - "rm -rf /home"
+        - "rm -rf /etc"
+        - "rm -rf /usr"
+        - "rm -rf /boot"
+        - "rm -rf /var"
+        - "rm --no-preserve-root -rf /"
+    undo:
+      "deleted file": "no built-in undo — restore from backup or use 'trash' command instead of rm"
+    distro_notes:
+      Ubuntu/Debian: "Consider 'trash-cli' (trash-put) as a safer alternative to rm"
+      all: "rm has no recycle bin — deletion is permanent. Use 'trash' or backups for safety."
+    related_commands:
+      - rmdir
+      - trash
+      - find
+
+  - name: find
+    description: "Search for files and directories matching criteria in a directory tree"
+    common_intents:
+      - intent: "find files by name or extension"
+        pattern: "find {directory} -name '{pattern}'"
+        example: "find /home -name '*.log'"
+      - intent: "find files by name case-insensitively"
+        pattern: "find {directory} -iname '{pattern}'"
+        example: "find . -iname '*.jpg'"
+      - intent: "find only directories"
+        pattern: "find {directory} -type d -name '{pattern}'"
+        example: "find /var -type d -name 'cache'"
+      - intent: "find only files"
+        pattern: "find {directory} -type f"
+        example: "find /tmp -type f"
+      - intent: "find files modified within the last N days"
+        pattern: "find {directory} -type f -mtime -{days}"
+        example: "find /var/log -type f -mtime -7"
+      - intent: "find files larger than a given size"
+        pattern: "find {directory} -type f -size +{size}"
+        example: "find /home -type f -size +100M"
+      - intent: "find files by permission"
+        pattern: "find {directory} -type f -perm {octal}"
+        example: "find /etc -type f -perm 777"
+      - intent: "find and execute a command on each result"
+        pattern: "find {directory} -name '{pattern}' -exec {command} {} \\;"
+        example: "find . -name '*.py' -exec wc -l {} \\;"
+      - intent: "find empty files or directories"
+        pattern: "find {directory} -empty"
+        example: "find /tmp -empty -type f"
+      - intent: "find files excluding a path"
+        pattern: "find {directory} -name '{pattern}' -not -path '{excluded_path}'"
+        example: "find . -name '*.py' -not -path '*/site-packages/*'"
+      - intent: "find files and limit search depth"
+        pattern: "find {directory} -maxdepth {n} -name '{pattern}'"
+        example: "find . -maxdepth 2 -name 'config.yaml'"
+      - intent: "find broken symbolic links"
+        pattern: "find -L {directory} -type l"
+        example: "find -L /usr/local/bin -type l"
+    key_flags:
+      - flag: "-name '{pattern}'"
+        meaning: "Match files by name (case-sensitive glob)"
+      - flag: "-iname '{pattern}'"
+        meaning: "Match files by name (case-insensitive glob)"
+      - flag: "-type f|d|l"
+        meaning: "Match by type: f=file, d=directory, l=symlink"
+      - flag: "-mtime ±N"
+        meaning: "Match files modified N*24h ago: -N means less than N days ago"
+      - flag: "-size ±N[kMG]"
+        meaning: "Match by file size: +N means larger than N"
+      - flag: "-exec {cmd} {} \\;"
+        meaning: "Run command on each matching file"
+      - flag: "-maxdepth N"
+        meaning: "Limit recursion to N directory levels"
+      - flag: "-not / !"
+        meaning: "Negate a test"
+      - flag: "-delete"
+        meaning: "Delete matching files (use with extreme care)"
+      - flag: "-print0"
+        meaning: "Print results separated by null byte (safe for filenames with spaces)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for:
+        - "find ... -delete (permanent deletion)"
+        - "find ... -exec rm ... (recursive deletion via exec)"
+      blocked_patterns:
+        - "find / -delete"
+        - "find / -exec rm -rf {} \\;"
+    undo:
+      "find with -delete": "no undo — deleted files cannot be recovered"
+      "find read-only": "no-op — find without -delete or destructive -exec is read-only"
+    related_commands:
+      - locate
+      - grep
+      - ls
+
+  - name: locate
+    description: "Find files quickly using a pre-built filename database"
+    common_intents:
+      - intent: "quickly find a file by name"
+        pattern: "locate '{pattern}'"
+        example: "locate 'nginx.conf'"
+      - intent: "find a file by name case-insensitively"
+        pattern: "locate -i '{pattern}'"
+        example: "locate -i '*.jpg'"
+      - intent: "find files with exact filename match"
+        pattern: "locate '*/{filename}'"
+        example: "locate '*/passwd'"
+      - intent: "update the locate database to include recently added files"
+        pattern: "sudo updatedb"
+        example: "sudo updatedb"
+    key_flags:
+      - flag: "-i, --ignore-case"
+        meaning: "Case-insensitive pattern matching"
+      - flag: "-c, --count"
+        meaning: "Print only the count of matching entries"
+      - flag: "-l, --limit=N"
+        meaning: "Limit output to N results"
+      - flag: "-r, --regexp"
+        meaning: "Use POSIX extended regular expression for pattern"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "search": "no-op — locate is read-only"
+    distro_notes:
+      all: "locate searches a cached database updated by updatedb (usually via cron). Newly created files are not found until updatedb runs."
+      Ubuntu/Debian: "Install with: apt install mlocate or plocate"
+    related_commands:
+      - find
+      - which
+      - whereis
+
+  - name: chmod
+    description: "Change file or directory access permissions"
+    common_intents:
+      - intent: "make a script executable"
+        pattern: "chmod +x {script}"
+        example: "chmod +x deploy.sh"
+      - intent: "make a file executable by owner only"
+        pattern: "chmod u+x {file}"
+        example: "chmod u+x myscript.sh"
+      - intent: "set standard file permissions (owner rw, group+others r)"
+        pattern: "chmod 644 {file}"
+        example: "chmod 644 config.yaml"
+      - intent: "set standard directory permissions (owner rwx, group+others rx)"
+        pattern: "chmod 755 {directory}"
+        example: "chmod 755 /srv/www"
+      - intent: "give owner full permissions, group and others read+execute"
+        pattern: "chmod u=rwx,go=rx {file}"
+        example: "chmod u=rwx,go=rx /usr/local/bin/myapp"
+      - intent: "remove write permission from group and others"
+        pattern: "chmod go-w {file}"
+        example: "chmod go-w sensitive.conf"
+      - intent: "remove all permissions from others"
+        pattern: "chmod o= {file}"
+        example: "chmod o= private_key"
+      - intent: "recursively change directory permissions"
+        pattern: "chmod -R {mode} {directory}"
+        example: "chmod -R 750 /srv/app"
+      - intent: "add execute bit only for files already executable (smart recursive)"
+        pattern: "chmod -R a+rX {directory}"
+        example: "chmod -R a+rX /srv/public"
+    key_flags:
+      - flag: "-R, --recursive"
+        meaning: "Apply permission change recursively to all files and subdirectories"
+      - flag: "-v, --verbose"
+        meaning: "Output a diagnostic for every file processed"
+      - flag: "-c, --changes"
+        meaning: "Like verbose but report only when a change is actually made"
+      - flag: "--reference=RFILE"
+        meaning: "Set permissions to match those of a reference file"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "chmod -R on system directories (/etc, /usr, /bin, /lib)"
+        - "removing execute bit on system binaries"
+      blocked_patterns:
+        - "chmod -R 777 /"
+        - "chmod -R 777 /etc"
+        - "chmod -R 777 /usr"
+        - "chmod 777 /etc/passwd"
+        - "chmod 777 /etc/shadow"
+    undo:
+      "permission change": "chmod {original_mode} {file} — record original mode with 'stat -c \"%a %n\" {file}' before changing"
+    distro_notes:
+      all: "Symbolic mode (u+x, go-w) is portable; octal mode (755, 644) is also universally supported"
+    related_commands:
+      - chown
+      - stat
+      - umask
+
+  - name: chown
+    description: "Change the owner and/or group of files and directories"
+    common_intents:
+      - intent: "change file owner"
+        pattern: "sudo chown {user} {file}"
+        example: "sudo chown alice report.txt"
+      - intent: "change file owner and group"
+        pattern: "sudo chown {user}:{group} {file}"
+        example: "sudo chown www-data:www-data /srv/www/index.html"
+      - intent: "change owner and set group to user's login group"
+        pattern: "sudo chown {user}: {file}"
+        example: "sudo chown bob: myfile.txt"
+      - intent: "change group only"
+        pattern: "chown :{group} {file}"
+        example: "chown :developers project.py"
+      - intent: "recursively change owner of a directory"
+        pattern: "sudo chown -R {user}:{group} {directory}"
+        example: "sudo chown -R www-data:www-data /var/www/html"
+      - intent: "change owner of a symbolic link (not its target)"
+        pattern: "sudo chown -h {user} {symlink}"
+        example: "sudo chown -h alice /usr/local/bin/myapp"
+      - intent: "change ownership to match a reference file"
+        pattern: "sudo chown --reference {reference_file} {file}"
+        example: "sudo chown --reference /etc/hosts /etc/myapp.conf"
+    key_flags:
+      - flag: "-R, --recursive"
+        meaning: "Operate recursively on directories and their contents"
+      - flag: "-h, --no-dereference"
+        meaning: "Change ownership of the symlink itself, not the file it points to"
+      - flag: "-v, --verbose"
+        meaning: "Output a diagnostic for every file processed"
+      - flag: "-c, --changes"
+        meaning: "Like verbose but report only when a change is made"
+      - flag: "--reference=RFILE"
+        meaning: "Use the owner and group of RFILE instead of specifying values"
+      - flag: "--preserve-root"
+        meaning: "Refuse to operate recursively on /"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "chown -R on system directories (/etc, /usr, /var, /home)"
+        - "changing ownership of files owned by system users (root, daemon)"
+      blocked_patterns:
+        - "chown -R root /"
+        - "chown -R nobody /"
+    undo:
+      "owner change": "sudo chown {original_owner}:{original_group} {file} — record with 'stat -c \"%U %G\" {file}' before changing"
+    related_commands:
+      - chmod
+      - chgrp
+      - stat
+
+  - name: ln
+    description: "Create hard links or symbolic links to files and directories"
+    common_intents:
+      - intent: "create a symbolic link to a file"
+        pattern: "ln -s {target} {link_name}"
+        example: "ln -s /usr/local/bin/python3.11 /usr/local/bin/python3"
+      - intent: "create a symbolic link to a directory"
+        pattern: "ln -s {target_directory} {link_name}"
+        example: "ln -s /opt/myapp/current /usr/local/share/myapp"
+      - intent: "overwrite an existing symbolic link"
+        pattern: "ln -sf {new_target} {link_name}"
+        example: "ln -sf /opt/myapp-v2 /usr/local/share/myapp"
+      - intent: "create a hard link to a file"
+        pattern: "ln {target_file} {link_name}"
+        example: "ln document.txt document_hardlink.txt"
+      - intent: "create a relative symbolic link"
+        pattern: "ln -sr {target} {link_name}"
+        example: "ln -sr ../lib/libfoo.so /usr/local/lib/libfoo.so"
+    key_flags:
+      - flag: "-s, --symbolic"
+        meaning: "Create a symbolic (soft) link instead of a hard link"
+      - flag: "-f, --force"
+        meaning: "Remove existing destination files before creating link"
+      - flag: "-r, --relative"
+        meaning: "Create symbolic link relative to the link's location (with -s)"
+      - flag: "-v, --verbose"
+        meaning: "Print name of each linked file"
+      - flag: "-n, --no-dereference"
+        meaning: "Treat LINK_NAME as a normal file if it is a symlink to a directory"
+      - flag: "-i, --interactive"
+        meaning: "Prompt whether to remove destinations"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "ln -sf overwriting an existing symlink"
+      blocked_patterns: []
+    undo:
+      "created symlink": "rm {link_name}"
+      "created hard link": "rm {link_name} — original file is unaffected (hard links share inode)"
+    distro_notes:
+      all: "Symbolic links work across filesystems; hard links do not. Hard links cannot point to directories (as a regular user)."
+    related_commands:
+      - readlink
+      - unlink
+      - cp
+
+  - name: stat
+    description: "Display detailed file or filesystem metadata including permissions, timestamps, and inode info"
+    common_intents:
+      - intent: "show all metadata for a file"
+        pattern: "stat {file}"
+        example: "stat /etc/hosts"
+      - intent: "show only octal permissions of a file"
+        pattern: "stat -c '%a %n' {file}"
+        example: "stat -c '%a %n' ~/.ssh/id_rsa"
+      - intent: "show owner and group of a file"
+        pattern: "stat -c '%U %G' {file}"
+        example: "stat -c '%U %G' /etc/passwd"
+      - intent: "show file size in bytes"
+        pattern: "stat -c '%s %n' {file}"
+        example: "stat -c '%s %n' /var/log/syslog"
+      - intent: "show filesystem information for a path"
+        pattern: "stat -f {file}"
+        example: "stat -f /home"
+      - intent: "show terse (machine-readable) output"
+        pattern: "stat -t {file}"
+        example: "stat -t /proc/1"
+    key_flags:
+      - flag: "-c, --format=FORMAT"
+        meaning: "Use specified FORMAT string instead of default output"
+      - flag: "-f, --file-system"
+        meaning: "Show filesystem status instead of file status"
+      - flag: "-L, --dereference"
+        meaning: "Follow symlinks (report on the target, not the link)"
+      - flag: "-t, --terse"
+        meaning: "Print information in compact terse form"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "stat query": "no-op — stat is read-only"
+    distro_notes:
+      macOS: "macOS stat uses different format strings: use 'stat -f' for format specifiers"
+    related_commands:
+      - ls
+      - file
+      - chmod
+      - chown
+
+  - name: file
+    description: "Identify the type of a file by inspecting its contents"
+    common_intents:
+      - intent: "identify what type of file something is"
+        pattern: "file {file}"
+        example: "file unknown_binary"
+      - intent: "identify file type of multiple files"
+        pattern: "file {file1} {file2}"
+        example: "file *.dat"
+      - intent: "show MIME type of a file"
+        pattern: "file -i {file}"
+        example: "file -i image.jpg"
+      - intent: "identify contents inside a compressed archive"
+        pattern: "file -z {archive}"
+        example: "file -z backup.tar.gz"
+      - intent: "suppress filename in output (bare result only)"
+        pattern: "file -b {file}"
+        example: "file -b script"
+    key_flags:
+      - flag: "-i, --mime"
+        meaning: "Output MIME type string instead of human-readable description"
+      - flag: "-b, --brief"
+        meaning: "Do not prepend filename to output"
+      - flag: "-z, --uncompress"
+        meaning: "Look inside compressed files to determine type of contents"
+      - flag: "-s, --special-files"
+        meaning: "Read block and character special files (useful for devices)"
+      - flag: "-k, --keep-going"
+        meaning: "Do not stop at first match; report all matching types"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "file query": "no-op — file is read-only"
+    related_commands:
+      - stat
+      - ls
+      - xxd
+
+  - name: tree
+    description: "Display directory structure as a visual tree"
+    common_intents:
+      - intent: "show directory tree"
+        pattern: "tree {directory}"
+        example: "tree /etc/nginx"
+      - intent: "show tree limited to N levels deep"
+        pattern: "tree -L {n} {directory}"
+        example: "tree -L 2 ~/projects"
+      - intent: "show only directories in tree"
+        pattern: "tree -d {directory}"
+        example: "tree -d /usr/local"
+      - intent: "show tree including hidden files"
+        pattern: "tree -a {directory}"
+        example: "tree -a ~"
+      - intent: "show tree with file sizes"
+        pattern: "tree -sh {directory}"
+        example: "tree -sh /var/log"
+      - intent: "show tree matching a file pattern"
+        pattern: "tree -P '{pattern}' {directory}"
+        example: "tree -P '*.yaml' /etc"
+      - intent: "show tree excluding certain directories"
+        pattern: "tree -I '{pattern}' {directory}"
+        example: "tree -I 'node_modules|.git' ~/projects/myapp"
+      - intent: "show full paths without indentation lines"
+        pattern: "tree -if {directory}"
+        example: "tree -if /etc/apt"
+    key_flags:
+      - flag: "-L N"
+        meaning: "Limit display to N levels of directory depth"
+      - flag: "-d"
+        meaning: "List directories only"
+      - flag: "-a"
+        meaning: "Show all files including hidden (dot files)"
+      - flag: "-P '{pattern}'"
+        meaning: "List only files matching the wildcard pattern"
+      - flag: "-I '{pattern}'"
+        meaning: "Exclude files and directories matching pattern"
+      - flag: "-s"
+        meaning: "Print the size of each file"
+      - flag: "-h"
+        meaning: "Print human-readable sizes (requires -s)"
+      - flag: "--prune"
+        meaning: "Prune empty directories from output"
+      - flag: "-C"
+        meaning: "Enable colorized output"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "tree query": "no-op — tree is read-only"
+    distro_notes:
+      all: "tree may not be installed by default; install with 'apt install tree' or 'yum install tree'"
+    related_commands:
+      - ls
+      - find
+      - du
+
+  - name: mkdir
+    description: "Create one or more directories"
+    common_intents:
+      - intent: "create a directory"
+        pattern: "mkdir {directory}"
+        example: "mkdir /tmp/workspace"
+      - intent: "create a directory and all missing parent directories"
+        pattern: "mkdir -p {path/to/directory}"
+        example: "mkdir -p ~/projects/myapp/src/components"
+      - intent: "create multiple directories at once"
+        pattern: "mkdir {dir1} {dir2} {dir3}"
+        example: "mkdir logs tmp cache"
+      - intent: "create multiple nested directories with brace expansion"
+        pattern: "mkdir -p {base}/{branch1,branch2}"
+        example: "mkdir -p src/{models,views,controllers}"
+      - intent: "create a directory with specific permissions"
+        pattern: "mkdir -m {mode} {directory}"
+        example: "mkdir -m 750 /srv/private"
+      - intent: "create directories verbosely"
+        pattern: "mkdir -pv {path}"
+        example: "mkdir -pv /opt/myapp/{bin,lib,etc}"
+    key_flags:
+      - flag: "-p, --parents"
+        meaning: "Create parent directories as needed; no error if directory already exists"
+      - flag: "-m, --mode=MODE"
+        meaning: "Set directory permissions (as with chmod) on creation"
+      - flag: "-v, --verbose"
+        meaning: "Print a message for each created directory"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "created empty directory": "rmdir {directory}"
+      "created directory tree": "rm -r {base_directory}"
+    related_commands:
+      - rmdir
+      - chmod
+      - touch
+
+  - name: rmdir
+    description: "Remove empty directories"
+    common_intents:
+      - intent: "remove an empty directory"
+        pattern: "rmdir {directory}"
+        example: "rmdir /tmp/empty-workspace"
+      - intent: "remove multiple empty directories"
+        pattern: "rmdir {dir1} {dir2}"
+        example: "rmdir tmp cache logs"
+      - intent: "remove a directory and its empty parents"
+        pattern: "rmdir -p {path/to/directory}"
+        example: "rmdir -p build/tmp/artifacts"
+      - intent: "remove all empty subdirectories in current directory"
+        pattern: "rmdir *"
+        example: "rmdir *"
+    key_flags:
+      - flag: "-p, --parents"
+        meaning: "Remove directory and its empty ancestors (like rm -p a/b removes b then a)"
+      - flag: "-v, --verbose"
+        meaning: "Output a diagnostic for every directory processed"
+      - flag: "--ignore-fail-on-non-empty"
+        meaning: "Ignore failures caused by non-empty directories"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "removed directory": "mkdir {directory}"
+    distro_notes:
+      all: "rmdir only removes empty directories. Use 'rm -r' for non-empty directories."
+    related_commands:
+      - mkdir
+      - rm
+      - find
+
+  - name: touch
+    description: "Create empty files or update access/modification timestamps of existing files"
+    common_intents:
+      - intent: "create a new empty file"
+        pattern: "touch {file}"
+        example: "touch README.md"
+      - intent: "create multiple empty files"
+        pattern: "touch {file1} {file2}"
+        example: "touch index.html style.css app.js"
+      - intent: "create a range of numbered files"
+        pattern: "touch {prefix}{1..n}"
+        example: "touch log{1..10}.txt"
+      - intent: "update a file's timestamp to now without creating it"
+        pattern: "touch -c {file}"
+        example: "touch -c build_marker"
+      - intent: "set a file's timestamp to a specific date and time"
+        pattern: "touch -d '{datetime}' {file}"
+        example: "touch -d '2024-01-01 08:00' archive.tar"
+      - intent: "set a file's timestamp to match another file"
+        pattern: "touch -r {reference_file} {target_file}"
+        example: "touch -r original.txt copy.txt"
+      - intent: "update only the modification time"
+        pattern: "touch -m {file}"
+        example: "touch -m Makefile"
+      - intent: "update only the access time"
+        pattern: "touch -a {file}"
+        example: "touch -a accessed.log"
+    key_flags:
+      - flag: "-c, --no-create"
+        meaning: "Do not create file if it does not exist; only update timestamps"
+      - flag: "-d, --date=STRING"
+        meaning: "Parse STRING as a date/time and use it instead of the current time"
+      - flag: "-r, --reference=FILE"
+        meaning: "Use the timestamps of FILE instead of the current time"
+      - flag: "-t STAMP"
+        meaning: "Use [[CC]YY]MMDDhhmm[.ss] format timestamp"
+      - flag: "-m"
+        meaning: "Change only the modification time"
+      - flag: "-a"
+        meaning: "Change only the access time"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "created empty file": "rm {file}"
+      "changed timestamp": "touch -r {backup_reference} {file} — original timestamp must be recorded beforehand"
+    related_commands:
+      - mkdir
+      - stat
+      - date
+
+  - name: rename
+    description: "Batch rename files using regex or string substitution (Perl rename / util-linux rename)"
+    common_intents:
+      - intent: "replace text in filenames"
+        pattern: "rename 's/{from}/{to}/' {files}"
+        example: "rename 's/draft_/final_/' *.txt"
+      - intent: "change file extensions"
+        pattern: "rename 's/\\.{old_ext}$/.{new_ext}/' {files}"
+        example: "rename 's/\\.jpeg$/.jpg/' *.jpeg"
+      - intent: "lowercase all filenames"
+        pattern: "rename 'y/A-Z/a-z/' {files}"
+        example: "rename 'y/A-Z/a-z/' *"
+      - intent: "replace spaces with underscores in filenames"
+        pattern: "rename 's/\\s+/_/g' {files}"
+        example: "rename 's/\\s+/_/g' *.mp3"
+      - intent: "dry-run to preview renames without making changes"
+        pattern: "rename -n 's/{from}/{to}/' {files}"
+        example: "rename -n 's/old/new/' *.conf"
+      - intent: "rename all occurrences in filename (not just first)"
+        pattern: "rename -a 's/{from}/{to}/' {files}"
+        example: "rename -a 's/-/_/g' *.txt"
+    key_flags:
+      - flag: "-n, --no-act"
+        meaning: "Dry-run: show what would be renamed without making changes"
+      - flag: "-v, --verbose"
+        meaning: "Show which files were renamed"
+      - flag: "-o, --no-overwrite"
+        meaning: "Do not overwrite existing files"
+      - flag: "-i, --interactive"
+        meaning: "Ask before overwriting existing files"
+      - flag: "-a, --all"
+        meaning: "Replace all occurrences of the pattern, not just the first"
+      - flag: "-s, --symlink"
+        meaning: "Rename the symlink target, not the symlink itself"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "rename without -n on large file sets (always dry-run first)"
+        - "rename without -o or -i (may silently overwrite files)"
+      blocked_patterns: []
+    undo:
+      "renamed files": "rename 's/{to}/{from}/' {files} — run reverse substitution; or restore from backup"
+    distro_notes:
+      Ubuntu/Debian: "Two versions exist: Perl rename (file-rename package, 's/from/to/' syntax) and util-linux rename (rename from to files syntax). This entry covers the Perl version (more common)."
+      all: "Always use -n (dry-run) before executing bulk renames to verify results."
+    related_commands:
+      - mv
+      - find
+      - sed

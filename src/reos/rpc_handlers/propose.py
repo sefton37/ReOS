@@ -10,25 +10,14 @@ them in subsequent user_action telemetry events.
 from __future__ import annotations
 
 import logging
-import re
 import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Soft-risky patterns: commands that pass safety validation but warrant a visual
-# warning badge in the frontend.  Compiled once at import time.
-_SOFT_RISKY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\bsudo\b", re.IGNORECASE), "Requires elevated privileges"),
-    (re.compile(r"\brm\b.*-[rRf]", re.IGNORECASE), "Recursive or forced delete"),
-    (re.compile(r"\bdd\b", re.IGNORECASE), "Low-level disk operation"),
-    (re.compile(r"\bchmod\b.*777", re.IGNORECASE), "Makes files world-writable"),
-    (re.compile(r"\bcurl\b.*\|\s*(?:bash|sh)\b", re.IGNORECASE), "Pipes remote content to shell"),
-    (re.compile(r"\bwget\b.*\|\s*(?:bash|sh)\b", re.IGNORECASE), "Pipes remote content to shell"),
-    (re.compile(r"\bsystemctl\b\s+(?:stop|disable|mask)\b", re.IGNORECASE),
-     "Modifies service state"),
-    (re.compile(r"\bapt(?:-get)?\b.*(?:remove|purge)", re.IGNORECASE), "Removes packages"),
-]
+# Soft-risky patterns live in shell_propose so converse.py can import the same list.
+# Keep a module-level alias for any code that still references _SOFT_RISKY_PATTERNS here.
+from reos.shell_propose import SOFT_RISKY_PATTERNS as _SOFT_RISKY_PATTERNS  # noqa: E402
 
 
 def handle_reos_propose(db: Any = None, *, natural_language: str) -> dict[str, Any]:

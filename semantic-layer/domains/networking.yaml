@@ -1,0 +1,1183 @@
+domain: networking
+description: "Network configuration, diagnostics, traffic analysis, and firewall management"
+related_domains:
+  - ssh-remote
+  - permissions-security
+  - system-info
+
+commands:
+
+  - name: ip
+    description: "Show and manipulate routing, network devices, interfaces, and tunnels (modern replacement for ifconfig/route)"
+    common_intents:
+      - intent: "list all network interfaces with IP addresses"
+        pattern: "ip addr"
+        example: "ip addr"
+        followup: "ip -br addr"
+      - intent: "show network interfaces briefly"
+        pattern: "ip -br addr"
+        example: "ip -br addr"
+      - intent: "show interface link layer info"
+        pattern: "ip -br link"
+        example: "ip -br link"
+      - intent: "show routing table"
+        pattern: "ip route"
+        example: "ip route"
+      - intent: "show IPv6 routing table"
+        pattern: "ip -6 route"
+        example: "ip -6 route"
+      - intent: "add an IP address to an interface"
+        pattern: "sudo ip addr add {ip_address}/{prefix_len} dev {interface}"
+        example: "sudo ip addr add 192.168.1.100/24 dev eth0"
+        followup: "ip addr show eth0"
+      - intent: "remove an IP address from an interface"
+        pattern: "sudo ip addr del {ip_address}/{prefix_len} dev {interface}"
+        example: "sudo ip addr del 192.168.1.100/24 dev eth0"
+      - intent: "bring a network interface up"
+        pattern: "sudo ip link set {interface} up"
+        example: "sudo ip link set eth0 up"
+        followup: "ip link show eth0"
+      - intent: "bring a network interface down"
+        pattern: "sudo ip link set {interface} down"
+        example: "sudo ip link set eth0 down"
+      - intent: "add a default gateway route"
+        pattern: "sudo ip route add default via {gateway_ip}"
+        example: "sudo ip route add default via 192.168.1.1"
+      - intent: "add a static route"
+        pattern: "sudo ip route add {destination_cidr} via {gateway_ip} dev {interface}"
+        example: "sudo ip route add 10.0.0.0/8 via 192.168.1.1 dev eth0"
+      - intent: "delete a route"
+        pattern: "sudo ip route del {destination_cidr} dev {interface}"
+        example: "sudo ip route del 10.0.0.0/8 dev eth0"
+      - intent: "show which route will be used to reach an IP"
+        pattern: "ip route get {destination_ip}"
+        example: "ip route get 8.8.8.8"
+      - intent: "show ARP neighbor table"
+        pattern: "ip neighbour show"
+        example: "ip neighbour show"
+      - intent: "change MAC address of an interface"
+        pattern: "sudo ip link set {interface} address {mac_address}"
+        example: "sudo ip link set eth0 address aa:bb:cc:dd:ee:ff"
+      - intent: "flush all IP addresses from an interface"
+        pattern: "sudo ip addr flush dev {interface}"
+        example: "sudo ip addr flush dev eth0"
+    key_flags:
+      - flag: "-br, -brief"
+        meaning: "Show output in brief one-line format, easier to read"
+      - flag: "-4"
+        meaning: "Restrict output to IPv4"
+      - flag: "-6"
+        meaning: "Restrict output to IPv6"
+      - flag: "-s, -statistics"
+        meaning: "Show additional statistics (use twice for more detail)"
+      - flag: "-j, -json"
+        meaning: "Output in JSON format"
+      - flag: "-h, -human-readable"
+        meaning: "Print statistics with human-readable suffixes"
+      - flag: "-n, -netns {name}"
+        meaning: "Operate within the named network namespace"
+      - flag: "-o, -oneline"
+        meaning: "Output each record on a single line"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "ip link set {interface} down"
+        - "ip addr flush dev {interface}"
+        - "ip route del default"
+        - "ip route flush"
+      blocked_patterns:
+        - "ip route flush table main"
+        - "ip addr flush dev lo"
+    undo:
+      "ip addr add {ip}/{mask} dev {iface}": "sudo ip addr del {ip}/{mask} dev {iface}"
+      "ip link set {iface} down": "sudo ip link set {iface} up"
+      "ip link set {iface} up": "sudo ip link set {iface} down"
+      "ip route add {dst} via {gw}": "sudo ip route del {dst} via {gw}"
+      "ip link set {iface} address {new_mac}": "sudo ip link set {iface} address {original_mac}"
+    related_commands:
+      - ifconfig
+      - route
+      - ss
+      - nmcli
+      - ethtool
+
+  - name: ss
+    description: "Investigate sockets — fast replacement for netstat"
+    common_intents:
+      - intent: "show all listening TCP sockets with process names"
+        pattern: "ss -tlp"
+        example: "ss -tlp"
+      - intent: "show all listening ports (TCP and UDP)"
+        pattern: "ss -tulpn"
+        example: "ss -tulpn"
+      - intent: "show all TCP connections"
+        pattern: "ss -t"
+        example: "ss -t"
+      - intent: "show all sockets (listening and established)"
+        pattern: "ss -a"
+        example: "ss -a"
+      - intent: "show what process is listening on a specific port"
+        pattern: "ss -tlpn src :{port}"
+        example: "ss -tlpn src :8080"
+      - intent: "show connections to a remote host and port"
+        pattern: "ss -t dst {host}:{port}"
+        example: "ss -t dst 192.168.2.1:80"
+      - intent: "show established SSH connections"
+        pattern: "ss -t state established '( dport = :ssh or sport = :ssh )'"
+        example: "ss -t state established '( dport = :ssh or sport = :ssh )'"
+      - intent: "show all UDP sockets"
+        pattern: "ss -u"
+        example: "ss -u"
+      - intent: "show all UNIX domain sockets"
+        pattern: "ss -x"
+        example: "ss -x"
+      - intent: "show socket statistics by state"
+        pattern: "ss -s"
+        example: "ss -s"
+    key_flags:
+      - flag: "-t, --tcp"
+        meaning: "Show TCP sockets"
+      - flag: "-u, --udp"
+        meaning: "Show UDP sockets"
+      - flag: "-l, --listening"
+        meaning: "Show only listening sockets"
+      - flag: "-p, --processes"
+        meaning: "Show process name and PID using each socket"
+      - flag: "-n, --numeric"
+        meaning: "Do not resolve service names or hostnames"
+      - flag: "-a, --all"
+        meaning: "Show both listening and non-listening sockets"
+      - flag: "-4 / -6"
+        meaning: "Restrict to IPv4 or IPv6 sockets"
+      - flag: "-s, --summary"
+        meaning: "Print summary statistics"
+      - flag: "-e, --extended"
+        meaning: "Show detailed socket information including UID and inode"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - netstat
+      - lsof
+      - ip
+
+  - name: curl
+    description: "Transfer data from or to a server using URLs (HTTP, HTTPS, FTP, and many more protocols)"
+    common_intents:
+      - intent: "fetch a webpage or URL"
+        pattern: "curl {url}"
+        example: "curl https://example.com"
+      - intent: "download a file saving it with its original filename"
+        pattern: "curl -O {url}"
+        example: "curl -O https://example.com/file.tar.gz"
+      - intent: "download a file and save it with a custom name"
+        pattern: "curl -o {output_file} {url}"
+        example: "curl -o myfile.html https://example.com"
+      - intent: "follow redirects when fetching a URL"
+        pattern: "curl -L {url}"
+        example: "curl -L https://example.com/redirect"
+      - intent: "show response headers and body"
+        pattern: "curl -L -D - {url}"
+        example: "curl -L -D - https://example.com"
+      - intent: "make a POST request with form data"
+        pattern: "curl -X POST -d '{data}' {url}"
+        example: "curl -X POST -d 'name=bob&age=30' http://example.com/form"
+      - intent: "send JSON data in a POST request"
+        pattern: "curl -d '{json}' -H 'Content-Type: application/json' {url}"
+        example: "curl -d '{\"name\":\"bob\"}' -H 'Content-Type: application/json' http://example.com/api"
+      - intent: "fetch only the HTTP response headers"
+        pattern: "curl -I {url}"
+        example: "curl -I https://example.com"
+      - intent: "get HTTP status code only"
+        pattern: "curl -o /dev/null -w '%{http_code}' -s {url}"
+        example: "curl -o /dev/null -w '%{http_code}' -s https://example.com"
+      - intent: "send a request with a custom header"
+        pattern: "curl -H '{Header: value}' {url}"
+        example: "curl -H 'Authorization: Bearer mytoken' https://api.example.com"
+      - intent: "resume a partial download"
+        pattern: "curl -C - -o {partial_file} {url}"
+        example: "curl -C - -o file.zip https://example.com/file.zip"
+      - intent: "download with authentication"
+        pattern: "curl -u {username}:{password} {url}"
+        example: "curl -u admin:secret https://example.com/protected"
+      - intent: "download through a proxy"
+        pattern: "curl -x {proxy_host}:{port} {url}"
+        example: "curl -x http://proxy.example.com:8080 https://target.com"
+      - intent: "check my external/public IP address"
+        pattern: "curl https://ifconfig.me"
+        example: "curl https://ifconfig.me"
+    key_flags:
+      - flag: "-O, --remote-name"
+        meaning: "Save output using the filename from the URL"
+      - flag: "-o, --output {file}"
+        meaning: "Write output to a file instead of stdout"
+      - flag: "-L, --location"
+        meaning: "Follow HTTP redirects"
+      - flag: "-I, --head"
+        meaning: "Fetch only the response headers"
+      - flag: "-d, --data {data}"
+        meaning: "Send data in a POST request body"
+      - flag: "-H, --header {header}"
+        meaning: "Add a custom request header"
+      - flag: "-X, --request {method}"
+        meaning: "Specify the HTTP method (GET, POST, PUT, DELETE, etc.)"
+      - flag: "-u, --user {user:pass}"
+        meaning: "HTTP basic authentication credentials"
+      - flag: "-k, --insecure"
+        meaning: "Skip TLS certificate verification (use with caution)"
+      - flag: "-s, --silent"
+        meaning: "Silent mode — suppress progress meter and error messages"
+      - flag: "-v, --verbose"
+        meaning: "Show full request and response including headers"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "curl ... | bash"
+        - "curl ... | sh"
+      blocked_patterns:
+        - "curl {url} | bash"
+        - "curl {url} | sh"
+    undo: {}
+    distro_notes:
+      general: "curl is available on all major Linux distributions; version varies"
+    related_commands:
+      - wget
+      - nc
+      - dig
+
+  - name: wget
+    description: "Download files from the web (HTTP, HTTPS, FTP); supports recursive and resumable downloads"
+    common_intents:
+      - intent: "download a file"
+        pattern: "wget {url}"
+        example: "wget https://example.com/file.tar.gz"
+      - intent: "download a file and save with a custom name"
+        pattern: "wget -O {output_file} {url}"
+        example: "wget -O myfile.html https://example.com"
+      - intent: "download a file to a specific directory"
+        pattern: "wget -P {directory} {url}"
+        example: "wget -P /tmp/downloads https://example.com/file.zip"
+      - intent: "resume an interrupted download"
+        pattern: "wget -c {url}"
+        example: "wget -c https://example.com/largefile.iso"
+      - intent: "mirror a website locally"
+        pattern: "wget -mk {url}"
+        example: "wget -mk https://example.com"
+      - intent: "download all URLs from a text file"
+        pattern: "wget -i {url_list_file}"
+        example: "wget -i url_list.txt"
+      - intent: "limit download speed"
+        pattern: "wget --limit-rate={speed} {url}"
+        example: "wget --limit-rate=500k https://example.com/file.iso"
+      - intent: "download with authentication"
+        pattern: "wget --user {username} --password {password} {url}"
+        example: "wget --user admin --password secret https://example.com/protected"
+      - intent: "download recursively within a directory"
+        pattern: "wget -r -l1 -A.{ext} {url}"
+        example: "wget -r -l1 -A.pdf https://example.com/docs/"
+    key_flags:
+      - flag: "-O, --output-document {file}"
+        meaning: "Write documents to FILE instead of the URL-derived filename"
+      - flag: "-P, --directory-prefix {dir}"
+        meaning: "Save files to the specified directory"
+      - flag: "-c, --continue"
+        meaning: "Resume a partially downloaded file"
+      - flag: "-r, --recursive"
+        meaning: "Download files recursively"
+      - flag: "-m, --mirror"
+        meaning: "Mirror a site (implies -r, -N, -l inf, --no-remove-listing)"
+      - flag: "-i, --input-file {file}"
+        meaning: "Download URLs listed in a file"
+      - flag: "--limit-rate={rate}"
+        meaning: "Limit download bandwidth (e.g. 100k, 2m)"
+      - flag: "-q, --quiet"
+        meaning: "Suppress output"
+      - flag: "-t, --tries {n}"
+        meaning: "Set number of retries (0 = infinite)"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - curl
+
+  - name: ping
+    description: "Send ICMP ECHO_REQUEST packets to test network host reachability"
+    common_intents:
+      - intent: "check if a host is reachable"
+        pattern: "ping {host}"
+        example: "ping google.com"
+      - intent: "ping a host a specific number of times"
+        pattern: "ping -c {count} {host}"
+        example: "ping -c 4 google.com"
+      - intent: "ping with a faster interval"
+        pattern: "ping -c {count} -i {seconds} {host}"
+        example: "ping -c 10 -i 0.5 192.168.1.1"
+      - intent: "test MTU / check if large packets are supported"
+        pattern: "ping -s {size} -c {count} -M do {host}"
+        example: "ping -s 1500 -c 3 -M do 192.168.1.1"
+      - intent: "ping without DNS resolution"
+        pattern: "ping -n {host}"
+        example: "ping -n 8.8.8.8"
+      - intent: "ping with a total time limit"
+        pattern: "ping -w {seconds} {host}"
+        example: "ping -w 10 google.com"
+    key_flags:
+      - flag: "-c {count}"
+        meaning: "Stop after sending count ECHO_REQUEST packets"
+      - flag: "-i {interval}"
+        meaning: "Wait interval seconds between packets (default 1)"
+      - flag: "-n"
+        meaning: "Numeric output only — do not resolve hostnames"
+      - flag: "-s {size}"
+        meaning: "Specify the number of data bytes in the packet"
+      - flag: "-w {deadline}"
+        meaning: "Exit after deadline seconds regardless of packets sent/received"
+      - flag: "-W {timeout}"
+        meaning: "Time to wait for a response per packet in seconds"
+      - flag: "-M do"
+        meaning: "Set the DF (Don't Fragment) bit — used for MTU path testing"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - traceroute
+      - dig
+      - mtr
+
+  - name: dig
+    description: "DNS lookup utility — query DNS servers for resource records"
+    common_intents:
+      - intent: "look up the IP address of a domain"
+        pattern: "dig +short {domain}"
+        example: "dig +short example.com"
+      - intent: "get detailed DNS answer for a domain"
+        pattern: "dig +noall +answer {domain}"
+        example: "dig +noall +answer example.com"
+      - intent: "look up a specific DNS record type"
+        pattern: "dig {domain} {type}"
+        example: "dig example.com MX"
+      - intent: "query a specific DNS server"
+        pattern: "dig @{dns_server} {domain}"
+        example: "dig @8.8.8.8 example.com"
+      - intent: "perform a reverse DNS lookup"
+        pattern: "dig -x {ip_address}"
+        example: "dig -x 8.8.8.8"
+      - intent: "trace the full DNS resolution path"
+        pattern: "dig +trace {domain}"
+        example: "dig +trace example.com"
+      - intent: "find authoritative name servers for a domain"
+        pattern: "dig +nssearch {domain}"
+        example: "dig +nssearch example.com"
+      - intent: "query using DNS over TLS"
+        pattern: "dig +tls @{dns_server} {domain}"
+        example: "dig +tls @1.1.1.1 example.com"
+      - intent: "query a DNS server on a non-standard port"
+        pattern: "dig +tcp -p {port} @{dns_server} {domain}"
+        example: "dig +tcp -p 5353 @127.0.0.1 example.com"
+    key_flags:
+      - flag: "+short"
+        meaning: "Display only the answer section in terse format"
+      - flag: "+noall +answer"
+        meaning: "Suppress all sections except the answer"
+      - flag: "+trace"
+        meaning: "Perform iterative queries from root — shows full resolution path"
+      - flag: "-x {ip}"
+        meaning: "Perform a reverse lookup (PTR record) for an IP address"
+      - flag: "@{server}"
+        meaning: "Send query to the specified DNS server instead of the system default"
+      - flag: "+tcp"
+        meaning: "Use TCP instead of UDP for the query"
+      - flag: "+tls"
+        meaning: "Use DNS over TLS (DoT)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - nslookup
+      - host
+      - resolvectl
+
+  - name: nslookup
+    description: "Query DNS name servers for domain records (simpler interface than dig)"
+    common_intents:
+      - intent: "look up the IP address of a domain"
+        pattern: "nslookup {domain}"
+        example: "nslookup example.com"
+      - intent: "query a specific DNS server"
+        pattern: "nslookup {domain} {dns_server}"
+        example: "nslookup example.com 8.8.8.8"
+      - intent: "look up a specific record type"
+        pattern: "nslookup -type={type} {domain}"
+        example: "nslookup -type=MX example.com"
+      - intent: "perform a reverse DNS lookup"
+        pattern: "nslookup -type=PTR {ip_address}"
+        example: "nslookup -type=PTR 8.8.8.8"
+      - intent: "query for all available records"
+        pattern: "nslookup -type=ANY {domain}"
+        example: "nslookup -type=ANY example.com"
+      - intent: "query name servers (NS records)"
+        pattern: "nslookup -type=NS {domain}"
+        example: "nslookup -type=NS example.com"
+    key_flags:
+      - flag: "-type={type}"
+        meaning: "Specify record type: A, AAAA, MX, NS, TXT, CNAME, PTR, SOA, ANY"
+      - flag: "-port={port}"
+        meaning: "Use a non-standard port for the query"
+      - flag: "-debug"
+        meaning: "Show full details of the DNS transaction"
+      - flag: "-vc"
+        meaning: "Use a virtual circuit (TCP) instead of UDP"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - dig
+      - host
+      - resolvectl
+
+  - name: traceroute
+    description: "Print the route packets take to a network host, showing each hop"
+    common_intents:
+      - intent: "trace the route to a host"
+        pattern: "traceroute {host}"
+        example: "traceroute google.com"
+      - intent: "trace route without DNS resolution"
+        pattern: "traceroute -n {host}"
+        example: "traceroute -n 8.8.8.8"
+      - intent: "trace route using ICMP instead of UDP"
+        pattern: "traceroute -I {host}"
+        example: "traceroute -I google.com"
+      - intent: "set timeout per hop"
+        pattern: "traceroute -w {seconds} {host}"
+        example: "traceroute -w 2 example.com"
+      - intent: "send more queries per hop for reliability"
+        pattern: "traceroute -q {count} {host}"
+        example: "traceroute -q 5 example.com"
+      - intent: "determine MTU to destination"
+        pattern: "traceroute --mtu {host}"
+        example: "traceroute --mtu example.com"
+    key_flags:
+      - flag: "-n"
+        meaning: "Do not resolve IP addresses to hostnames"
+      - flag: "-I, --icmp"
+        meaning: "Use ICMP ECHO instead of UDP datagrams"
+      - flag: "-T, --tcp"
+        meaning: "Use TCP SYN for probes (bypasses some firewalls)"
+      - flag: "-w, --wait {seconds}"
+        meaning: "Wait time for a response per probe"
+      - flag: "-q, --queries {n}"
+        meaning: "Number of probe packets per hop (default 3)"
+      - flag: "--mtu"
+        meaning: "Discover the MTU along the path"
+      - flag: "-m {max_hops}"
+        meaning: "Set maximum number of hops (default 30)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - ping
+      - mtr
+      - dig
+
+  - name: nmap
+    description: "Network exploration tool and port/security scanner"
+    common_intents:
+      - intent: "scan the top 1000 ports on a host"
+        pattern: "nmap {host}"
+        example: "nmap 192.168.1.1"
+      - intent: "scan specific ports"
+        pattern: "nmap -p {ports} {host}"
+        example: "nmap -p 22,80,443 192.168.1.0/24"
+      - intent: "scan all 65535 ports"
+        pattern: "nmap -p- {host}"
+        example: "nmap -p- 192.168.1.1"
+      - intent: "detect OS and service versions"
+        pattern: "sudo nmap -A {host}"
+        example: "sudo nmap -A 192.168.1.1"
+      - intent: "ping sweep — discover live hosts on a subnet"
+        pattern: "nmap -sn {subnet}"
+        example: "nmap -sn 192.168.1.0/24"
+      - intent: "fast scan of a subnet"
+        pattern: "nmap -T5 -sn {subnet}"
+        example: "nmap -T5 -sn 10.0.0.0/24"
+      - intent: "detect service and version info"
+        pattern: "nmap -sV {host}"
+        example: "nmap -sV 192.168.1.1"
+      - intent: "run default safe NSE scripts with version detection"
+        pattern: "nmap -sC -sV {host}"
+        example: "nmap -sC -sV 192.168.1.1"
+      - intent: "scan hosts from a file"
+        pattern: "sudo nmap -A -iL {file}"
+        example: "sudo nmap -A -iL targets.txt"
+      - intent: "save scan output to a file"
+        pattern: "nmap -oN {output_file} {host}"
+        example: "nmap -oN scan_results.txt 192.168.1.1"
+    key_flags:
+      - flag: "-sn"
+        meaning: "Ping scan only — host discovery without port scanning"
+      - flag: "-sS"
+        meaning: "SYN (stealth) scan — requires root; faster and less detectable"
+      - flag: "-sV"
+        meaning: "Probe open ports to determine service/version info"
+      - flag: "-sU"
+        meaning: "UDP scan"
+      - flag: "-O"
+        meaning: "Enable OS detection"
+      - flag: "-A"
+        meaning: "Aggressive scan: OS detection + version + scripts + traceroute"
+      - flag: "-p {ports}"
+        meaning: "Specify ports to scan; -p- scans all 65535 ports"
+      - flag: "-T{0-5}"
+        meaning: "Set timing template (0=paranoid, 3=default, 5=insane)"
+      - flag: "--script {category|name}"
+        meaning: "Run NSE scripts: default, safe, vuln, http-*, etc."
+      - flag: "-oN / -oX / -oA"
+        meaning: "Save output in normal / XML / all formats"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "nmap --script exploit {host}"
+        - "nmap --script brute {host}"
+        - "nmap -T5 {large_network}"
+      blocked_patterns:
+        - "nmap --script exploit"
+        - "nmap --script dos"
+        - "nmap --script brute"
+    undo: {}
+    distro_notes:
+      general: "SYN scan (-sS) and OS detection (-O) require root/sudo"
+    related_commands:
+      - ping
+      - traceroute
+      - ss
+      - nc
+
+  - name: iptables
+    description: "Configure IPv4 firewall rules in the Linux kernel (filter, nat, mangle tables)"
+    common_intents:
+      - intent: "list all firewall rules"
+        pattern: "sudo iptables -vnL --line-numbers"
+        example: "sudo iptables -vnL --line-numbers"
+      - intent: "allow incoming traffic on a port"
+        pattern: "sudo iptables -A INPUT -p {tcp|udp} --dport {port} -j ACCEPT"
+        example: "sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT"
+      - intent: "block incoming traffic from an IP"
+        pattern: "sudo iptables -A INPUT -s {ip_address} -j DROP"
+        example: "sudo iptables -A INPUT -s 10.0.0.5 -j DROP"
+      - intent: "block outgoing traffic to an IP"
+        pattern: "sudo iptables -A OUTPUT -d {ip_address} -j DROP"
+        example: "sudo iptables -A OUTPUT -d 203.0.113.1 -j DROP"
+      - intent: "delete a rule by line number"
+        pattern: "sudo iptables -D {chain} {line_number}"
+        example: "sudo iptables -D INPUT 3"
+      - intent: "set default chain policy"
+        pattern: "sudo iptables -P {chain} {ACCEPT|DROP}"
+        example: "sudo iptables -P INPUT DROP"
+      - intent: "save current rules to a file"
+        pattern: "sudo iptables-save > {file}"
+        example: "sudo iptables-save > /etc/iptables/rules.v4"
+      - intent: "restore rules from a file"
+        pattern: "sudo iptables-restore < {file}"
+        example: "sudo iptables-restore < /etc/iptables/rules.v4"
+      - intent: "add NAT masquerade for a subnet"
+        pattern: "sudo iptables -t nat -A POSTROUTING -s {subnet} -j MASQUERADE"
+        example: "sudo iptables -t nat -A POSTROUTING -s 192.168.0.0/24 -j MASQUERADE"
+      - intent: "flush all rules (DANGER)"
+        pattern: "sudo iptables-save > /tmp/iptables.bak && sudo iptables -F"
+        example: "sudo iptables-save > /tmp/iptables.bak && sudo iptables -F"
+    key_flags:
+      - flag: "-A {chain}"
+        meaning: "Append a rule to the end of a chain"
+      - flag: "-I {chain} [rulenum]"
+        meaning: "Insert a rule at the beginning (or at rulenum)"
+      - flag: "-D {chain} {rulenum|rule}"
+        meaning: "Delete a rule by line number or specification"
+      - flag: "-L, --list"
+        meaning: "List all rules in a chain"
+      - flag: "-F, --flush"
+        meaning: "Flush (delete) all rules in a chain"
+      - flag: "-P {chain} {target}"
+        meaning: "Set the default policy for a built-in chain"
+      - flag: "-t {table}"
+        meaning: "Specify table: filter (default), nat, mangle, raw"
+      - flag: "-j {target}"
+        meaning: "Jump to target: ACCEPT, DROP, REJECT, MASQUERADE, etc."
+      - flag: "-s {source}"
+        meaning: "Source IP address or network"
+      - flag: "-p {protocol}"
+        meaning: "Protocol: tcp, udp, icmp, all"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "iptables -F"
+        - "iptables -P INPUT DROP"
+        - "iptables -P FORWARD DROP"
+        - "iptables -P OUTPUT DROP"
+      blocked_patterns:
+        - "iptables -F"
+        - "iptables --flush"
+        - "iptables -P INPUT DROP"
+    undo:
+      "iptables -A {chain} {rule}": "sudo iptables -D {chain} {rule}"
+      "iptables -P INPUT DROP": "sudo iptables -P INPUT ACCEPT"
+      "iptables flush": "sudo iptables-restore < /path/to/saved/rules"
+    distro_notes:
+      debian_ubuntu: "Use iptables-persistent or netfilter-persistent to save rules across reboots"
+      rhel_fedora: "Use firewalld as the preferred front-end; iptables is available via iptables-legacy"
+      general: "nftables is the modern replacement; iptables may be iptables-nft on newer systems"
+    related_commands:
+      - nft
+      - ip6tables
+      - iptables-save
+      - iptables-restore
+
+  - name: nft
+    description: "Manage nftables firewall rules — the modern replacement for iptables/ip6tables"
+    common_intents:
+      - intent: "list the entire current ruleset"
+        pattern: "sudo nft list ruleset"
+        example: "sudo nft list ruleset"
+      - intent: "add a new table"
+        pattern: "sudo nft add table {family} {table_name}"
+        example: "sudo nft add table inet filter"
+      - intent: "add a chain to a table"
+        pattern: "sudo nft add chain {family} {table} {chain} '{ type {type} hook {hook} priority {priority} ; policy {accept|drop} ; }'"
+        example: "sudo nft add chain inet filter input '{ type filter hook input priority 0 ; policy accept ; }'"
+      - intent: "add a rule to allow TCP ports"
+        pattern: "sudo nft add rule {family} {table} {chain} tcp dport { {ports} } accept"
+        example: "sudo nft add rule inet filter input tcp dport { ssh, http, https } accept"
+      - intent: "delete a rule by handle number"
+        pattern: "sudo nft delete rule {family} {table} {chain} handle {handle}"
+        example: "sudo nft delete rule inet filter input handle 3"
+      - intent: "show rules with handle numbers"
+        pattern: "sudo nft --handle --numeric list chain {family} {table} {chain}"
+        example: "sudo nft --handle --numeric list chain inet filter input"
+      - intent: "save current ruleset to a file"
+        pattern: "sudo nft list ruleset > {file}"
+        example: "sudo nft list ruleset > /etc/nftables.conf"
+      - intent: "load rules from a file"
+        pattern: "sudo nft -f {file}"
+        example: "sudo nft -f /etc/nftables.conf"
+      - intent: "add NAT masquerade rule"
+        pattern: "sudo nft add rule nat postrouting ip saddr {subnet} masquerade"
+        example: "sudo nft add rule nat postrouting ip saddr 192.168.0.0/24 masquerade"
+    key_flags:
+      - flag: "list ruleset"
+        meaning: "Display the complete current ruleset"
+      - flag: "--handle, -a"
+        meaning: "Show rule handle numbers (needed for deletion)"
+      - flag: "--numeric, -n"
+        meaning: "Print numeric values instead of resolving names"
+      - flag: "-f {file}"
+        meaning: "Read and execute rules from a file"
+      - flag: "-c, --check"
+        meaning: "Check rule validity without applying changes"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "nft flush ruleset"
+        - "nft delete table"
+      blocked_patterns:
+        - "nft flush ruleset"
+        - "nft delete table inet filter"
+    undo:
+      "nft add rule {family} {table} {chain} {rule}": "sudo nft delete rule {family} {table} {chain} handle {handle}"
+      "nft add table {family} {table}": "sudo nft delete table {family} {table}"
+      "nft flush ruleset": "sudo nft -f /path/to/backup/ruleset.conf"
+    distro_notes:
+      debian_ubuntu: "nftables is the default firewall framework since Debian 10 / Ubuntu 20.04"
+      rhel_fedora: "nftables is used by default; firewalld uses nftables as its backend since RHEL 8"
+    related_commands:
+      - iptables
+      - ip6tables
+
+  - name: netstat
+    description: "Display network connections, routing tables, and interface statistics (deprecated — prefer ss)"
+    common_intents:
+      - intent: "list all listening TCP and UDP ports with processes"
+        pattern: "sudo netstat -tulpn"
+        example: "sudo netstat -tulpn"
+      - intent: "show all open connections"
+        pattern: "netstat -a"
+        example: "netstat -a"
+      - intent: "show listening ports"
+        pattern: "netstat -l"
+        example: "netstat -l"
+      - intent: "show routing table"
+        pattern: "netstat -rn"
+        example: "netstat -rn"
+      - intent: "find what process is using a specific port"
+        pattern: "sudo netstat -tlpn | grep {port}"
+        example: "sudo netstat -tlpn | grep 8080"
+      - intent: "show network statistics continuously"
+        pattern: "netstat -c"
+        example: "netstat -c"
+    key_flags:
+      - flag: "-t, --tcp"
+        meaning: "Show TCP connections"
+      - flag: "-u, --udp"
+        meaning: "Show UDP connections"
+      - flag: "-l, --listening"
+        meaning: "Show only listening sockets"
+      - flag: "-p, --program"
+        meaning: "Show PID and program name"
+      - flag: "-n, --numeric"
+        meaning: "Show numerical addresses instead of resolving hostnames"
+      - flag: "-r, --route"
+        meaning: "Display the routing table"
+      - flag: "-c, --continuous"
+        meaning: "Update display continuously"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    distro_notes:
+      general: "netstat is deprecated and part of net-tools; use ss for socket queries and ip route for routing. May not be installed by default on newer distributions."
+    related_commands:
+      - ss
+      - ip
+      - lsof
+
+  - name: ifconfig
+    description: "Configure and display network interface parameters (deprecated — prefer ip addr)"
+    common_intents:
+      - intent: "show all network interfaces"
+        pattern: "ifconfig -a"
+        example: "ifconfig -a"
+      - intent: "show a specific interface"
+        pattern: "ifconfig {interface}"
+        example: "ifconfig eth0"
+      - intent: "assign an IP address to an interface"
+        pattern: "sudo ifconfig {interface} {ip_address} netmask {netmask}"
+        example: "sudo ifconfig eth0 192.168.1.100 netmask 255.255.255.0"
+      - intent: "bring an interface up"
+        pattern: "sudo ifconfig {interface} up"
+        example: "sudo ifconfig eth0 up"
+      - intent: "bring an interface down"
+        pattern: "sudo ifconfig {interface} down"
+        example: "sudo ifconfig eth0 down"
+    key_flags:
+      - flag: "-a"
+        meaning: "Display all interfaces, including those that are down"
+      - flag: "up / down"
+        meaning: "Bring the interface up or down"
+      - flag: "netmask {mask}"
+        meaning: "Set the subnet mask"
+      - flag: "mtu {size}"
+        meaning: "Set the MTU size"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "ifconfig {interface} down"
+      blocked_patterns: []
+    undo:
+      "ifconfig {iface} down": "sudo ifconfig {iface} up"
+      "ifconfig {iface} {ip} netmask {mask}": "sudo ip addr flush dev {iface}"
+    distro_notes:
+      general: "ifconfig is deprecated and part of net-tools package. Modern Linux systems prefer 'ip addr' (iproute2). May not be installed by default on newer distributions."
+    related_commands:
+      - ip
+      - nmcli
+      - ethtool
+
+  - name: route
+    description: "Show and manipulate the IP routing table (deprecated — prefer ip route)"
+    common_intents:
+      - intent: "display the routing table with numeric addresses"
+        pattern: "route -n"
+        example: "route -n"
+      - intent: "add a default gateway"
+        pattern: "sudo route add default gw {gateway_ip}"
+        example: "sudo route add default gw 192.168.1.1"
+      - intent: "add a network route"
+        pattern: "sudo route add -net {network} netmask {mask} gw {gateway}"
+        example: "sudo route add -net 192.168.2.0 netmask 255.255.255.0 gw 192.168.1.1"
+      - intent: "delete the default route"
+        pattern: "sudo route del default"
+        example: "sudo route del default"
+      - intent: "add a route via a specific interface"
+        pattern: "sudo route add -net {network} netmask {mask} dev {interface}"
+        example: "sudo route add -net 10.0.0.0 netmask 255.0.0.0 dev eth0"
+    key_flags:
+      - flag: "-n"
+        meaning: "Show numerical addresses instead of resolving hostnames"
+      - flag: "add / del"
+        meaning: "Add or remove a route"
+      - flag: "-net {network}"
+        meaning: "Route target is a network"
+      - flag: "-host {host}"
+        meaning: "Route target is a single host"
+      - flag: "gw {gateway}"
+        meaning: "Route packets via a gateway"
+      - flag: "dev {interface}"
+        meaning: "Force the route to be associated with the specified interface"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "route del default"
+      blocked_patterns: []
+    undo:
+      "route add default gw {gw}": "sudo route del default gw {gw}"
+      "route add -net {net} netmask {mask} gw {gw}": "sudo route del -net {net} netmask {mask} gw {gw}"
+    distro_notes:
+      general: "route is deprecated (net-tools). Modern replacement is 'ip route'. May not be installed by default on newer distributions."
+    related_commands:
+      - ip
+      - netstat
+
+  - name: hostname
+    description: "Show or set the system's hostname"
+    common_intents:
+      - intent: "show the current hostname"
+        pattern: "hostname"
+        example: "hostname"
+      - intent: "show the IP address associated with the hostname"
+        pattern: "hostname -I"
+        example: "hostname -I"
+      - intent: "show the fully qualified domain name (FQDN)"
+        pattern: "hostname -f"
+        example: "hostname -f"
+      - intent: "set the hostname temporarily"
+        pattern: "sudo hostname {new_hostname}"
+        example: "sudo hostname myserver"
+      - intent: "set the hostname persistently"
+        pattern: "sudo hostnamectl set-hostname {new_hostname}"
+        example: "sudo hostnamectl set-hostname myserver"
+    key_flags:
+      - flag: "-I, --all-ip-addresses"
+        meaning: "Display all IP addresses of the host"
+      - flag: "-f, --fqdn"
+        meaning: "Display the fully qualified domain name"
+      - flag: "-s, --short"
+        meaning: "Display the short hostname (up to the first dot)"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "hostname {new_name}"
+      blocked_patterns: []
+    undo:
+      "hostname {new_name}": "sudo hostname {original_name}"
+      "hostnamectl set-hostname {new_name}": "sudo hostnamectl set-hostname {original_name}"
+    distro_notes:
+      general: "Setting hostname with 'hostname' command is temporary (lost on reboot). Use 'hostnamectl set-hostname' for persistent change on systemd-based systems."
+    related_commands:
+      - hostnamectl
+
+  - name: host
+    description: "Simple DNS lookup utility — query A, AAAA, MX, and other record types"
+    common_intents:
+      - intent: "look up the IP address of a domain"
+        pattern: "host {domain}"
+        example: "host example.com"
+      - intent: "perform a reverse DNS lookup"
+        pattern: "host {ip_address}"
+        example: "host 8.8.8.8"
+      - intent: "look up a specific DNS record type"
+        pattern: "host -t {type} {domain}"
+        example: "host -t MX example.com"
+      - intent: "query a specific DNS server"
+        pattern: "host {domain} {dns_server}"
+        example: "host example.com 8.8.8.8"
+    key_flags:
+      - flag: "-t {type}"
+        meaning: "Query a specific record type: A, AAAA, MX, NS, TXT, CNAME, SOA"
+      - flag: "-v"
+        meaning: "Verbose output"
+      - flag: "-a"
+        meaning: "Query for all record types (equivalent to -t ANY)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - dig
+      - nslookup
+      - resolvectl
+
+  - name: nc
+    description: "Netcat — versatile TCP/UDP network utility for connections, port scanning, and data transfer"
+    common_intents:
+      - intent: "test if a port is open on a remote host"
+        pattern: "nc -zv {host} {port}"
+        example: "nc -zv example.com 80"
+      - intent: "scan a range of ports"
+        pattern: "nc -zv -w {timeout} {host} {start_port}-{end_port}"
+        example: "nc -zv -w 2 192.168.1.1 20-80"
+      - intent: "listen on a TCP port"
+        pattern: "nc -l -p {port}"
+        example: "nc -l -p 4444"
+      - intent: "connect to a TCP port"
+        pattern: "nc {host} {port}"
+        example: "nc 192.168.1.1 4444"
+      - intent: "transfer a file from sender to receiver"
+        pattern: "nc -l -p {port} > {received_file}  # receiver\nnc {host} {port} < {file}  # sender"
+        example: "nc -l -p 9000 > received.tar.gz"
+      - intent: "connect via UDP"
+        pattern: "nc -u {host} {port}"
+        example: "nc -u 192.168.1.1 514"
+      - intent: "send an HTTP GET request manually"
+        pattern: "echo -e 'GET / HTTP/1.1\\nHost: {host}\\n\\n' | nc {host} 80"
+        example: "echo -e 'GET / HTTP/1.1\\nHost: example.com\\n\\n' | nc example.com 80"
+      - intent: "forward traffic from a local port to a remote host"
+        pattern: "nc -l -p {local_port} | nc {remote_host} {remote_port}"
+        example: "nc -l -p 8080 | nc 10.0.0.5 80"
+    key_flags:
+      - flag: "-l"
+        meaning: "Listen mode — wait for incoming connections"
+      - flag: "-p {port}"
+        meaning: "Local source port to use"
+      - flag: "-z"
+        meaning: "Zero-I/O mode — scan for open ports without sending data"
+      - flag: "-v"
+        meaning: "Verbose — report connection status"
+      - flag: "-u"
+        meaning: "Use UDP instead of TCP"
+      - flag: "-w {timeout}"
+        meaning: "Timeout in seconds for connects and final net reads"
+      - flag: "-e {program}"
+        meaning: "Execute program after connection (available in some nc variants; dangerous)"
+    safety:
+      level: dangerous
+      requires_sudo: false
+      confirmation_required_for:
+        - "nc -l -p {port} -e {shell}"
+        - "nc {host} {port} -e {shell}"
+      blocked_patterns:
+        - "nc -l.*-e.*/bin/sh"
+        - "nc -l.*-e.*/bin/bash"
+        - "nc.*-e /bin/sh"
+        - "nc.*-e /bin/bash"
+    undo: {}
+    distro_notes:
+      general: "Two main variants: ncat (from nmap, feature-rich) and openbsd-netcat (default on many distros). The -e flag may not be available in all variants."
+    related_commands:
+      - curl
+      - nmap
+      - ss
+      - socat
+
+  - name: tcpdump
+    description: "Capture and analyze network traffic at the packet level"
+    common_intents:
+      - intent: "capture traffic on a specific interface"
+        pattern: "sudo tcpdump -i {interface}"
+        example: "sudo tcpdump -i eth0"
+      - intent: "capture traffic to/from a specific host"
+        pattern: "sudo tcpdump host {host}"
+        example: "sudo tcpdump host 192.168.1.100"
+      - intent: "capture traffic on a specific port"
+        pattern: "sudo tcpdump port {port}"
+        example: "sudo tcpdump port 443"
+      - intent: "capture traffic and save to a file"
+        pattern: "sudo tcpdump -w {file.pcap} {filter}"
+        example: "sudo tcpdump -w capture.pcap port not 22"
+      - intent: "read a previously saved capture file"
+        pattern: "tcpdump -r {file.pcap}"
+        example: "tcpdump -r capture.pcap"
+      - intent: "capture with filter on interface, source, dest, and port"
+        pattern: "sudo tcpdump -i {interface} src {src_ip} and dst {dst_ip} and port {port}"
+        example: "sudo tcpdump -i eth0 src 192.168.1.1 and dst 192.168.1.2 and port 80"
+      - intent: "capture traffic on a subnet"
+        pattern: "sudo tcpdump net {subnet}"
+        example: "sudo tcpdump net 192.168.1.0/24"
+      - intent: "show packet contents in ASCII"
+        pattern: "sudo tcpdump -A port {port}"
+        example: "sudo tcpdump -A port 80"
+      - intent: "list available network interfaces"
+        pattern: "tcpdump -D"
+        example: "tcpdump -D"
+      - intent: "disable name resolution for faster output"
+        pattern: "sudo tcpdump -nn -i {interface}"
+        example: "sudo tcpdump -nn -i eth0"
+    key_flags:
+      - flag: "-i {interface}"
+        meaning: "Capture on a specific interface; use 'any' for all interfaces"
+      - flag: "-w {file}"
+        meaning: "Write raw packets to a .pcap file for later analysis"
+      - flag: "-r {file}"
+        meaning: "Read packets from a .pcap file"
+      - flag: "-n"
+        meaning: "Do not resolve hostnames"
+      - flag: "-nn"
+        meaning: "Do not resolve hostnames or port names"
+      - flag: "-A"
+        meaning: "Print packet payload in ASCII"
+      - flag: "-X"
+        meaning: "Print packet payload in hex and ASCII"
+      - flag: "-c {count}"
+        meaning: "Stop after capturing count packets"
+      - flag: "-s {snaplen}"
+        meaning: "Capture snaplen bytes per packet (0 = unlimited)"
+      - flag: "-D, --list-interfaces"
+        meaning: "List all available network interfaces"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    distro_notes:
+      general: "Requires read access to network interfaces (root or CAP_NET_RAW capability). Wireshark can open .pcap files captured by tcpdump."
+    related_commands:
+      - wireshark
+      - tshark
+      - nmap
+      - ss
+
+  - name: ethtool
+    description: "Display and modify NIC (Network Interface Controller) parameters, link settings, and statistics"
+    common_intents:
+      - intent: "show current settings for an interface"
+        pattern: "ethtool {interface}"
+        example: "ethtool eth0"
+      - intent: "show driver information for an interface"
+        pattern: "ethtool -i {interface}"
+        example: "ethtool -i eth0"
+      - intent: "show all supported features of an interface"
+        pattern: "ethtool -k {interface}"
+        example: "ethtool -k eth0"
+      - intent: "show network usage statistics for an interface"
+        pattern: "ethtool -S {interface}"
+        example: "ethtool -S eth0"
+      - intent: "check for errors on an interface"
+        pattern: "ethtool -S {interface} | grep -i error"
+        example: "ethtool -S eth0 | grep -i error"
+      - intent: "identify a NIC by blinking its LED"
+        pattern: "sudo ethtool -p {interface} {seconds}"
+        example: "sudo ethtool -p eth0 10"
+      - intent: "set link speed and duplex"
+        pattern: "sudo ethtool -s {interface} speed {speed} duplex {half|full} autoneg {on|off}"
+        example: "sudo ethtool -s eth0 speed 1000 duplex full autoneg on"
+    key_flags:
+      - flag: "-i, --driver"
+        meaning: "Show driver information for the interface"
+      - flag: "-k, --show-features"
+        meaning: "Show all currently enabled and available features"
+      - flag: "-S, --statistics"
+        meaning: "Show NIC statistics (packets, errors, drops)"
+      - flag: "-p, --identify {n}"
+        meaning: "Blink LED(s) for n seconds to physically identify the card"
+      - flag: "-s, --change"
+        meaning: "Change link parameters: speed, duplex, autoneg"
+      - flag: "-r, --negotiate"
+        meaning: "Restart auto-negotiation if supported"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "ethtool -s {interface} speed {speed} duplex {mode} autoneg off"
+      blocked_patterns: []
+    undo:
+      "ethtool -s {iface} speed {speed} duplex {mode} autoneg off": "sudo ethtool -s {iface} autoneg on"
+    related_commands:
+      - ip
+      - nmcli
+      - ifconfig
+
+  - name: nmcli
+    description: "Manage NetworkManager network connections, devices, and Wi-Fi from the command line"
+    common_intents:
+      - intent: "show status of all network devices"
+        pattern: "nmcli device"
+        example: "nmcli device"
+      - intent: "list all NetworkManager connections"
+        pattern: "nmcli connection"
+        example: "nmcli connection"
+      - intent: "show only active connections"
+        pattern: "nmcli connection show --active"
+        example: "nmcli connection show --active"
+      - intent: "list available Wi-Fi networks"
+        pattern: "nmcli device wifi list"
+        example: "nmcli device wifi list"
+      - intent: "connect to a Wi-Fi network"
+        pattern: "nmcli device wifi connect {ssid} password {password}"
+        example: "nmcli device wifi connect MyNetwork password mysecretpass"
+      - intent: "disconnect from Wi-Fi"
+        pattern: "nmcli device disconnect {interface}"
+        example: "nmcli device disconnect wlan0"
+      - intent: "bring up a connection by name"
+        pattern: "nmcli connection up {connection_name}"
+        example: "nmcli connection up 'Home Network'"
+      - intent: "bring down a connection"
+        pattern: "nmcli connection down {connection_name}"
+        example: "nmcli connection down 'Home Network'"
+      - intent: "show Wi-Fi password and QR code"
+        pattern: "nmcli device wifi show-password"
+        example: "nmcli device wifi show-password"
+      - intent: "enable or disable Wi-Fi radio"
+        pattern: "nmcli radio wifi {on|off}"
+        example: "nmcli radio wifi off"
+      - intent: "import a VPN connection from an OVPN file"
+        pattern: "nmcli connection import type openvpn file {path}"
+        example: "nmcli connection import type openvpn file /etc/vpn/client.ovpn"
+      - intent: "add a new ethernet connection with DHCP"
+        pattern: "nmcli connection add type ethernet con-name {name} ifname {interface}"
+        example: "nmcli connection add type ethernet con-name 'my-eth' ifname eth0"
+      - intent: "rescan for available Wi-Fi networks"
+        pattern: "nmcli device wifi rescan"
+        example: "nmcli device wifi rescan"
+      - intent: "show detailed information about a device"
+        pattern: "nmcli device show {interface}"
+        example: "nmcli device show wlan0"
+    key_flags:
+      - flag: "device / d"
+        meaning: "Manage network interfaces and devices"
+      - flag: "connection / con / c"
+        meaning: "Manage saved network connection profiles"
+      - flag: "radio / r"
+        meaning: "Manage radio switches (WiFi, WWAN)"
+      - flag: "general / g"
+        meaning: "Show NetworkManager status and permissions"
+      - flag: "-p, --pretty"
+        meaning: "Pretty-print output with sections and column headers"
+      - flag: "-t, --terse"
+        meaning: "Terse output (machine-parseable)"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "nmcli connection delete {connection}"
+      blocked_patterns: []
+    undo:
+      "nmcli connection down {name}": "nmcli connection up {name}"
+      "nmcli radio wifi off": "nmcli radio wifi on"
+      "nmcli connection delete {name}": "nmcli connection import ... (must recreate)"
+    distro_notes:
+      general: "Requires NetworkManager to be running. Not available on systems using systemd-networkd or plain ifupdown as network manager."
+      debian_ubuntu: "NetworkManager may not manage all interfaces by default; check /etc/NetworkManager/NetworkManager.conf"
+    related_commands:
+      - ip
+      - iwconfig
+      - iwctl
+      - nmtui
+      - ethtool

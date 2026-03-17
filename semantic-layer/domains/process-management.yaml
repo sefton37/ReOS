@@ -1,0 +1,976 @@
+domain: process-management
+description: "Process listing, monitoring, signaling, priority management, and job control"
+related_domains:
+  - service-management
+  - system-info
+  - logging
+
+commands:
+  - name: ps
+    description: "Report a snapshot of currently running processes"
+    common_intents:
+      - intent: "show all running processes"
+        pattern: "ps aux"
+        example: "ps aux"
+        followup: "grep for a specific process name"
+      - intent: "show all running processes with full command string"
+        pattern: "ps auxww"
+        example: "ps auxww"
+      - intent: "search for a process by name"
+        pattern: "ps aux | grep '[{first_letter}]{rest_of_name}'"
+        example: "ps aux | grep '[h]ttpd'"
+        followup: "kill {pid}"
+      - intent: "list processes owned by a specific user"
+        pattern: "ps -u {username} -F"
+        example: "ps -u alice -F"
+      - intent: "show processes as a tree to see parent-child relationships"
+        pattern: "ps axjf"
+        example: "ps axjf"
+      - intent: "get the parent PID of a process"
+        pattern: "ps -o ppid= -p {pid}"
+        example: "ps -o ppid= -p 1234"
+      - intent: "sort processes by memory usage"
+        pattern: "ps --sort size"
+        example: "ps --sort size"
+      - intent: "show processes with custom output columns"
+        pattern: "ps -eo pid,user,command"
+        example: "ps -eo pid,user,command"
+      - intent: "show process tree for the current user"
+        pattern: "ps -u $(id -u) f"
+        example: "ps -u $(id -u) f"
+    key_flags:
+      - flag: "a"
+        meaning: "Show processes for all users (BSD syntax)"
+      - flag: "u"
+        meaning: "Display user-oriented format showing owner, CPU, memory"
+      - flag: "x"
+        meaning: "Include processes not attached to a terminal"
+      - flag: "-e"
+        meaning: "Select all processes (UNIX syntax equivalent of aux)"
+      - flag: "-f"
+        meaning: "Full-format listing including PPID, STIME, and full command"
+      - flag: "-o {format}"
+        meaning: "User-defined output format (e.g. pid,user,command)"
+      - flag: "--sort {key}"
+        meaning: "Sort output by specified column (e.g. size, pcpu, pid)"
+      - flag: "f"
+        meaning: "Show process hierarchy as ASCII art tree (BSD syntax)"
+      - flag: "-F"
+        meaning: "Extra full format; adds SZ, RSS, PSR columns"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "ps is read-only; no undo required"
+    related_commands:
+      - top
+      - htop
+      - pgrep
+      - lsof
+
+  - name: top
+    description: "Display dynamic real-time information about running processes"
+    common_intents:
+      - intent: "monitor running processes in real time"
+        pattern: "top"
+        example: "top"
+      - intent: "watch processes for a specific user"
+        pattern: "top -u {username}"
+        example: "top -u www-data"
+      - intent: "hide idle and zombie processes"
+        pattern: "top -i"
+        example: "top -i"
+      - intent: "sort processes by a specific field"
+        pattern: "top -o {field_name}"
+        example: "top -o %MEM"
+      - intent: "monitor threads of a specific process"
+        pattern: "top -Hp {pid}"
+        example: "top -Hp 1234"
+      - intent: "watch only specific processes by PID"
+        pattern: "top -p {pid1},{pid2}"
+        example: "top -p 1234,5678"
+      - intent: "monitor processes matching a name"
+        pattern: "top -p $(pgrep -d ',' {process_name})"
+        example: "top -p $(pgrep -d ',' nginx)"
+    key_flags:
+      - flag: "-u {username}"
+        meaning: "Show only processes owned by the given user"
+      - flag: "-i"
+        meaning: "Toggle display of idle/zombie processes"
+      - flag: "-o {field}"
+        meaning: "Sort by the named field (overrides default sort)"
+      - flag: "-p {pid}"
+        meaning: "Monitor specific PID(s), comma-separated"
+      - flag: "-H"
+        meaning: "Show individual threads rather than collapsed processes"
+      - flag: "-n {count}"
+        meaning: "Exit after this many iterations (useful in scripts)"
+      - flag: "-b"
+        meaning: "Batch mode — non-interactive output suitable for piping"
+      - flag: "-d {seconds}"
+        meaning: "Set the update delay interval in seconds"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "top is read-only; no undo required"
+    distro_notes:
+      macOS: "top on macOS uses different flags; -i sets interval, -o sets sort key"
+    related_commands:
+      - htop
+      - ps
+      - pgrep
+      - watch
+
+  - name: htop
+    description: "Interactive process viewer — an enhanced, color version of top"
+    common_intents:
+      - intent: "interactively monitor all running processes"
+        pattern: "htop"
+        example: "htop"
+      - intent: "monitor processes for a specific user"
+        pattern: "htop -u {username}"
+        example: "htop -u alice"
+      - intent: "show processes in a tree view"
+        pattern: "htop -t"
+        example: "htop -t"
+      - intent: "sort processes by a specific metric"
+        pattern: "htop -s {sort_item}"
+        example: "htop -s PERCENT_MEM"
+      - intent: "run htop in read-only mode with no process-changing features"
+        pattern: "htop --readonly"
+        example: "htop --readonly"
+      - intent: "set update interval for htop"
+        pattern: "htop -d {delay_tenths_of_second}"
+        example: "htop -d 50"
+    key_flags:
+      - flag: "-u {username}"
+        meaning: "Show only processes owned by the given user"
+      - flag: "-t"
+        meaning: "Display processes in a tree hierarchy"
+      - flag: "-s {sort_item}"
+        meaning: "Sort by the named column at startup"
+      - flag: "-d {delay}"
+        meaning: "Delay between updates in tenths of a second (50 = 5s)"
+      - flag: "--readonly"
+        meaning: "Disable all system and process modification features"
+      - flag: "-p {pid1},{pid2}"
+        meaning: "Monitor only the specified PIDs"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "htop is read-only by default; no undo required"
+    related_commands:
+      - top
+      - ps
+      - pgrep
+
+  - name: kill
+    description: "Send a signal to a process by PID, defaulting to SIGTERM"
+    common_intents:
+      - intent: "terminate a process gracefully"
+        pattern: "kill {pid}"
+        example: "kill 1234"
+      - intent: "force kill a process that won't respond to SIGTERM"
+        pattern: "kill -9 {pid}"
+        example: "kill -9 1234"
+      - intent: "send SIGHUP to reload a daemon's configuration"
+        pattern: "kill -HUP {pid}"
+        example: "kill -HUP 1234"
+      - intent: "send SIGINT to a process (same as Ctrl+C)"
+        pattern: "kill -INT {pid}"
+        example: "kill -INT 1234"
+      - intent: "pause a process temporarily"
+        pattern: "kill -STOP {pid}"
+        example: "kill -STOP 1234"
+        followup: "kill -CONT {pid}"
+      - intent: "resume a paused process"
+        pattern: "kill -CONT {pid}"
+        example: "kill -CONT 1234"
+      - intent: "terminate a background job by job number"
+        pattern: "kill %{job_number}"
+        example: "kill %1"
+      - intent: "list all available signal names"
+        pattern: "kill -l"
+        example: "kill -l"
+      - intent: "send a signal to all processes in a process group"
+        pattern: "kill -SIGUSR1 -{group_id}"
+        example: "kill -SIGUSR1 -5678"
+    key_flags:
+      - flag: "-9 / -KILL / -SIGKILL"
+        meaning: "Forceful termination; cannot be caught or ignored by the process"
+      - flag: "-15 / -TERM / -SIGTERM"
+        meaning: "Graceful termination request (default signal)"
+      - flag: "-1 / -HUP / -SIGHUP"
+        meaning: "Hang-up; many daemons reload configuration instead of exiting"
+      - flag: "-2 / -INT / -SIGINT"
+        meaning: "Interrupt signal, equivalent to pressing Ctrl+C"
+      - flag: "-19 / -STOP / -SIGSTOP"
+        meaning: "Pause/suspend the process; cannot be caught"
+      - flag: "-18 / -CONT / -SIGCONT"
+        meaning: "Resume a stopped process"
+      - flag: "-l"
+        meaning: "List all signal names and numbers"
+    safety:
+      level: "dangerous"
+      requires_sudo: false
+      confirmation_required_for:
+        - "kill -9 {pid}"
+        - "kill -KILL {pid}"
+        - "kill -9 -1 (kills all processes owned by invoking user)"
+      blocked_patterns:
+        - "kill -9 1"
+        - "kill -KILL 1"
+        - "kill -9 -1"
+        - "kill 1"
+    undo:
+      "SIGSTOP": "kill -CONT {pid}"
+      "SIGTERM / SIGKILL": "not undoable — process is terminated"
+      "SIGHUP": "restart the daemon manually if it exited"
+    related_commands:
+      - killall
+      - pkill
+      - pgrep
+      - ps
+
+  - name: killall
+    description: "Send a signal to all processes matching a given name (exact name match)"
+    common_intents:
+      - intent: "terminate all instances of a process by name"
+        pattern: "killall {process_name}"
+        example: "killall firefox"
+      - intent: "force kill all instances of a process"
+        pattern: "killall -KILL {process_name}"
+        example: "killall -KILL nginx"
+      - intent: "ask for confirmation before killing each process"
+        pattern: "killall -i {process_name}"
+        example: "killall -i python3"
+      - intent: "send SIGHUP to reload all instances of a daemon"
+        pattern: "killall -HUP {process_name}"
+        example: "killall -HUP apache2"
+      - intent: "kill all processes owned by a specific user"
+        pattern: "killall -u {username} {process_name}"
+        example: "killall -u alice python3"
+      - intent: "list available signal names"
+        pattern: "killall -l"
+        example: "killall -l"
+      - intent: "send SIGINT to all instances of a process"
+        pattern: "killall -INT {process_name}"
+        example: "killall -INT myapp"
+    key_flags:
+      - flag: "-i / --interactive"
+        meaning: "Ask for confirmation before killing each process"
+      - flag: "-u / --user {user}"
+        meaning: "Restrict killing to processes owned by the specified user"
+      - flag: "-e / --exact"
+        meaning: "Require exact name match (important for long process names)"
+      - flag: "-I / --ignore-case"
+        meaning: "Case-insensitive process name match"
+      - flag: "-g / --process-group"
+        meaning: "Kill the process group to which the matching process belongs"
+      - flag: "-w / --wait"
+        meaning: "Wait until all killed processes have died"
+      - flag: "-q / --quiet"
+        meaning: "Do not complain if no processes were killed"
+    safety:
+      level: "dangerous"
+      requires_sudo: false
+      confirmation_required_for:
+        - "killall -KILL {name}"
+        - "killall {name} (when name matches critical system processes)"
+      blocked_patterns:
+        - "killall init"
+        - "killall -9 init"
+        - "killall -KILL init"
+        - "killall systemd"
+        - "killall -9 systemd"
+        - "killall kernel"
+    undo:
+      "SIGTERM / SIGKILL": "not undoable — processes are terminated"
+      "SIGHUP": "restart the daemon manually if it exited"
+    distro_notes:
+      macOS: "killall on macOS is a different implementation with different flags"
+    related_commands:
+      - kill
+      - pkill
+      - pgrep
+
+  - name: pkill
+    description: "Signal processes by name pattern (regex), more flexible than killall"
+    common_intents:
+      - intent: "kill all processes matching a name"
+        pattern: "pkill \"{process_name}\""
+        example: "pkill \"nginx\""
+      - intent: "kill processes matching a partial name or string in command line"
+        pattern: "pkill -f \"{string}\""
+        example: "pkill -f \"python myscript.py\""
+      - intent: "force kill matching processes"
+        pattern: "pkill -9 \"{process_name}\""
+        example: "pkill -9 \"hung_process\""
+      - intent: "kill processes owned by a specific user"
+        pattern: "pkill -u {username} \"{process_name}\""
+        example: "pkill -u alice \"python\""
+      - intent: "kill only the oldest matching process"
+        pattern: "pkill -o \"{process_name}\""
+        example: "pkill -o \"firefox\""
+      - intent: "kill only the newest matching process"
+        pattern: "pkill -n \"{process_name}\""
+        example: "pkill -n \"python\""
+      - intent: "send a custom signal to matching processes"
+        pattern: "pkill -USR1 \"{process_name}\""
+        example: "pkill -USR1 \"myapp\""
+      - intent: "count matching processes without killing"
+        pattern: "pgrep -c \"{process_name}\""
+        example: "pgrep -c \"nginx\""
+    key_flags:
+      - flag: "-f / --full"
+        meaning: "Match against the full command line, not just the process name"
+      - flag: "-u / --euid {user}"
+        meaning: "Match only processes owned by the given user"
+      - flag: "-o / --oldest"
+        meaning: "Match only the oldest (least recently started) process"
+      - flag: "-n / --newest"
+        meaning: "Match only the newest (most recently started) process"
+      - flag: "-9"
+        meaning: "Send SIGKILL (force kill, unblockable)"
+      - flag: "-e / --echo"
+        meaning: "Print name and PID of each process being killed"
+      - flag: "-x / --exact"
+        meaning: "Match the process name exactly"
+    safety:
+      level: "dangerous"
+      requires_sudo: false
+      confirmation_required_for:
+        - "pkill -9 {pattern}"
+        - "pkill -f {broad_pattern} (risk of over-matching)"
+      blocked_patterns:
+        - "pkill -9 init"
+        - "pkill -9 systemd"
+        - "pkill init"
+        - "pkill systemd"
+    undo:
+      "SIGTERM / SIGKILL": "not undoable — processes are terminated"
+    related_commands:
+      - kill
+      - killall
+      - pgrep
+
+  - name: nice
+    description: "Launch a program with a custom scheduling priority (niceness)"
+    common_intents:
+      - intent: "run a CPU-intensive program with lower priority to avoid impacting other processes"
+        pattern: "nice -n {niceness_value} {command}"
+        example: "nice -n 10 make -j4"
+      - intent: "run a program with lower priority using shorthand"
+        pattern: "nice -{niceness_value} {command}"
+        example: "nice -19 rsync -av /src /dst"
+      - intent: "run a program with higher priority (requires sudo)"
+        pattern: "sudo nice -n -{niceness_value} {command}"
+        example: "sudo nice -n -10 ./realtime_processor"
+      - intent: "check the current niceness value of the shell"
+        pattern: "nice"
+        example: "nice"
+    key_flags:
+      - flag: "-n {N} / --adjustment={N}"
+        meaning: "Add integer N to the niceness (default +10 if omitted). Negative requires root."
+    safety:
+      level: "moderate"
+      requires_sudo: false
+      confirmation_required_for:
+        - "sudo nice -n -{high_value} {command} (raising priority above 0 requires root)"
+      blocked_patterns: []
+    undo:
+      "launched with low priority": "renice -n 0 -p {pid}"
+      "program started": "not undoable — must kill and restart with different niceness"
+    related_commands:
+      - renice
+      - ps
+      - top
+
+  - name: renice
+    description: "Alter the scheduling priority of one or more already-running processes"
+    common_intents:
+      - intent: "lower the priority of a running process"
+        pattern: "renice -n {positive_value} -p {pid}"
+        example: "renice -n 10 -p 1234"
+      - intent: "raise the priority of a running process (requires sudo)"
+        pattern: "sudo renice -n -{value} -p {pid}"
+        example: "sudo renice -n -5 -p 1234"
+      - intent: "change priority of all processes owned by a user"
+        pattern: "renice -n {value} -u {username}"
+        example: "renice -n 5 -u alice"
+      - intent: "set absolute priority for a process group"
+        pattern: "renice --priority {value} -g {process_group}"
+        example: "renice --priority 5 -g 2001"
+      - intent: "set exact (absolute) priority for a process"
+        pattern: "renice --priority {value} -p {pid}"
+        example: "renice --priority 10 -p 1234"
+    key_flags:
+      - flag: "-n {N}"
+        meaning: "Relative or absolute priority adjustment (behavior depends on POSIXLY_CORRECT)"
+      - flag: "--priority {N}"
+        meaning: "Set absolute scheduling priority"
+      - flag: "--relative {N}"
+        meaning: "Increment or decrement priority by N"
+      - flag: "-p / --pid"
+        meaning: "Interpret arguments as process IDs (default)"
+      - flag: "-u / --user"
+        meaning: "Interpret arguments as usernames or UIDs"
+      - flag: "-g / --pgrp"
+        meaning: "Interpret arguments as process group IDs"
+    safety:
+      level: "moderate"
+      requires_sudo: false
+      confirmation_required_for:
+        - "sudo renice -n -{value} -p {pid} (raising priority requires root)"
+      blocked_patterns: []
+    undo:
+      "priority changed": "renice -n {original_value} -p {pid}"
+    related_commands:
+      - nice
+      - ps
+      - top
+
+  - name: nohup
+    description: "Run a command immune to hangup signals so it continues after the terminal closes"
+    common_intents:
+      - intent: "keep a process running after logging out"
+        pattern: "nohup {command} &"
+        example: "nohup python3 server.py &"
+      - intent: "run a script that survives terminal disconnect"
+        pattern: "nohup {path/to/script.sh} &"
+        example: "nohup /home/alice/backup.sh &"
+      - intent: "redirect nohup output to a specific file"
+        pattern: "nohup {command} > {path/to/output_file} 2>&1 &"
+        example: "nohup ./long_job.sh > /var/log/job.log 2>&1 &"
+      - intent: "run a command in the background and keep it alive"
+        pattern: "nohup {command} {arg1} {arg2} &"
+        example: "nohup rsync -av /src/ /dst/ &"
+    key_flags:
+      - flag: "(none)"
+        meaning: "nohup has no flags; append & to background the process immediately"
+    safety:
+      level: "moderate"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "process started with nohup": "kill {pid} (find PID with pgrep or ps; output defaults to nohup.out)"
+    related_commands:
+      - bg
+      - fg
+      - jobs
+      - disown
+
+  - name: bg
+    description: "Resume a suspended job and run it in the background"
+    common_intents:
+      - intent: "resume the most recently suspended job in the background"
+        pattern: "bg"
+        example: "bg"
+      - intent: "resume a specific job in the background"
+        pattern: "bg %{job_number}"
+        example: "bg %2"
+        followup: "jobs"
+    key_flags:
+      - flag: "%{job_number}"
+        meaning: "Specify which job to background (omit for most recent)"
+    safety:
+      level: "moderate"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "sent to background": "fg %{job_number}"
+    related_commands:
+      - fg
+      - jobs
+      - nohup
+      - disown
+
+  - name: fg
+    description: "Bring a background or suspended job to the foreground"
+    common_intents:
+      - intent: "bring the most recent background job to the foreground"
+        pattern: "fg"
+        example: "fg"
+      - intent: "bring a specific background job to the foreground"
+        pattern: "fg %{job_number}"
+        example: "fg %1"
+        followup: "jobs"
+    key_flags:
+      - flag: "%{job_number}"
+        meaning: "Specify which job to foreground (omit for most recent)"
+    safety:
+      level: "moderate"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "brought to foreground": "Ctrl+Z to suspend, then bg %{job_number}"
+    related_commands:
+      - bg
+      - jobs
+      - nohup
+
+  - name: jobs
+    description: "List all jobs started by the current shell with their status"
+    common_intents:
+      - intent: "list all background and suspended jobs in the current shell"
+        pattern: "jobs"
+        example: "jobs"
+      - intent: "list jobs with their PIDs"
+        pattern: "jobs -l"
+        example: "jobs -l"
+      - intent: "show only running jobs"
+        pattern: "jobs -r"
+        example: "jobs -r"
+      - intent: "show only stopped (suspended) jobs"
+        pattern: "jobs -s"
+        example: "jobs -s"
+      - intent: "show only jobs whose status has changed"
+        pattern: "jobs -n"
+        example: "jobs -n"
+      - intent: "show only the PIDs of all jobs"
+        pattern: "jobs -p"
+        example: "jobs -p"
+    key_flags:
+      - flag: "-l"
+        meaning: "List jobs along with their PIDs"
+      - flag: "-r"
+        meaning: "Show only running jobs"
+      - flag: "-s"
+        meaning: "Show only stopped (suspended) jobs"
+      - flag: "-n"
+        meaning: "Show only jobs whose status has changed since last notification"
+      - flag: "-p"
+        meaning: "Show only process IDs"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "jobs is read-only; no undo required"
+    related_commands:
+      - bg
+      - fg
+      - ps
+      - disown
+
+  - name: wait
+    description: "Wait for a process or job to complete and return its exit status"
+    common_intents:
+      - intent: "wait for a background process to finish"
+        pattern: "wait {pid}"
+        example: "wait 1234"
+      - intent: "wait for all background jobs started by this shell to finish"
+        pattern: "wait"
+        example: "wait"
+      - intent: "wait for a specific job by job number"
+        pattern: "wait %{job_number}"
+        example: "wait %1"
+    key_flags:
+      - flag: "{pid}"
+        meaning: "Wait for the process with this PID"
+      - flag: "%{job_number}"
+        meaning: "Wait for the job with this job number"
+      - flag: "(no args)"
+        meaning: "Wait for all background processes known to the shell"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "wait only blocks; it does not modify process state"
+    related_commands:
+      - jobs
+      - bg
+      - fg
+      - ps
+
+  - name: pgrep
+    description: "Search for processes by name or attributes and return their PIDs"
+    common_intents:
+      - intent: "find the PID of a running process by name"
+        pattern: "pgrep {process_name}"
+        example: "pgrep nginx"
+      - intent: "search for processes matching a full command line"
+        pattern: "pgrep -f \"{command_string}\""
+        example: "pgrep -f \"python manage.py\""
+      - intent: "find processes run by a specific user"
+        pattern: "pgrep -u {username} {process_name}"
+        example: "pgrep -u www-data nginx"
+      - intent: "count how many instances of a process are running"
+        pattern: "pgrep -c {process_name}"
+        example: "pgrep -c worker"
+      - intent: "kill all matching PIDs via xargs"
+        pattern: "pgrep -f {pattern} | xargs kill"
+        example: "pgrep -f stale_worker | xargs kill"
+      - intent: "list PIDs and names of matching processes"
+        pattern: "pgrep -a {process_name}"
+        example: "pgrep -a python"
+    key_flags:
+      - flag: "-f / --full"
+        meaning: "Match against the full command line, not just the process name"
+      - flag: "-u / --euid {user}"
+        meaning: "Match only processes owned by the given user"
+      - flag: "-c / --count"
+        meaning: "Print a count of matching processes instead of PIDs"
+      - flag: "-a"
+        meaning: "List PID and full command line of matching processes"
+      - flag: "-d / --delimiter {string}"
+        meaning: "Use a custom delimiter between output PIDs (default: newline)"
+      - flag: "-x"
+        meaning: "Match the process name exactly"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "pgrep is read-only; no undo required"
+    related_commands:
+      - pkill
+      - ps
+      - kill
+      - lsof
+
+  - name: xargs
+    description: "Build and execute commands from standard input, enabling piped argument passing"
+    common_intents:
+      - intent: "pass output of one command as arguments to another"
+        pattern: "{source_command} | xargs {command}"
+        example: "find . -name '*.tmp' | xargs rm"
+      - intent: "run a command once per input item"
+        pattern: "{source_command} | xargs -n 1 {command}"
+        example: "cat pids.txt | xargs -n 1 kill"
+      - intent: "run commands in parallel"
+        pattern: "{source_command} | xargs -P {num_procs} -n 1 {command}"
+        example: "find . -name '*.gz' | xargs -P 4 -n 1 gunzip"
+      - intent: "use a placeholder to insert input at a specific position"
+        pattern: "{source_command} | xargs -I {} {command} {}"
+        example: "ls *.log | xargs -I {} cp {} /backup/{}"
+      - intent: "prompt for confirmation before each execution"
+        pattern: "{source_command} | xargs -p {command}"
+        example: "pgrep zombie | xargs -p kill"
+      - intent: "handle filenames with spaces safely using null delimiter"
+        pattern: "find . -name '*.pdf' -print0 | xargs -0 {command}"
+        example: "find . -name '*.pdf' -print0 | xargs -0 rm"
+      - intent: "read arguments from a file"
+        pattern: "xargs -a {path/to/file} {command}"
+        example: "xargs -a pids.txt kill"
+      - intent: "do nothing if input is empty"
+        pattern: "{source_command} | xargs --no-run-if-empty {command}"
+        example: "find . -name '*.bak' | xargs --no-run-if-empty rm"
+    key_flags:
+      - flag: "-n {max-args}"
+        meaning: "Use at most max-args arguments per command invocation"
+      - flag: "-P {max-procs}"
+        meaning: "Run up to max-procs processes simultaneously"
+      - flag: "-I {replace-str}"
+        meaning: "Replace occurrences of replace-str in the command with input"
+      - flag: "-0 / --null"
+        meaning: "Expect NUL-delimited input (safe for filenames with spaces)"
+      - flag: "-p / --interactive"
+        meaning: "Prompt user for confirmation before running each command"
+      - flag: "-a {file} / --arg-file={file}"
+        meaning: "Read arguments from a file instead of stdin"
+      - flag: "--no-run-if-empty"
+        meaning: "Do not run command if stdin is empty (GNU extension)"
+    safety:
+      level: "moderate"
+      requires_sudo: false
+      confirmation_required_for:
+        - "xargs rm / xargs kill (destructive commands piped through xargs)"
+      blocked_patterns:
+        - "xargs rm -rf / (would wipe filesystem)"
+        - "xargs kill -9 (mass force-kill without confirmation)"
+    undo:
+      "files deleted via xargs rm": "not recoverable without backup"
+      "processes killed via xargs kill": "not undoable"
+    related_commands:
+      - find
+      - pgrep
+      - kill
+
+  - name: watch
+    description: "Execute a command repeatedly at a fixed interval and display the output full-screen"
+    common_intents:
+      - intent: "monitor the output of a command as it changes over time"
+        pattern: "watch {command}"
+        example: "watch df -h"
+      - intent: "run a command every N seconds"
+        pattern: "watch -n {seconds} {command}"
+        example: "watch -n 5 free -m"
+      - intent: "highlight differences between successive outputs"
+        pattern: "watch -d {command}"
+        example: "watch -d netstat -an"
+      - intent: "watch a pipeline command"
+        pattern: "watch \"{command1} | {command2}\""
+        example: "watch \"ps aux | grep nginx\""
+      - intent: "exit watch when output changes"
+        pattern: "watch -g {command}"
+        example: "watch -g lsblk"
+      - intent: "display output with ANSI color support"
+        pattern: "watch -c {command}"
+        example: "watch -c ls --color=always"
+      - intent: "monitor process list periodically"
+        pattern: "watch -n {seconds} ps aux"
+        example: "watch -n 2 ps aux"
+    key_flags:
+      - flag: "-n {seconds} / --interval"
+        meaning: "Set the update interval in seconds (default 2s, minimum 0.1s)"
+      - flag: "-d / --differences"
+        meaning: "Highlight lines that changed between updates"
+      - flag: "-g / --chgexit"
+        meaning: "Exit when the output of the command changes"
+      - flag: "-c / --color"
+        meaning: "Interpret ANSI color and style escape sequences"
+      - flag: "-e / --errexit"
+        meaning: "Freeze on command error and exit on keypress"
+      - flag: "-t / --no-title"
+        meaning: "Hide the header line showing interval and command"
+      - flag: "-b / --beep"
+        meaning: "Beep if the command exits with a non-zero status"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "watch is read-only; no undo required (unless the watched command mutates state)"
+    related_commands:
+      - top
+      - ps
+      - pgrep
+
+  - name: timeout
+    description: "Run a command with a time limit, sending a signal when the limit expires"
+    common_intents:
+      - intent: "run a command and kill it if it takes too long"
+        pattern: "timeout {duration} {command}"
+        example: "timeout 30s curl https://example.com"
+      - intent: "send a specific signal when timeout occurs"
+        pattern: "timeout -s {SIGNAL} {duration} {command}"
+        example: "timeout -s INT 10s ./interactive_script.sh"
+      - intent: "force kill with SIGKILL if process ignores the initial signal"
+        pattern: "timeout -k {kill_delay} {duration} {command}"
+        example: "timeout -k 5s 30s ./app"
+      - intent: "preserve the command's exit status even when it times out"
+        pattern: "timeout --preserve-status {duration} {command}"
+        example: "timeout --preserve-status 10s ./test_runner"
+      - intent: "print verbose output when timeout fires"
+        pattern: "timeout -v {duration} {command}"
+        example: "timeout -v 5s slow_query.sh"
+    key_flags:
+      - flag: "-s {SIGNAL} / --signal={SIGNAL}"
+        meaning: "Signal to send on timeout (default SIGTERM)"
+      - flag: "-k {duration} / --kill-after={duration}"
+        meaning: "Send SIGKILL this long after the initial signal if process is still alive"
+      - flag: "--preserve-status"
+        meaning: "Exit with the same status as COMMAND even when it times out"
+      - flag: "--foreground"
+        meaning: "Allow COMMAND to receive TTY signals (useful when not on a shell prompt)"
+      - flag: "-v / --verbose"
+        meaning: "Print a message to stderr indicating which signal was sent"
+    safety:
+      level: "moderate"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "process killed by timeout": "not undoable — restart the process manually"
+    related_commands:
+      - kill
+      - watch
+      - nohup
+
+  - name: strace
+    description: "Trace system calls and signals made by a process for debugging"
+    common_intents:
+      - intent: "trace all system calls made by a command"
+        pattern: "strace {command}"
+        example: "strace ls /tmp"
+      - intent: "attach to a running process and trace its system calls"
+        pattern: "sudo strace -p {pid}"
+        example: "sudo strace -p 1234"
+      - intent: "filter trace to specific system calls"
+        pattern: "strace -e trace={syscall1,syscall2} {command}"
+        example: "strace -e trace=open,read,write cat /etc/hosts"
+      - intent: "trace only file-related system calls"
+        pattern: "strace -e trace=file {command}"
+        example: "strace -e trace=file python3 app.py"
+      - intent: "trace only network system calls"
+        pattern: "strace -e trace=network {command}"
+        example: "strace -e trace=network curl https://example.com"
+      - intent: "follow child processes"
+        pattern: "strace -f {command}"
+        example: "strace -f make"
+      - intent: "summarize call counts and timing on exit"
+        pattern: "strace -c {command}"
+        example: "strace -c ./slow_program"
+      - intent: "save trace output to a file"
+        pattern: "strace -o {path/to/trace.txt} {command}"
+        example: "strace -o /tmp/trace.txt ./app"
+      - intent: "show time spent in each system call"
+        pattern: "sudo strace -p {pid} -T"
+        example: "sudo strace -p 1234 -T"
+    key_flags:
+      - flag: "-p {pid} / --attach={pid}"
+        meaning: "Attach to an existing running process by PID"
+      - flag: "-e trace={expr}"
+        meaning: "Filter to a specific set of system calls or categories"
+      - flag: "-f / --follow-forks"
+        meaning: "Follow child processes as they are created by fork/vfork/clone"
+      - flag: "-c / --summary-only"
+        meaning: "Count calls, time, and errors per syscall and print a summary on exit"
+      - flag: "-o {file} / --output={file}"
+        meaning: "Write trace output to a file instead of stderr"
+      - flag: "-T / --syscall-times"
+        meaning: "Show the time spent in each system call"
+      - flag: "-s {strsize} / --string-limit={strsize}"
+        meaning: "Limit the size of strings printed (default 32)"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "strace is read-only tracing; no undo required"
+    distro_notes:
+      Linux: "strace is Linux-specific; macOS equivalent is dtruss or dtrace"
+    related_commands:
+      - lsof
+      - ps
+      - ltrace
+
+  - name: lsof
+    description: "List open files and the processes that have them open (files, sockets, pipes)"
+    common_intents:
+      - intent: "find which process has a specific file open"
+        pattern: "lsof {path/to/file}"
+        example: "lsof /var/log/syslog"
+        followup: "kill {pid}"
+      - intent: "find which process is using a specific network port"
+        pattern: "lsof -i :{port}"
+        example: "lsof -i :8080"
+      - intent: "list all files opened by a user"
+        pattern: "lsof -u {username}"
+        example: "lsof -u alice"
+      - intent: "list all files opened by a specific process"
+        pattern: "lsof -p {pid}"
+        example: "lsof -p 1234"
+      - intent: "list all open network connections"
+        pattern: "lsof -i"
+        example: "lsof -i"
+      - intent: "find process listening on a TCP port"
+        pattern: "lsof -i TCP:{port} -sTCP:LISTEN"
+        example: "lsof -i TCP:80 -sTCP:LISTEN"
+      - intent: "list files opened by a command or process name"
+        pattern: "lsof -c {process_name}"
+        example: "lsof -c nginx"
+      - intent: "list all open files in a directory"
+        pattern: "lsof +D {path/to/directory}"
+        example: "lsof +D /var/log"
+      - intent: "get only the PID of the process using a file"
+        pattern: "lsof -t {path/to/file}"
+        example: "lsof -t /tmp/lockfile"
+      - intent: "find processes blocking unmount of a filesystem"
+        pattern: "lsof +f -- {mount_point}"
+        example: "lsof +f -- /mnt/usb"
+    key_flags:
+      - flag: "-i [:{port}]"
+        meaning: "List network files; optionally filter by port"
+      - flag: "-u {username}"
+        meaning: "List files opened by the specified user"
+      - flag: "-p {pid}"
+        meaning: "List files opened by the process with this PID"
+      - flag: "-c {name}"
+        meaning: "List files opened by processes whose name starts with name"
+      - flag: "+D {directory}"
+        meaning: "List all open files in the directory tree"
+      - flag: "-t"
+        meaning: "Output only PIDs (terse mode, useful in scripts)"
+      - flag: "-n"
+        meaning: "Do not resolve network addresses to hostnames (faster)"
+      - flag: "-P"
+        meaning: "Do not resolve port numbers to service names"
+      - flag: "-sTCP:LISTEN"
+        meaning: "Show only TCP sockets in LISTEN state"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "lsof is read-only; no undo required"
+    distro_notes:
+      general: "Root privileges are required to list files opened by other users' processes"
+    related_commands:
+      - fuser
+      - ps
+      - netstat
+      - ss
+      - pgrep
+
+  - name: fuser
+    description: "Identify processes using specified files, directories, or network sockets"
+    common_intents:
+      - intent: "find which processes are accessing a file or directory"
+        pattern: "fuser {path/to/file_or_directory}"
+        example: "fuser /var/log/app.log"
+      - intent: "show detailed info about processes using a file"
+        pattern: "fuser -v {path/to/file_or_directory}"
+        example: "fuser -v /tmp/data"
+      - intent: "find which process is using a TCP port"
+        pattern: "fuser {port}/tcp"
+        example: "fuser 8080/tcp"
+      - intent: "kill all processes accessing a file"
+        pattern: "fuser -k {path/to/file_or_directory}"
+        example: "fuser -k /tmp/lockfile"
+      - intent: "kill all processes using a TCP port"
+        pattern: "fuser -k {port}/tcp"
+        example: "fuser -k 8080/tcp"
+      - intent: "find processes accessing the filesystem that contains a file"
+        pattern: "fuser -m {path/to/file_or_directory}"
+        example: "fuser -m /mnt/usb"
+        followup: "umount /mnt/usb"
+    key_flags:
+      - flag: "-v / --verbose"
+        meaning: "Show USER, PID, ACCESS type, and COMMAND for each process"
+      - flag: "-k / --kill"
+        meaning: "Send SIGKILL to all processes accessing the named file or socket"
+      - flag: "-m / --mount"
+        meaning: "Show all processes accessing the filesystem containing the file"
+      - flag: "-n {space}"
+        meaning: "Select the namespace: file, udp, or tcp"
+      - flag: "-i / --interactive"
+        meaning: "Ask for confirmation before killing each process (use with -k)"
+      - flag: "-s / --silent"
+        meaning: "Suppress all output; rely on exit code only"
+    safety:
+      level: "dangerous"
+      requires_sudo: false
+      confirmation_required_for:
+        - "fuser -k {file} (sends SIGKILL to all processes using the file)"
+        - "fuser -k {port}/tcp (kills all processes using the port)"
+      blocked_patterns:
+        - "fuser -k /"
+        - "fuser -k /usr"
+        - "fuser -k /etc"
+    undo:
+      "fuser -k killed processes": "not undoable — processes must be restarted manually"
+    related_commands:
+      - lsof
+      - kill
+      - ps
+      - umount
