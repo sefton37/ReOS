@@ -1,0 +1,987 @@
+domain: service-management
+description: "Managing systemd services, units, timers, and targets"
+related_domains:
+  - process-management
+  - logging
+  - scheduling
+
+commands:
+  - name: systemctl
+    description: "Control the systemd system and service manager"
+    common_intents:
+      - intent: "start a service"
+        alternate_phrasings:
+          - "systemctl start {service}"
+          - "bring up {service}"
+          - "nginx is down, kick it back on"
+          - "spin up {service}"
+          - "turn on {service}"
+        pattern: "systemctl start {service}"
+        example: "systemctl start nginx"
+        followup: "systemctl status {service}"
+
+      - intent: "stop a service"
+        alternate_phrasings:
+          - "systemctl stop {service}"
+          - "shut down {service}"
+          - "kill off the nginx process via systemd"
+          - "turn off {service}"
+          - "take {service} down"
+        pattern: "systemctl stop {service}"
+        example: "systemctl stop nginx"
+
+      - intent: "restart a service"
+        alternate_phrasings:
+          - "systemctl restart {service}"
+          - "bounce {service}"
+          - "nginx is acting weird, restart it"
+          - "reload {service} by restarting it"
+          - "cycle {service}"
+        pattern: "systemctl restart {service}"
+        example: "systemctl restart nginx"
+        followup: "systemctl status {service}"
+
+      - intent: "reload service configuration without restarting"
+        alternate_phrasings:
+          - "systemctl reload {service}"
+          - "apply new config to {service} without downtime"
+          - "tell nginx to re-read its config without dropping connections"
+          - "hot reload {service}"
+          - "graceful reload {service}"
+        pattern: "systemctl reload {service}"
+        example: "systemctl reload nginx"
+
+      - intent: "check the status of a service"
+        alternate_phrasings:
+          - "systemctl status {service}"
+          - "is {service} running"
+          - "why did nginx crash"
+          - "see recent logs and state for {service}"
+          - "what is {service} doing right now"
+        pattern: "systemctl status {service}"
+        example: "systemctl status sshd"
+        followup: "journalctl -u {service} -e --no-pager"
+
+      - intent: "enable a service to start on boot"
+        alternate_phrasings:
+          - "systemctl enable {service}"
+          - "make {service} start automatically"
+          - "nginx keeps dying after reboot, enable it"
+          - "persist {service} across reboots"
+          - "autostart {service}"
+        pattern: "systemctl enable {service}"
+        example: "systemctl enable docker"
+
+      - intent: "enable a service and start it immediately"
+        alternate_phrasings:
+          - "systemctl enable --now {service}"
+          - "turn on {service} and make it survive reboots in one step"
+          - "enable and start {service} at the same time"
+          - "start and enable {service}"
+        pattern: "systemctl enable --now {service}"
+        example: "systemctl enable --now postgresql"
+
+      - intent: "disable a service from starting on boot"
+        alternate_phrasings:
+          - "systemctl disable {service}"
+          - "stop {service} from starting at boot"
+          - "don't autostart {service} anymore"
+          - "remove {service} from startup"
+          - "prevent {service} from launching on boot"
+        pattern: "systemctl disable {service}"
+        example: "systemctl disable bluetooth"
+
+      - intent: "mask a service so it cannot be started at all"
+        alternate_phrasings:
+          - "systemctl mask {service}"
+          - "completely block {service} from ever starting"
+          - "permanently prevent {service} from running"
+          - "hard-disable {service}"
+        pattern: "systemctl mask {service}"
+        example: "systemctl mask cups"
+
+      - intent: "unmask a service to allow it to be started again"
+        alternate_phrasings:
+          - "systemctl unmask {service}"
+          - "re-enable a masked service"
+          - "undo masking of {service}"
+          - "allow {service} to start again after masking"
+        pattern: "systemctl unmask {service}"
+        example: "systemctl unmask cups"
+
+      - intent: "check if a service is active"
+        alternate_phrasings:
+          - "systemctl is-active {service}"
+          - "is {service} up right now"
+          - "quick check if {service} is running"
+          - "ping systemd to see if {service} is alive"
+        pattern: "systemctl is-active {service}"
+        example: "systemctl is-active nginx"
+
+      - intent: "check if a service is enabled to start on boot"
+        alternate_phrasings:
+          - "systemctl is-enabled {service}"
+          - "does {service} start at boot"
+          - "will {service} survive a reboot"
+          - "is {service} set to autostart"
+        pattern: "systemctl is-enabled {service}"
+        example: "systemctl is-enabled sshd"
+
+      - intent: "list all failed services"
+        alternate_phrasings:
+          - "systemctl --failed"
+          - "what services have crashed"
+          - "show me everything that is broken"
+          - "which units are in a failed state"
+          - "any dead services"
+        pattern: "systemctl --failed"
+        example: "systemctl --failed"
+        followup: "journalctl -u {failed_service} -e --no-pager"
+
+      - intent: "list all running services"
+        alternate_phrasings:
+          - "systemctl list-units --type=service --state=running"
+          - "show every active service"
+          - "what services are currently running"
+          - "list running systemd services"
+          - "what is started right now"
+        pattern: "systemctl list-units --type=service --state=running"
+        example: "systemctl list-units --type=service --state=running"
+
+      - intent: "list all units including inactive ones"
+        alternate_phrasings:
+          - "systemctl list-units --all"
+          - "show all systemd units regardless of state"
+          - "full list of every unit systemd knows about"
+          - "list-units -a"
+        pattern: "systemctl list-units --all"
+        example: "systemctl list-units --all"
+
+      - intent: "reload systemd after editing a unit file"
+        alternate_phrasings:
+          - "systemctl daemon-reload"
+          - "tell systemd to re-read unit files"
+          - "I edited a service file, how do I apply it"
+          - "apply changes to unit files"
+          - "refresh systemd config"
+        pattern: "systemctl daemon-reload"
+        example: "systemctl daemon-reload"
+
+      - intent: "view the contents of a unit file"
+        alternate_phrasings:
+          - "systemctl cat {unit}"
+          - "show me the unit file for {service}"
+          - "print the service definition for {service}"
+          - "read the systemd unit for {service}"
+        pattern: "systemctl cat {unit}"
+        example: "systemctl cat nginx.service"
+
+      - intent: "edit a unit file non-destructively with a drop-in override"
+        alternate_phrasings:
+          - "systemctl edit {unit}"
+          - "add an override to a systemd unit without replacing the whole file"
+          - "tweak {service} unit config without touching the original"
+          - "create a drop-in for {service}"
+        pattern: "systemctl edit {unit}"
+        example: "systemctl edit nginx.service"
+        followup: "systemctl daemon-reload"
+
+      - intent: "show detailed low-level properties of a unit"
+        alternate_phrasings:
+          - "systemctl show {unit}"
+          - "dump all properties for a service for scripting"
+          - "machine-readable status of {service}"
+          - "inspect every property of {unit}"
+        pattern: "systemctl show {unit}"
+        example: "systemctl show nginx.service"
+
+      - intent: "list dependencies of a unit"
+        alternate_phrasings:
+          - "systemctl list-dependencies {unit}"
+          - "what does {service} depend on"
+          - "show the dependency tree for {service}"
+          - "which units does {service} pull in"
+        pattern: "systemctl list-dependencies {unit}"
+        example: "systemctl list-dependencies multi-user.target"
+
+      - intent: "manage a user-level service (no sudo)"
+        alternate_phrasings:
+          - "systemctl --user {action} {service}"
+          - "start a per-user service without root"
+          - "manage my personal systemd service"
+          - "run {service} as my user"
+        pattern: "systemctl --user {action} {service}"
+        example: "systemctl --user start pulseaudio"
+
+    key_flags:
+      - flag: "--now"
+        meaning: "Also start/stop the unit immediately when enabling/disabling"
+      - flag: "--user"
+        meaning: "Operate on user-level units instead of system-wide units (no sudo needed)"
+      - flag: "--failed"
+        meaning: "List only units in a failed state"
+      - flag: "--all, -a"
+        meaning: "Include inactive units in list output"
+      - flag: "--type, -t {type}"
+        meaning: "Filter list commands by unit type (service, socket, timer, target, mount, ...)"
+      - flag: "--state {state}"
+        meaning: "Filter list commands by unit state (running, dead, failed, active, inactive, ...)"
+      - flag: "--no-pager"
+        meaning: "Print output to stdout without piping through less"
+      - flag: "--no-legend"
+        meaning: "Omit column headers and footers from list output (useful for scripts)"
+      - flag: "--full, -l"
+        meaning: "Show full unit names without ellipsis truncation"
+      - flag: "--force, -f"
+        meaning: "With edit: create a full unit file even if one does not exist"
+
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "start"
+        - "stop"
+        - "restart"
+        - "enable"
+        - "disable"
+        - "mask"
+        - "daemon-reload"
+        - "isolate"
+        - "reboot"
+        - "poweroff"
+        - "halt"
+      blocked_patterns:
+        - "systemctl mask sshd"
+        - "systemctl mask ssh"
+        - "systemctl mask systemd-*"
+        - "systemctl disable networking"
+        - "systemctl disable NetworkManager"
+        - "systemctl disable systemd-networkd"
+        - "systemctl mask systemd-journald"
+        - "systemctl mask systemd-logind"
+
+    undo:
+      "start": "systemctl stop {service}"
+      "stop": "systemctl start {service}"
+      "restart": "systemctl stop {service}  # no exact undo; service is now running"
+      "enable": "systemctl disable {service}"
+      "disable": "systemctl enable {service}"
+      "mask": "systemctl unmask {service}"
+      "unmask": "systemctl mask {service}"
+      "daemon-reload": "# no undo; re-edit the unit file and reload again"
+
+    distro_notes:
+      alpine: "Uses OpenRC, not systemd. Equivalent: rc-service {service} start|stop|restart; rc-update add {service} default"
+      void: "Uses runit, not systemd. Equivalent: sv start|stop|restart {service}; ln -s /etc/sv/{service} /var/service/"
+
+    related_commands:
+      - journalctl
+      - systemd-analyze
+      - loginctl
+      - systemd-run
+
+  - name: journalctl
+    description: "Query and display entries from the systemd journal (structured log database)"
+    common_intents:
+      - intent: "show logs for a specific service"
+        alternate_phrasings:
+          - "journalctl -u {service}"
+          - "what is nginx logging"
+          - "show me the output from {service}"
+          - "logs for {service}"
+          - "why is {service} failing, check the logs"
+        pattern: "journalctl -u {service}"
+        example: "journalctl -u nginx"
+
+      - intent: "follow logs in real time for a service"
+        alternate_phrasings:
+          - "journalctl -fu {service}"
+          - "tail the logs for {service} live"
+          - "watch {service} output as it happens"
+          - "stream {service} logs"
+          - "keep showing me new log lines from {service}"
+        pattern: "journalctl -fu {service}"
+        example: "journalctl -fu nginx"
+
+      - intent: "show logs since the last boot"
+        alternate_phrasings:
+          - "journalctl -b"
+          - "only show this boot's logs"
+          - "what happened since the machine restarted"
+          - "logs from current boot"
+          - "fresh boot logs"
+        pattern: "journalctl -b"
+        example: "journalctl -b"
+
+      - intent: "show only error-level and above log messages"
+        alternate_phrasings:
+          - "journalctl -p err"
+          - "show only errors and critical messages in the journal"
+          - "filter journal to errors only"
+          - "what errors have occurred since boot"
+          - "hide info and debug noise, just show errors"
+        pattern: "journalctl -b -p err"
+        example: "journalctl -b -p err"
+
+      - intent: "show kernel messages"
+        alternate_phrasings:
+          - "journalctl -k"
+          - "show dmesg-style messages from the journal"
+          - "kernel log messages"
+          - "hardware and driver messages from this boot"
+        pattern: "journalctl -k"
+        example: "journalctl -k"
+
+      - intent: "show the last N log lines and follow new entries"
+        alternate_phrasings:
+          - "journalctl -n 100 -f"
+          - "tail 100 lines from the journal and keep watching"
+          - "show recent journal entries and stream new ones"
+          - "like tail -f but for systemd journal"
+        pattern: "journalctl -n {lines} -f"
+        example: "journalctl -n 100 -f"
+
+      - intent: "jump to the end of the journal (most recent entries)"
+        alternate_phrasings:
+          - "journalctl -e"
+          - "skip to the latest log entries"
+          - "show the newest journal lines"
+          - "page to the bottom of the journal"
+        pattern: "journalctl -e"
+        example: "journalctl -e"
+
+      - intent: "filter journal by time range"
+        alternate_phrasings:
+          - "journalctl --since yesterday --until now"
+          - "show logs from a specific time window"
+          - "what happened between 2pm and 4pm in the logs"
+          - "journal entries for a date range"
+          - "logs from last night"
+        pattern: "journalctl --since \"{since}\" --until \"{until}\""
+        example: "journalctl --since \"2024-01-15 14:00\" --until \"2024-01-15 16:00\""
+
+      - intent: "filter journal by a specific process ID"
+        alternate_phrasings:
+          - "journalctl _PID={pid}"
+          - "show logs from process {pid}"
+          - "what did PID {pid} log"
+          - "journal for a specific PID"
+        pattern: "journalctl _PID={pid}"
+        example: "journalctl _PID=4812"
+
+      - intent: "show logs for a specific executable"
+        alternate_phrasings:
+          - "journalctl /usr/bin/sshd"
+          - "logs from a specific binary path"
+          - "show what /usr/sbin/nginx has logged"
+          - "journal entries for an executable"
+        pattern: "journalctl {path/to/executable}"
+        example: "journalctl /usr/sbin/sshd"
+
+      - intent: "show all logs from the previous boot"
+        alternate_phrasings:
+          - "journalctl -b -1"
+          - "logs from before the last reboot"
+          - "what happened in the previous boot session"
+          - "journal from last boot"
+        pattern: "journalctl -b -1"
+        example: "journalctl -b -1"
+
+      - intent: "list all available boots in the journal"
+        alternate_phrasings:
+          - "journalctl --list-boots"
+          - "how many times has this machine booted"
+          - "show boot history from journal"
+          - "list boot sessions in the log"
+        pattern: "journalctl --list-boots"
+        example: "journalctl --list-boots"
+
+      - intent: "free up disk space by removing old journal logs"
+        alternate_phrasings:
+          - "journalctl --vacuum-time=2weeks"
+          - "delete old journal entries to free disk space"
+          - "the journal is eating all my disk, clean it up"
+          - "rotate and truncate the systemd journal"
+          - "journalctl taking up too much space"
+        pattern: "journalctl --vacuum-time={duration}"
+        example: "journalctl --vacuum-time=2weeks"
+
+      - intent: "show journal output without paging"
+        alternate_phrasings:
+          - "journalctl --no-pager"
+          - "dump journal to stdout without less"
+          - "pipe journal output to another command"
+          - "journalctl output for a script"
+        pattern: "journalctl -u {service} --no-pager"
+        example: "journalctl -u nginx --no-pager"
+
+    key_flags:
+      - flag: "-u {unit}, --unit={unit}"
+        meaning: "Show only messages from the specified systemd unit"
+      - flag: "-f, --follow"
+        meaning: "Stream new log entries as they arrive (like tail -f)"
+      - flag: "-b [{offset}], --boot[={offset}]"
+        meaning: "Show messages from a specific boot; -b 0 is current, -b -1 is previous"
+      - flag: "-p {priority}, --priority={priority}"
+        meaning: "Filter by minimum priority: emerg(0) alert(1) crit(2) err(3) warning(4) notice(5) info(6) debug(7)"
+      - flag: "-n {N}, --lines={N}"
+        meaning: "Show only the most recent N entries"
+      - flag: "-e, --pager-end"
+        meaning: "Jump to the end of the journal output in the pager"
+      - flag: "-k, --dmesg"
+        meaning: "Show only kernel messages (equivalent to dmesg)"
+      - flag: "--since={timestamp}"
+        meaning: "Show entries on or after the timestamp; accepts 'yesterday', 'today', ISO dates"
+      - flag: "--until={timestamp}"
+        meaning: "Show entries on or before the timestamp"
+      - flag: "--no-pager"
+        meaning: "Do not pipe output through a pager; send directly to stdout"
+      - flag: "--vacuum-time={duration}"
+        meaning: "Remove journal files older than the specified duration (e.g. 2weeks, 30d)"
+      - flag: "--vacuum-size={bytes}"
+        meaning: "Reduce journal to at most the specified size"
+      - flag: "-o {format}, --output={format}"
+        meaning: "Output format: short (default), json, json-pretty, cat, verbose, export"
+
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+
+    undo: null  # read-only command; --vacuum operations are irreversible but non-destructive to running system
+
+    distro_notes:
+      alpine: "Alpine uses OpenRC + syslog-ng or busybox syslog. No journalctl. Use: logread (busybox) or tail -f /var/log/messages"
+      void: "Void uses runit. Logs are in /var/log/sv/{service}/current. Use: sv log {service} or tail -f /var/log/sv/{service}/current"
+
+    related_commands:
+      - systemctl
+      - dmesg
+      - systemd-cat
+
+  - name: systemd-analyze
+    description: "Analyze system boot performance and debug systemd units"
+    common_intents:
+      - intent: "show total boot time"
+        alternate_phrasings:
+          - "systemd-analyze"
+          - "how long did the system take to boot"
+          - "boot is slow, what is the total startup time"
+          - "time the last boot"
+          - "system startup duration"
+        pattern: "systemd-analyze"
+        example: "systemd-analyze"
+
+      - intent: "find which services are slowing down boot"
+        alternate_phrasings:
+          - "systemd-analyze blame"
+          - "what is making boot slow"
+          - "rank services by startup time"
+          - "show me the slowest units at boot"
+          - "find the boot bottleneck"
+        pattern: "systemd-analyze blame"
+        example: "systemd-analyze blame"
+        followup: "systemctl status {slow_unit}"
+
+      - intent: "show the critical chain that determines boot time"
+        alternate_phrasings:
+          - "systemd-analyze critical-chain"
+          - "what is the longest path through boot dependencies"
+          - "show the boot dependency chain"
+          - "which unit is the true bottleneck"
+        pattern: "systemd-analyze critical-chain"
+        example: "systemd-analyze critical-chain"
+
+      - intent: "generate an SVG visualization of the boot timeline"
+        alternate_phrasings:
+          - "systemd-analyze plot"
+          - "create a boot timeline diagram"
+          - "visualize which services started when"
+          - "make a Gantt chart of boot"
+        pattern: "systemd-analyze plot > {path/to/boot.svg}"
+        example: "systemd-analyze plot > /tmp/boot.svg"
+
+      - intent: "check the security score of a service unit"
+        alternate_phrasings:
+          - "systemd-analyze security {unit}"
+          - "how sandboxed is {service}"
+          - "analyze the security posture of a service"
+          - "rate the isolation of {service}"
+        pattern: "systemd-analyze security {unit}"
+        example: "systemd-analyze security nginx.service"
+
+      - intent: "verify a unit file for syntax errors"
+        alternate_phrasings:
+          - "systemd-analyze verify {unit_file}"
+          - "check if a unit file is valid"
+          - "lint a systemd unit file"
+          - "did I write my service file correctly"
+        pattern: "systemd-analyze verify {unit_file}"
+        example: "systemd-analyze verify /etc/systemd/system/myapp.service"
+
+      - intent: "check how long critical-chain took for a specific unit"
+        alternate_phrasings:
+          - "systemd-analyze critical-chain {unit}"
+          - "show dependencies leading to {unit} and their times"
+          - "boot chain ending at {unit}"
+        pattern: "systemd-analyze critical-chain {unit}"
+        example: "systemd-analyze critical-chain multi-user.target"
+
+    key_flags:
+      - flag: "blame"
+        meaning: "List all running units ordered by initialization time (slowest first)"
+      - flag: "critical-chain [UNIT]"
+        meaning: "Print the time-critical chain of boot units; optionally scoped to a unit"
+      - flag: "plot"
+        meaning: "Output an SVG Gantt chart of boot unit timing to stdout"
+      - flag: "security [UNIT]"
+        meaning: "Analyze and score the security/sandboxing settings of units"
+      - flag: "verify FILE"
+        meaning: "Check unit files for syntax and semantic errors without running them"
+      - flag: "dot"
+        meaning: "Generate a Graphviz dependency graph of units"
+      - flag: "calendar SPEC"
+        meaning: "Parse and validate a systemd OnCalendar= time specification"
+
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+
+    undo: null  # read-only analysis tool
+
+    distro_notes:
+      alpine: "Not available. Alpine uses OpenRC; use rc-status for service state overview."
+      void: "Not available. Void uses runit; use sv status /var/service/* for a status overview."
+
+    related_commands:
+      - systemctl
+      - journalctl
+
+  - name: loginctl
+    description: "Control and inspect systemd login sessions, seats, and users"
+    common_intents:
+      - intent: "list all active login sessions"
+        alternate_phrasings:
+          - "loginctl list-sessions"
+          - "who is logged in right now"
+          - "show current login sessions"
+          - "what user sessions exist"
+          - "see all active sessions on this machine"
+        pattern: "loginctl list-sessions"
+        example: "loginctl list-sessions"
+
+      - intent: "show detailed status of a login session"
+        alternate_phrasings:
+          - "loginctl session-status {session_id}"
+          - "what is happening in session {session_id}"
+          - "details for a specific login session"
+          - "inspect session {session_id}"
+        pattern: "loginctl session-status {session_id}"
+        example: "loginctl session-status 3"
+
+      - intent: "list all logged-in users"
+        alternate_phrasings:
+          - "loginctl list-users"
+          - "show currently logged in user accounts"
+          - "who has an active session"
+          - "which users are logged in"
+        pattern: "loginctl list-users"
+        example: "loginctl list-users"
+
+      - intent: "terminate (kill) a login session"
+        alternate_phrasings:
+          - "loginctl terminate-session {session_id}"
+          - "force log out a session"
+          - "kick session {session_id}"
+          - "end another user's session"
+          - "forcibly close session {session_id}"
+        pattern: "loginctl terminate-session {session_id}"
+        example: "loginctl terminate-session 5"
+
+      - intent: "enable lingering for a user so their services persist after logout"
+        alternate_phrasings:
+          - "loginctl enable-linger {user}"
+          - "keep {user}'s systemd services running after they log out"
+          - "let {user} run background services without being logged in"
+          - "persist user services across logouts for {user}"
+        pattern: "loginctl enable-linger {user}"
+        example: "loginctl enable-linger alice"
+
+      - intent: "disable lingering for a user"
+        alternate_phrasings:
+          - "loginctl disable-linger {user}"
+          - "stop {user}'s services when they log out"
+          - "remove linger for {user}"
+        pattern: "loginctl disable-linger {user}"
+        example: "loginctl disable-linger alice"
+
+      - intent: "lock all active sessions (screen lock)"
+        alternate_phrasings:
+          - "loginctl lock-sessions"
+          - "lock all user screens"
+          - "screen lock all active sessions"
+        pattern: "loginctl lock-sessions"
+        example: "loginctl lock-sessions"
+
+    key_flags:
+      - flag: "list-sessions"
+        meaning: "Show all active login sessions with session ID, UID, user, seat, and TTY"
+      - flag: "session-status [ID]"
+        meaning: "Show runtime status and recent log for a session; defaults to caller's session"
+      - flag: "list-users"
+        meaning: "List all users currently logged in"
+      - flag: "terminate-session ID"
+        meaning: "Kill all processes in a session and release its resources"
+      - flag: "enable-linger [USER]"
+        meaning: "Spawn and keep a user manager at boot even when the user is not logged in"
+      - flag: "disable-linger [USER]"
+        meaning: "Stop keeping user manager alive after logout"
+      - flag: "lock-sessions"
+        meaning: "Send lock request to all sessions that support it"
+      - flag: "unlock-sessions"
+        meaning: "Send unlock request to all sessions that support it"
+
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "terminate-session"
+        - "kill-session"
+      blocked_patterns: []
+
+    undo:
+      "enable-linger": "loginctl disable-linger {user}"
+      "disable-linger": "loginctl enable-linger {user}"
+      "terminate-session": "# no undo; session is gone"
+
+    distro_notes:
+      alpine: "loginctl not available on Alpine (no systemd-logind). Use 'who' and 'pkill -u {user}' to manage sessions."
+      void: "loginctl not available on Void (no systemd-logind). Use 'who', 'w', and 'pkill -u {user}'."
+
+    related_commands:
+      - systemctl
+      - who
+      - w
+
+  - name: systemd-run
+    description: "Run a command as a transient systemd service, scope, or timer unit"
+    common_intents:
+      - intent: "run a command as a transient background service"
+        alternate_phrasings:
+          - "sudo systemd-run {command}"
+          - "launch a command under systemd management"
+          - "start a one-off job as a systemd service"
+          - "detach a command from my terminal under systemd"
+          - "run {command} as a managed systemd unit"
+        pattern: "sudo systemd-run {command}"
+        example: "sudo systemd-run /usr/bin/mybackup.sh"
+        followup: "systemctl status run-*.service"
+
+      - intent: "run a transient service as the current user (no root)"
+        alternate_phrasings:
+          - "systemd-run --user {command}"
+          - "launch {command} as a user-level transient service"
+          - "run without sudo under my own user service manager"
+          - "user-level systemd-run"
+        pattern: "systemd-run --user {command}"
+        example: "systemd-run --user /home/alice/myscript.sh"
+
+      - intent: "run a command as a transient service with a custom name"
+        alternate_phrasings:
+          - "sudo systemd-run --unit={name} {command}"
+          - "give a descriptive name to a transient service"
+          - "name the systemd-run job so I can track it"
+          - "transient service with a recognizable unit name"
+        pattern: "sudo systemd-run --unit={name} {command}"
+        example: "sudo systemd-run --unit=mybackup /usr/bin/backup.sh"
+
+      - intent: "run a command once at a specific calendar time via transient timer"
+        alternate_phrasings:
+          - "sudo systemd-run --on-calendar={time} {command}"
+          - "schedule a one-shot command using systemd"
+          - "run {command} at midnight tonight via systemd"
+          - "transient systemd timer for {command}"
+          - "schedule without cron using systemd"
+        pattern: "sudo systemd-run --on-calendar={calendar_event} {command}"
+        example: "sudo systemd-run --on-calendar='2024-01-20 03:00' /usr/bin/backup.sh"
+
+      - intent: "run a command with memory and CPU limits"
+        alternate_phrasings:
+          - "sudo systemd-run -p MemoryMax=512M {command}"
+          - "constrain a command's resource usage via systemd"
+          - "cap memory for {command} to 512MB"
+          - "run {command} with CPU and RAM limits"
+        pattern: "sudo systemd-run -p MemoryMax={memory} -p CPUQuota={percent}% {command}"
+        example: "sudo systemd-run -p MemoryMax=512M -p CPUQuota=25% /usr/bin/analysis.py"
+
+      - intent: "run a command and wait for it to finish (synchronous)"
+        alternate_phrasings:
+          - "sudo systemd-run --wait {command}"
+          - "block until the transient service completes"
+          - "run as systemd service and wait for exit"
+          - "synchronous systemd-run"
+        pattern: "sudo systemd-run --wait {command}"
+        example: "sudo systemd-run --wait /usr/bin/longrunning.sh"
+
+      - intent: "run a command interactively with a terminal (pty)"
+        alternate_phrasings:
+          - "systemd-run --user --pty {command}"
+          - "attach a terminal to a transient systemd service"
+          - "interactive systemd-run session"
+          - "run with stdin/stdout connected under systemd"
+        pattern: "systemd-run --user --pty {command}"
+        example: "systemd-run --user --pty bash"
+
+    key_flags:
+      - flag: "--user"
+        meaning: "Create unit under the current user's service manager instead of system (no sudo)"
+      - flag: "--unit={name}, -u {name}"
+        meaning: "Set an explicit unit name instead of the auto-generated run-XXXXX name"
+      - flag: "--description={text}"
+        meaning: "Set a human-readable description for the transient unit"
+      - flag: "--property={assignment}, -p {assignment}"
+        meaning: "Set a unit property (e.g. MemoryMax=512M, CPUQuota=25%, Restart=on-failure)"
+      - flag: "--wait"
+        meaning: "Block until the transient service exits and return its exit code"
+      - flag: "--pty"
+        meaning: "Allocate a pseudo-terminal for interactive use"
+      - flag: "--pipe, -P"
+        meaning: "Connect stdin/stdout/stderr to caller (for pipeline use)"
+      - flag: "--remain-after-exit, -r"
+        meaning: "Keep the unit around after it exits so status can be inspected"
+      - flag: "--on-calendar={spec}"
+        meaning: "Create a transient timer that runs the service at the given calendar time"
+      - flag: "--on-active={seconds}"
+        meaning: "Create a transient timer that runs the service N seconds from now"
+      - flag: "--scope"
+        meaning: "Create a transient .scope unit (inherits environment) instead of .service"
+      - flag: "--slice={name}"
+        meaning: "Place the unit in a specific resource control slice"
+
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "any command that modifies system state"
+      blocked_patterns: []
+
+    undo:
+      "transient service": "systemctl stop {unit_name}  # or it stops on its own when done"
+
+    distro_notes:
+      alpine: "Not available (no systemd). Use 'nohup {command} &' for background detach, or 'at' for scheduling."
+      void: "Not available (no systemd). Use 'nohup {command} &' or runit service directories for persistent services."
+
+    related_commands:
+      - systemctl
+      - journalctl
+
+  - name: systemd-cat
+    description: "Connect a program's stdout/stderr to the systemd journal"
+    common_intents:
+      - intent: "run a command and send its output to the journal"
+        alternate_phrasings:
+          - "systemd-cat {command}"
+          - "log {command} output to systemd journal"
+          - "capture script output into journald"
+          - "redirect output of {command} to the journal instead of a file"
+          - "send {command} stdout to systemd logs"
+        pattern: "systemd-cat {command}"
+        example: "systemd-cat /usr/bin/mybackup.sh"
+        followup: "journalctl -t mybackup.sh"
+
+      - intent: "pipe command output into the journal"
+        alternate_phrasings:
+          - "{command} | systemd-cat"
+          - "send pipeline output to journal"
+          - "log the output of a shell pipeline to journald"
+          - "capture pipe output in systemd journal"
+        pattern: "{command} | systemd-cat"
+        example: "echo 'backup started' | systemd-cat"
+
+      - intent: "log output with a custom identifier tag"
+        alternate_phrasings:
+          - "systemd-cat -t {identifier} {command}"
+          - "tag journal entries with a custom name for filtering"
+          - "log {command} output with identifier {tag} so I can filter it later"
+          - "labeled journal logging"
+        pattern: "systemd-cat -t {identifier} {command}"
+        example: "systemd-cat -t myapp /usr/bin/myapp.sh"
+        followup: "journalctl -t myapp"
+
+      - intent: "log output at a specific priority level"
+        alternate_phrasings:
+          - "systemd-cat -p warning {command}"
+          - "mark all output from {command} as warning priority in the journal"
+          - "set syslog priority for captured output"
+          - "log {command} as errors"
+        pattern: "systemd-cat -p {priority} {command}"
+        example: "systemd-cat -p warning /usr/bin/monitor.sh"
+
+    key_flags:
+      - flag: "-t {id}, --identifier={id}"
+        meaning: "Tag all journal entries with this string (visible in journalctl -t output)"
+      - flag: "-p {priority}, --priority={priority}"
+        meaning: "Set default priority for stdout: emerg, alert, crit, err, warning, notice, info, debug"
+      - flag: "--stderr-priority={priority}"
+        meaning: "Set a separate priority level for stderr output (defaults to same as stdout)"
+      - flag: "--level-prefix=yes|no"
+        meaning: "Control whether '<N>' syslog prefix codes in output are parsed for priority (default: yes)"
+
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+
+    undo: null  # journal entries are written but journal rotation handles cleanup
+
+    distro_notes:
+      alpine: "Not available (no systemd). Use 'logger' to write to syslog: {command} 2>&1 | logger -t myapp"
+      void: "Not available (no systemd). Use 'logger': {command} 2>&1 | logger -t myapp"
+
+    related_commands:
+      - journalctl
+      - systemctl
+      - logger
+
+  - name: systemd-cgls
+    description: "Recursively show the Linux cgroup hierarchy used by systemd as a tree"
+    common_intents:
+      - intent: "show the full cgroup hierarchy"
+        alternate_phrasings:
+          - "systemd-cgls"
+          - "show how processes are organized into control groups"
+          - "display the cgroup tree"
+          - "what cgroups are running on this system"
+          - "visualize resource group hierarchy"
+        pattern: "systemd-cgls"
+        example: "systemd-cgls"
+
+      - intent: "show the cgroup tree for a specific systemd unit"
+        alternate_phrasings:
+          - "systemd-cgls -u {unit}"
+          - "which processes belong to {service}"
+          - "show cgroup members for {service}"
+          - "what PIDs are in the cgroup for {service}"
+          - "process tree for {service} unit"
+        pattern: "systemd-cgls -u {unit}"
+        example: "systemd-cgls -u nginx.service"
+
+      - intent: "show the cgroup subtree for a specific resource controller"
+        alternate_phrasings:
+          - "systemd-cgls cpu"
+          - "show cgroup hierarchy for CPU controller"
+          - "memory cgroup tree"
+          - "display io cgroup hierarchy"
+        pattern: "systemd-cgls {cpu|memory|io}"
+        example: "systemd-cgls memory"
+
+      - intent: "show cgroup tree including kernel threads"
+        alternate_phrasings:
+          - "systemd-cgls -k"
+          - "include kernel threads in cgroup tree output"
+          - "show kernel processes in cgroup hierarchy"
+        pattern: "systemd-cgls -k"
+        example: "systemd-cgls -k"
+
+    key_flags:
+      - flag: "-u {unit}, --unit={unit}"
+        meaning: "Show only the cgroup subtree for the specified systemd unit(s)"
+      - flag: "--user-unit={unit}"
+        meaning: "Show cgroup subtrees for user-level units"
+      - flag: "--all"
+        meaning: "Show empty cgroups as well (hidden by default)"
+      - flag: "-k"
+        meaning: "Include kernel threads in the output"
+      - flag: "-l, --full"
+        meaning: "Do not ellipsize process names in the tree output"
+      - flag: "-M {machine}, --machine={machine}"
+        meaning: "Limit output to the cgroup for a specific systemd-nspawn container"
+
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+
+    undo: null  # read-only introspection tool
+
+    distro_notes:
+      alpine: "Not available (no systemd). Use 'cat /sys/fs/cgroup/...' or install cgtools."
+      void: "Not available (no systemd). Check /sys/fs/cgroup/ directly or use ps with cgroup fields."
+
+    related_commands:
+      - systemctl
+      - systemd-run
+
+  - name: systemctl list-timers
+    description: "List systemd timer units and their next scheduled execution time"
+    common_intents:
+      - intent: "show all active systemd timers"
+        alternate_phrasings:
+          - "systemctl list-timers"
+          - "what scheduled jobs are set up in systemd"
+          - "show me systemd timers and when they next run"
+          - "list systemd cron-equivalent jobs"
+          - "what timers are scheduled"
+        pattern: "systemctl list-timers"
+        example: "systemctl list-timers"
+
+      - intent: "show all timers including inactive ones"
+        alternate_phrasings:
+          - "systemctl list-timers --all"
+          - "list every timer even if it is not currently running"
+          - "include disabled timers in the list"
+          - "show me all timers including stopped ones"
+        pattern: "systemctl list-timers --all"
+        example: "systemctl list-timers --all"
+
+      - intent: "show timers matching a name pattern"
+        alternate_phrasings:
+          - "systemctl list-timers {pattern}"
+          - "filter timers by name"
+          - "list timers matching backup*"
+          - "find systemd timers for apt or dnf"
+        pattern: "systemctl list-timers {pattern}"
+        example: "systemctl list-timers apt*"
+
+      - intent: "show when a specific timer last ran and will run next"
+        alternate_phrasings:
+          - "systemctl list-timers {timer}"
+          - "when did {timer} last fire"
+          - "when will {timer} run next"
+          - "check schedule for {timer}"
+        pattern: "systemctl list-timers {timer}.timer"
+        example: "systemctl list-timers systemd-tmpfiles-clean.timer"
+        followup: "systemctl status {timer}.timer"
+
+    key_flags:
+      - flag: "--all, -a"
+        meaning: "List all timers including those that are not active"
+      - flag: "--state={state}"
+        meaning: "Filter timers by state: active, inactive, failed"
+      - flag: "--no-pager"
+        meaning: "Send output directly to stdout without less"
+      - flag: "--no-legend"
+        meaning: "Omit the column header and footer lines (useful for scripts)"
+
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+
+    undo: null  # read-only listing command
+
+    distro_notes:
+      alpine: "Not available (no systemd). Use 'crontab -l' and 'cat /etc/crontabs/*' to list scheduled jobs."
+      void: "Not available (no systemd). Use 'crontab -l' to list cron jobs."
+
+    related_commands:
+      - systemctl
+      - systemd-run
+      - crontab

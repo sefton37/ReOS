@@ -1,0 +1,1065 @@
+domain: storage
+description: "Disk usage, partitioning, filesystems, mounting, LVM, and block device management"
+related_domains:
+  - file-operations
+  - system-info
+  - permissions-security
+
+commands:
+
+  - name: df
+    description: "Report filesystem disk space usage for mounted filesystems"
+    common_intents:
+      - intent: "show disk usage for all mounted filesystems in human-readable form"
+        alternate_phrasings:
+          - "df -h"
+          - "I need to know how much disk space is left on every mounted drive before I copy a large archive"
+          - "disk full, what's eating it"
+          - "how much space do I have left"
+          - "check free disk space"
+        pattern: "df -h"
+        example: "df -h"
+
+      - intent: "show disk usage for the filesystem containing a specific path"
+        alternate_phrasings:
+          - "df -h {path}"
+          - "which filesystem is {path} on and how full is it"
+          - "how much room is left on the partition holding {path}"
+        pattern: "df -h {path}"
+        example: "df -h /var/log"
+
+      - intent: "show inode usage for all filesystems"
+        alternate_phrasings:
+          - "df -i"
+          - "disk says full but files are small — check inodes"
+          - "inode exhaustion check"
+          - "how many inodes are left on each filesystem"
+        pattern: "df -ih"
+        example: "df -ih"
+
+      - intent: "show filesystem types alongside usage"
+        alternate_phrasings:
+          - "df -Th"
+          - "show what filesystem type each partition is using"
+          - "list filesystems with their type and free space"
+        pattern: "df -Th"
+        example: "df -Th"
+
+      - intent: "show disk usage excluding tmpfs and squashfs noise"
+        alternate_phrasings:
+          - "df -hx tmpfs -x squashfs"
+          - "hide the fake/loop filesystems and show me real disk usage"
+          - "filter out snap and tmpfs mounts from df"
+        pattern: "df -h -x tmpfs -x squashfs"
+        example: "df -h -x tmpfs -x squashfs"
+
+    key_flags:
+      - flag: "-h"
+        meaning: "Human-readable sizes (K/M/G)"
+      - flag: "-i"
+        meaning: "Show inode usage instead of block usage"
+      - flag: "-T"
+        meaning: "Print filesystem type"
+      - flag: "-x {type}"
+        meaning: "Exclude filesystems of the given type"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands: [du, lsblk, mount]
+
+  - name: du
+    description: "Estimate file and directory disk usage"
+    common_intents:
+      - intent: "show total size of a directory in human-readable form"
+        alternate_phrasings:
+          - "du -sh {directory}"
+          - "how big is {directory}"
+          - "what's the total size of {directory}"
+          - "disk is filling up, how large is {directory} anyway"
+        pattern: "du -sh {directory}"
+        example: "du -sh /var/log"
+
+      - intent: "show sizes of all immediate subdirectories to find what is large"
+        alternate_phrasings:
+          - "du -sh *"
+          - "which subdirectory is eating all the space"
+          - "sort folders by size under current directory"
+          - "show me the biggest dirs in here"
+        pattern: "du -sh {directory}/*"
+        example: "du -sh /home/*"
+
+      - intent: "show directory sizes sorted largest first"
+        alternate_phrasings:
+          - "du -sk * | sort -rn"
+          - "list everything sorted by disk usage, biggest first"
+          - "I need to find the space hog — rank subdirs by size"
+          - "top disk users in this directory"
+        pattern: "du -sk {directory}/* | sort -rn"
+        example: "du -sk /var/* | sort -rn"
+
+      - intent: "list all files and subdirectories with their individual sizes up to a given depth"
+        alternate_phrasings:
+          - "du -ah --max-depth={n} {directory}"
+          - "show size of every file under {directory} up to {n} levels deep"
+          - "I want a recursive breakdown of disk use but not too deep"
+        pattern: "du -ah --max-depth={depth} {directory}"
+        example: "du -ah --max-depth=2 /home/user"
+
+      - intent: "find all files and directories over a size threshold"
+        alternate_phrasings:
+          - "du -ah -t 1G {directory}"
+          - "only show things larger than 1 gigabyte"
+          - "flag anything above {threshold} in size"
+        pattern: "du -ah -t {threshold} {directory}"
+        example: "du -ah -t 500M /var"
+
+    key_flags:
+      - flag: "-s"
+        meaning: "Summarize — show total only for each argument"
+      - flag: "-h"
+        meaning: "Human-readable sizes"
+      - flag: "-a"
+        meaning: "Show sizes for all files, not just directories"
+      - flag: "--max-depth={n}"
+        meaning: "Recurse at most n levels"
+      - flag: "-t {size}"
+        meaning: "Only show entries above the given threshold"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands: [df, find, ncdu]
+
+  - name: lsblk
+    description: "List block devices in a tree-like format with size, type, and mount point"
+    common_intents:
+      - intent: "list all block devices and partitions"
+        alternate_phrasings:
+          - "lsblk"
+          - "show me what disks and partitions the system sees"
+          - "what drives are plugged in"
+          - "list all disks and their partitions"
+          - "show block device tree"
+        pattern: "lsblk"
+        example: "lsblk"
+
+      - intent: "show block devices with filesystem type and mount point"
+        alternate_phrasings:
+          - "lsblk -f"
+          - "show what filesystem is on each partition and where it's mounted"
+          - "I need UUID and fstype for each partition"
+          - "list partitions with their fs type"
+        pattern: "lsblk -f"
+        example: "lsblk -f"
+
+      - intent: "show detailed info for a single specific device"
+        alternate_phrasings:
+          - "lsblk /dev/sda"
+          - "show partitions on /dev/sda only"
+          - "just show me {device} and its children"
+        pattern: "lsblk {device}"
+        example: "lsblk /dev/sdb"
+
+      - intent: "show block device topology (alignment, sector sizes)"
+        alternate_phrasings:
+          - "lsblk -t"
+          - "check disk topology and sector alignment"
+          - "show physical and logical sector sizes for all disks"
+        pattern: "lsblk -t"
+        example: "lsblk -t"
+
+      - intent: "check TRIM support on all disks"
+        alternate_phrasings:
+          - "lsblk --discard"
+          - "does this SSD support TRIM"
+          - "check if discard is available on my drives"
+        pattern: "lsblk --discard"
+        example: "lsblk --discard"
+
+    key_flags:
+      - flag: "-f"
+        meaning: "Show filesystem type, label, UUID, and mount point"
+      - flag: "-t"
+        meaning: "Show topology columns (PHY-SEC, LOG-SEC, etc.)"
+      - flag: "-o {columns}"
+        meaning: "Select specific output columns"
+      - flag: "--discard"
+        meaning: "Show TRIM/discard capability columns"
+      - flag: "-a"
+        meaning: "Include empty devices"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands: [blkid, fdisk, parted, df]
+
+  - name: blkid
+    description: "Print block device attributes (UUID, filesystem type, label)"
+    common_intents:
+      - intent: "list all partitions with UUID and filesystem type"
+        alternate_phrasings:
+          - "sudo blkid"
+          - "show me the UUID of every partition"
+          - "I need the UUIDs for /etc/fstab entries"
+          - "what UUID does each partition have"
+          - "list disk UUIDs"
+        pattern: "sudo blkid"
+        example: "sudo blkid"
+
+      - intent: "get the UUID of a specific partition"
+        alternate_phrasings:
+          - "sudo blkid -s UUID -o value {device}"
+          - "just give me the UUID of {device}, nothing else"
+          - "what is the UUID for {device}"
+        pattern: "sudo blkid -s UUID -o value {device}"
+        example: "sudo blkid -s UUID -o value /dev/sda1"
+
+      - intent: "list all partitions in table format with mount points"
+        alternate_phrasings:
+          - "sudo blkid -o list"
+          - "show partitions as a readable table"
+          - "blkid in list format"
+        pattern: "sudo blkid -o list"
+        example: "sudo blkid -o list"
+
+    key_flags:
+      - flag: "-s {tag}"
+        meaning: "Only show the specified tag (e.g., UUID, TYPE, LABEL)"
+      - flag: "-o {format}"
+        meaning: "Output format: full, value, list, udev, export"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands: [lsblk, tune2fs, parted]
+
+  - name: mount
+    description: "Attach a filesystem to a directory in the directory tree"
+    common_intents:
+      - intent: "mount a block device to a directory"
+        alternate_phrasings:
+          - "sudo mount {device} {mountpoint}"
+          - "plug in this drive and make it accessible at {mountpoint}"
+          - "mount /dev/sdb1 to /mnt/data"
+          - "how do I mount a partition"
+        pattern: "sudo mount {device} {mountpoint}"
+        example: "sudo mount /dev/sdb1 /mnt/data"
+
+      - intent: "mount an ISO image as a loop device"
+        alternate_phrasings:
+          - "sudo mount -o loop {isofile} {mountpoint}"
+          - "I want to browse the contents of an ISO without burning it"
+          - "mount ISO file"
+          - "access files inside a .iso"
+        pattern: "sudo mount -o loop {iso_file} {mountpoint}"
+        example: "sudo mount -o loop /tmp/debian.iso /mnt/iso"
+
+      - intent: "remount a filesystem read-write (e.g., after booting read-only)"
+        alternate_phrasings:
+          - "sudo mount -o remount,rw /"
+          - "root filesystem is read-only, remount it writable"
+          - "system booted into recovery mode, need to write to disk"
+          - "remount / as rw"
+        pattern: "sudo mount -o remount,rw {mountpoint}"
+        example: "sudo mount -o remount,rw /"
+
+      - intent: "bind mount a directory to another location"
+        alternate_phrasings:
+          - "sudo mount --bind {src} {dst}"
+          - "make {src} also appear at {dst}"
+          - "expose a directory at a second path"
+          - "mirror a directory to another location"
+        pattern: "sudo mount --bind {source_directory} {target_directory}"
+        example: "sudo mount --bind /data/web /var/www"
+
+      - intent: "mount a remote NFS share"
+        alternate_phrasings:
+          - "sudo mount -t nfs {host}:{remote_path} {mountpoint}"
+          - "mount NFS export from {host}"
+          - "access a network filesystem at {mountpoint}"
+        pattern: "sudo mount -t nfs {host}:{remote_path} {mountpoint}"
+        example: "sudo mount -t nfs fileserver:/exports/data /mnt/nfs"
+
+      - intent: "show all currently mounted filesystems"
+        alternate_phrasings:
+          - "mount"
+          - "what is currently mounted"
+          - "list all active mounts"
+          - "show mount table"
+        pattern: "mount"
+        example: "mount"
+
+      - intent: "mount all filesystems listed in /etc/fstab"
+        alternate_phrasings:
+          - "sudo mount -a"
+          - "apply all fstab entries"
+          - "mount everything in fstab"
+          - "after editing fstab, activate all entries"
+        pattern: "sudo mount -a"
+        example: "sudo mount -a"
+
+    key_flags:
+      - flag: "-t {type}"
+        meaning: "Specify filesystem type (ext4, ntfs, nfs, iso9660, etc.)"
+      - flag: "-o {options}"
+        meaning: "Mount options (ro, rw, remount, uid=, gid=, loop, bind, etc.)"
+      - flag: "--bind"
+        meaning: "Bind mount: make a directory accessible at a second path"
+      - flag: "-a"
+        meaning: "Mount all filesystems from /etc/fstab"
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "mounting to existing non-empty directories"
+        - "remounting root filesystem"
+      blocked_patterns: []
+    undo:
+      "mount {device} {mountpoint}": "sudo umount {mountpoint}"
+    related_commands: [umount, lsblk, blkid, fstab]
+
+  - name: umount
+    description: "Detach a filesystem from its mount point"
+    common_intents:
+      - intent: "unmount a filesystem by mount point"
+        alternate_phrasings:
+          - "sudo umount {mountpoint}"
+          - "I'm done with this drive, unmount it"
+          - "detach the drive at {mountpoint}"
+          - "eject {mountpoint}"
+        pattern: "sudo umount {mountpoint}"
+        example: "sudo umount /mnt/data"
+
+      - intent: "unmount a filesystem by device"
+        alternate_phrasings:
+          - "sudo umount {device}"
+          - "unmount /dev/sdb1"
+          - "detach the device {device}"
+        pattern: "sudo umount {device}"
+        example: "sudo umount /dev/sdb1"
+
+      - intent: "unmount a busy filesystem by forcing it read-only"
+        alternate_phrasings:
+          - "sudo umount -r {mountpoint}"
+          - "unmount fails because something is using it, remount read-only instead"
+          - "graceful degradation when umount is blocked"
+        pattern: "sudo umount -r {mountpoint}"
+        example: "sudo umount -r /mnt/data"
+
+      - intent: "recursively unmount a directory and all submounts"
+        alternate_phrasings:
+          - "sudo umount -R {mountpoint}"
+          - "unmount everything under {mountpoint} including bind mounts"
+          - "tear down all mounts rooted at {mountpoint}"
+        pattern: "sudo umount -R {mountpoint}"
+        example: "sudo umount -R /mnt"
+
+    key_flags:
+      - flag: "-r"
+        meaning: "If unmount fails, remount read-only"
+      - flag: "-R"
+        meaning: "Recursively unmount everything mounted under the given path"
+      - flag: "-a"
+        meaning: "Unmount all filesystems except proc"
+      - flag: "-l"
+        meaning: "Lazy unmount: detach now, clean up when no longer busy"
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "umount -a (unmounts everything)"
+        - "unmounting the root or boot filesystem"
+      blocked_patterns: []
+    undo:
+      "umount {mountpoint}": "sudo mount {device} {mountpoint}"
+    related_commands: [mount, lsblk, fuser, lsof]
+
+  - name: fdisk
+    description: "Interactively manage partition tables and partitions on a storage device"
+    common_intents:
+      - intent: "list all partitions on all disks"
+        alternate_phrasings:
+          - "sudo fdisk -l"
+          - "show me every partition table on every disk"
+          - "what partitions exist on this system"
+          - "list partition tables"
+          - "show disk layout"
+        pattern: "sudo fdisk -l"
+        example: "sudo fdisk -l"
+
+      - intent: "list partitions on a specific disk"
+        alternate_phrasings:
+          - "sudo fdisk -l {device}"
+          - "show the partition table on {device}"
+          - "what partitions are on {device}"
+        pattern: "sudo fdisk -l {device}"
+        example: "sudo fdisk -l /dev/sdb"
+
+      - intent: "open interactive partition editor for a disk"
+        alternate_phrasings:
+          - "sudo fdisk {device}"
+          - "partition {device} interactively"
+          - "I need to create or delete partitions on {device}"
+          - "open fdisk on {device} to repartition it"
+        pattern: "sudo fdisk {device}"
+        example: "sudo fdisk /dev/sdb"
+
+    key_flags:
+      - flag: "-l"
+        meaning: "List partition tables for all (or specified) devices"
+      - flag: "-n"
+        meaning: "(interactive) Create a new partition"
+      - flag: "-d"
+        meaning: "(interactive) Delete a partition"
+      - flag: "-w"
+        meaning: "(interactive) Write changes and exit"
+      - flag: "-q"
+        meaning: "(interactive) Quit without saving"
+    safety:
+      level: "dangerous"
+      requires_sudo: true
+      confirmation_required_for:
+        - "opening fdisk in write mode on any device"
+        - "writing changes to the partition table"
+      blocked_patterns:
+        - "fdisk on a mounted disk (data corruption risk)"
+    undo:
+      "fdisk {device} (partition deleted)": "Restore from partition table backup (sfdisk -d was not run before change — data may be unrecoverable)"
+    related_commands: [parted, lsblk, partprobe, mkfs]
+
+  - name: mkfs
+    description: "Create a new filesystem on a partition or block device (destructive — erases all data)"
+    common_intents:
+      - intent: "create an ext4 filesystem on a partition"
+        alternate_phrasings:
+          - "sudo mkfs.ext4 {device}"
+          - "format {device} as ext4"
+          - "make a new ext4 filesystem on {device}"
+          - "I need to format a new partition before mounting it"
+          - "wipe and reformat {device} as ext4"
+        pattern: "sudo mkfs.ext4 {device}"
+        example: "sudo mkfs.ext4 /dev/sdb1"
+
+      - intent: "create an exFAT filesystem (for USB drives shared with Windows/macOS)"
+        alternate_phrasings:
+          - "sudo mkfs.exfat {device}"
+          - "format this USB drive as exFAT so Windows can read it"
+          - "make a cross-platform filesystem on {device}"
+        pattern: "sudo mkfs.exfat {device}"
+        example: "sudo mkfs.exfat /dev/sdc1"
+
+      - intent: "create an NTFS filesystem"
+        alternate_phrasings:
+          - "sudo mkfs.ntfs {device}"
+          - "format {device} as NTFS"
+          - "make an NTFS partition on {device}"
+        pattern: "sudo mkfs.ntfs {device}"
+        example: "sudo mkfs.ntfs /dev/sdb2"
+
+      - intent: "create a filesystem of a specific type using mkfs -t"
+        alternate_phrasings:
+          - "sudo mkfs -t {fstype} {device}"
+          - "format {device} using filesystem type {fstype}"
+        pattern: "sudo mkfs -t {fstype} {device}"
+        example: "sudo mkfs -t xfs /dev/sdb1"
+
+      - intent: "create ext4 filesystem with a specific label"
+        alternate_phrasings:
+          - "sudo mkfs.ext4 -L {label} {device}"
+          - "format {device} as ext4 and give it the label {label}"
+          - "set disk label while formatting"
+        pattern: "sudo mkfs.ext4 -L {label} {device}"
+        example: "sudo mkfs.ext4 -L backups /dev/sdb1"
+
+    key_flags:
+      - flag: "-t {type}"
+        meaning: "Filesystem type (ext2, ext3, ext4, xfs, btrfs, ntfs, exfat, vfat)"
+      - flag: "-L {label}"
+        meaning: "Set the filesystem label"
+      - flag: "-c"
+        meaning: "Check for bad blocks before creating the filesystem"
+    safety:
+      level: "dangerous"
+      requires_sudo: true
+      confirmation_required_for:
+        - "every invocation — mkfs permanently destroys all data on the target device"
+      blocked_patterns:
+        - "mkfs on a currently mounted partition"
+    undo:
+      "mkfs {device}": "Data is unrecoverable without a prior backup. testdisk or photorec may recover some files."
+    related_commands: [fdisk, parted, mount, tune2fs, fsck]
+
+  - name: parted
+    description: "Partition manipulation program supporting GPT and MBR; also usable non-interactively"
+    common_intents:
+      - intent: "list all partitions on all block devices"
+        alternate_phrasings:
+          - "sudo parted -l"
+          - "show every partition table on all disks"
+          - "list partition layout for all drives"
+          - "what does the partition table look like"
+        pattern: "sudo parted -l"
+        example: "sudo parted -l"
+
+      - intent: "create a new GPT partition table on a disk (wipes existing layout)"
+        alternate_phrasings:
+          - "sudo parted {device} mklabel gpt"
+          - "initialize {device} with a GPT partition table"
+          - "wipe and start fresh with GPT on {device}"
+          - "I'm setting up a new disk and want GPT"
+        pattern: "sudo parted {device} mklabel {gpt|msdos}"
+        example: "sudo parted /dev/sdb mklabel gpt"
+
+      - intent: "create a new partition on a disk"
+        alternate_phrasings:
+          - "sudo parted {device} mkpart primary ext4 {start} {end}"
+          - "add a partition from {start} to {end} on {device}"
+          - "carve out a new partition on {device}"
+        pattern: "sudo parted {device} mkpart {part_type} {fs_type} {start} {end}"
+        example: "sudo parted /dev/sdb mkpart primary ext4 1MiB 50GiB"
+
+      - intent: "open parted in interactive mode for a specific device"
+        alternate_phrasings:
+          - "sudo parted {device}"
+          - "partition {device} interactively with parted"
+          - "open parted on {device}"
+        pattern: "sudo parted {device}"
+        example: "sudo parted /dev/sdb"
+
+      - intent: "set the boot flag on a partition"
+        alternate_phrasings:
+          - "sudo parted {device} set {partition_number} boot on"
+          - "mark partition {n} on {device} as bootable"
+          - "enable the boot flag for partition {n}"
+        pattern: "sudo parted {device} set {partition_number} boot on"
+        example: "sudo parted /dev/sda set 1 boot on"
+
+    key_flags:
+      - flag: "-l"
+        meaning: "List partition tables for all devices"
+      - flag: "-s"
+        meaning: "Script mode — suppress all interactive prompts"
+      - flag: "mklabel {type}"
+        meaning: "Create a new partition table (gpt, msdos/mbr — DESTRUCTIVE)"
+      - flag: "mkpart {type} {start} {end}"
+        meaning: "Create a new partition"
+      - flag: "set {n} {flag} on|off"
+        meaning: "Toggle a partition flag (boot, lvm, swap, etc.)"
+    safety:
+      level: "dangerous"
+      requires_sudo: true
+      confirmation_required_for:
+        - "mklabel — destroys existing partition table"
+        - "mkpart — partitioning a disk in use"
+        - "rm (parted command) — removes a partition"
+      blocked_patterns:
+        - "parted mklabel on a disk with mounted partitions"
+    undo:
+      "parted mklabel": "Partition table is overwritten and unrecoverable without a prior backup (testdisk can sometimes recover)."
+    related_commands: [fdisk, mkfs, lsblk, partprobe]
+
+  - name: swapon
+    description: "Enable a swap partition or swap file for virtual memory"
+    common_intents:
+      - intent: "show current swap usage and active swap areas"
+        alternate_phrasings:
+          - "swapon --show"
+          - "how much swap do I have active"
+          - "show swap partitions and their usage"
+          - "is swap enabled and how full is it"
+        pattern: "swapon --show"
+        example: "swapon --show"
+
+      - intent: "enable a specific swap partition or file"
+        alternate_phrasings:
+          - "sudo swapon {device_or_file}"
+          - "activate swap on {device}"
+          - "turn on the swap partition at {device}"
+          - "add more swap using {device}"
+        pattern: "sudo swapon {device_or_file}"
+        example: "sudo swapon /dev/sda2"
+
+      - intent: "enable all swap areas defined in /etc/fstab"
+        alternate_phrasings:
+          - "sudo swapon -a"
+          - "activate all fstab swap entries"
+          - "enable all configured swap spaces"
+        pattern: "sudo swapon -a"
+        example: "sudo swapon -a"
+
+    key_flags:
+      - flag: "--show"
+        meaning: "Display summary table of swap spaces"
+      - flag: "-a"
+        meaning: "Enable all swap areas from /etc/fstab (excluding noauto)"
+      - flag: "-L {label}"
+        meaning: "Enable swap partition by its label"
+      - flag: "-p {priority}"
+        meaning: "Set priority for this swap area"
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "swapon {device}": "sudo swapoff {device}"
+    related_commands: [swapoff, free, mkswap]
+
+  - name: swapoff
+    description: "Disable a swap partition or swap file"
+    common_intents:
+      - intent: "disable a specific swap partition or file"
+        alternate_phrasings:
+          - "sudo swapoff {device_or_file}"
+          - "turn off swap on {device}"
+          - "deactivate swap partition at {device}"
+          - "I need to run fsck on the swap partition — disable it first"
+        pattern: "sudo swapoff {device_or_file}"
+        example: "sudo swapoff /dev/sda2"
+
+      - intent: "disable all swap"
+        alternate_phrasings:
+          - "sudo swapoff -a"
+          - "turn off all swap"
+          - "disable every swap area"
+          - "preparing to repartition — need swap fully off"
+        pattern: "sudo swapoff -a"
+        example: "sudo swapoff -a"
+
+    key_flags:
+      - flag: "-a"
+        meaning: "Disable all active swap areas listed in /proc/swaps"
+      - flag: "-L {label}"
+        meaning: "Disable swap partition by label"
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "swapoff -a on a system under heavy memory pressure"
+      blocked_patterns: []
+    undo:
+      "swapoff {device}": "sudo swapon {device}"
+    related_commands: [swapon, free, mkswap]
+
+  - name: dd
+    description: "Low-level block copy and conversion; used for disk imaging, cloning, and writing ISOs"
+    common_intents:
+      - intent: "write a bootable ISO image to a USB drive"
+        alternate_phrasings:
+          - "sudo dd if={iso} of={usb_device} status=progress"
+          - "flash an ISO onto a USB stick"
+          - "burn an image to USB with dd"
+          - "create a bootable USB from an .iso file"
+          - "image this ISO to /dev/sdc"
+        pattern: "sudo dd if={iso_file} of={usb_device} bs=4M status=progress"
+        example: "sudo dd if=/home/user/debian.iso of=/dev/sdc bs=4M status=progress"
+
+      - intent: "clone one disk or partition to another"
+        alternate_phrasings:
+          - "sudo dd if={source} of={dest} bs=4M conv=fsync status=progress"
+          - "copy /dev/sda to /dev/sdb byte for byte"
+          - "duplicate a disk"
+          - "clone this drive to a replacement drive"
+        pattern: "sudo dd if={source_device} of={dest_device} bs=4M conv=fsync status=progress"
+        example: "sudo dd if=/dev/sda of=/dev/sdb bs=4M conv=fsync status=progress"
+
+      - intent: "create a raw disk image backup"
+        alternate_phrasings:
+          - "sudo dd if={device} of={image_file} status=progress"
+          - "back up the whole disk to an image file"
+          - "snapshot a partition to a .img file"
+          - "save a full disk image of {device}"
+        pattern: "sudo dd if={device} of={image_file} bs=4M status=progress"
+        example: "sudo dd if=/dev/sda of=/backup/sda.img bs=4M status=progress"
+
+      - intent: "restore a disk image to a device"
+        alternate_phrasings:
+          - "sudo dd if={image_file} of={device} status=progress"
+          - "write a .img backup back to a disk"
+          - "restore this image onto {device}"
+          - "flash a raw image to a disk"
+        pattern: "sudo dd if={image_file} of={device} bs=4M status=progress"
+        example: "sudo dd if=/backup/sda.img of=/dev/sda bs=4M status=progress"
+
+      - intent: "benchmark disk sequential write speed"
+        alternate_phrasings:
+          - "dd bs=1M count=1024 if=/dev/zero of={path} status=progress"
+          - "test how fast this disk writes"
+          - "measure write throughput of this drive"
+          - "quick disk write benchmark"
+        pattern: "dd bs=1M count=1024 if=/dev/zero of={test_file} status=progress && rm {test_file}"
+        example: "dd bs=1M count=1024 if=/dev/zero of=/tmp/disktest status=progress && rm /tmp/disktest"
+
+    key_flags:
+      - flag: "if={file}"
+        meaning: "Input file (source)"
+      - flag: "of={file}"
+        meaning: "Output file (destination)"
+      - flag: "bs={size}"
+        meaning: "Block size for reads and writes (e.g., 4M, 512)"
+      - flag: "status=progress"
+        meaning: "Print transfer progress to stderr"
+      - flag: "conv=fsync"
+        meaning: "Flush all output data before finishing"
+      - flag: "count={n}"
+        meaning: "Copy only n input blocks"
+    safety:
+      level: "dangerous"
+      requires_sudo: true
+      confirmation_required_for:
+        - "every invocation where of= is a block device — wrong target destroys data irreversibly"
+      blocked_patterns:
+        - "dd if=/dev/zero of=/dev/sda"
+        - "dd if=/dev/urandom of=/dev/sd{any}"
+        - "dd of= targeting a mounted filesystem's underlying device"
+    undo:
+      "dd if=... of={device}": "Restore from a prior backup image. No in-place undo exists."
+    related_commands: [fdisk, mkfs, parted, rsync]
+
+  - name: sync
+    description: "Flush all pending filesystem writes to disk, ensuring data is committed"
+    common_intents:
+      - intent: "flush all pending disk writes"
+        alternate_phrasings:
+          - "sync"
+          - "make sure all buffered writes are committed to disk before I power off"
+          - "force dirty cache to be written to disk"
+          - "I'm about to yank the power, flush writes first"
+          - "commit all pending I/O to disk"
+        pattern: "sync"
+        example: "sync"
+
+      - intent: "sync and then drop page/dentry/inode caches to reclaim memory"
+        alternate_phrasings:
+          - "sync; echo 3 | sudo tee /proc/sys/vm/drop_caches"
+          - "flush writes and drop filesystem caches"
+          - "free up RAM used by disk cache after sync"
+          - "clear page cache after flushing"
+        pattern: "sync; echo 3 | sudo tee /proc/sys/vm/drop_caches"
+        example: "sync; echo 3 | sudo tee /proc/sys/vm/drop_caches"
+
+    key_flags: []
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands: [dd, umount, fsck]
+
+  - name: fsck
+    description: "Check and optionally repair a filesystem (must be run on an unmounted filesystem)"
+    common_intents:
+      - intent: "check a filesystem for errors"
+        alternate_phrasings:
+          - "sudo fsck {device}"
+          - "run a disk check on {device}"
+          - "check {device} for filesystem errors"
+          - "is there filesystem corruption on {device}"
+          - "the filesystem on {device} is acting weird — check it"
+        pattern: "sudo fsck {device}"
+        example: "sudo fsck /dev/sdb1"
+
+      - intent: "automatically repair filesystem errors without prompting"
+        alternate_phrasings:
+          - "sudo fsck -a {device}"
+          - "fix filesystem errors automatically on {device}"
+          - "repair {device} non-interactively"
+          - "auto-fix all errors on {device}"
+        pattern: "sudo fsck -a {device}"
+        example: "sudo fsck -a /dev/sdb1"
+
+      - intent: "interactively repair filesystem errors, confirming each fix"
+        alternate_phrasings:
+          - "sudo fsck -r {device}"
+          - "check {device} and let me approve each repair"
+          - "interactive filesystem repair on {device}"
+          - "fix errors one by one on {device}"
+        pattern: "sudo fsck -r {device}"
+        example: "sudo fsck -r /dev/sdb1"
+
+    key_flags:
+      - flag: "-a"
+        meaning: "Automatically repair errors without prompting"
+      - flag: "-r"
+        meaning: "Interactively repair, prompting for each fix"
+      - flag: "-n"
+        meaning: "Dry-run — check but do not repair"
+      - flag: "-y"
+        meaning: "Answer yes to all repair prompts (alias for -a on most types)"
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "fsck -a or fsck -y on any device — auto-repair can alter data"
+      blocked_patterns:
+        - "fsck on a mounted filesystem (causes corruption)"
+    undo:
+      "fsck -a {device}": "No undo. Repairs modify the filesystem in place. Take a backup before running."
+    related_commands: [mount, umount, tune2fs, e2fsck]
+
+  - name: tune2fs
+    description: "Adjust tunable parameters on ext2/ext3/ext4 filesystems"
+    common_intents:
+      - intent: "set a label on an ext filesystem"
+        alternate_phrasings:
+          - "sudo tune2fs -L {label} {device}"
+          - "label the filesystem on {device} as {label}"
+          - "name this ext4 partition {label}"
+          - "assign a label to {device} so I can reference it in fstab"
+        pattern: "sudo tune2fs -L {label} {device}"
+        example: "sudo tune2fs -L mydata /dev/sdb1"
+
+      - intent: "assign a new random UUID to a filesystem"
+        alternate_phrasings:
+          - "sudo tune2fs -U random {device}"
+          - "generate a new UUID for {device} after cloning"
+          - "fix duplicate UUID after disk clone"
+          - "I cloned a disk and now both partitions have the same UUID"
+        pattern: "sudo tune2fs -U random {device}"
+        example: "sudo tune2fs -U random /dev/sdb1"
+
+      - intent: "enable journaling on an ext2 filesystem (upgrade to ext3)"
+        alternate_phrasings:
+          - "sudo tune2fs -O has_journal {device}"
+          - "add a journal to {device} to make it ext3"
+          - "enable journaling on this ext2 partition"
+        pattern: "sudo tune2fs -O has_journal {device}"
+        example: "sudo tune2fs -O has_journal /dev/sdb1"
+
+      - intent: "disable automatic fsck after N mounts (set mount count threshold)"
+        alternate_phrasings:
+          - "sudo tune2fs -c {n} {device}"
+          - "set fsck interval to every {n} mounts on {device}"
+          - "change how often this partition is auto-checked at boot"
+        pattern: "sudo tune2fs -c {mount_count} {device}"
+        example: "sudo tune2fs -c 0 /dev/sdb1"
+
+    key_flags:
+      - flag: "-L {label}"
+        meaning: "Set the filesystem volume label"
+      - flag: "-U {uuid|random|clear}"
+        meaning: "Set, randomize, or clear the filesystem UUID"
+      - flag: "-c {n}"
+        meaning: "Set maximum mount count before forced fsck (0 = disable)"
+      - flag: "-O {feature}"
+        meaning: "Enable a filesystem feature (e.g., has_journal, dir_index)"
+      - flag: "-o {options}"
+        meaning: "Set default mount options stored in the superblock"
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "changing UUID on a filesystem referenced in /etc/fstab by UUID"
+      blocked_patterns: []
+    undo:
+      "tune2fs -L {old_label} {device}": "sudo tune2fs -L {old_label} {device}"
+      "tune2fs -U random {device}": "Update /etc/fstab and bootloader config to use the new UUID; old UUID is gone."
+    related_commands: [mkfs, fsck, blkid, e2fsck]
+
+  # LVM commands grouped under an lvm section
+
+  - name: pvs
+    description: "Display a summary table of LVM physical volumes"
+    common_intents:
+      - intent: "list all LVM physical volumes"
+        alternate_phrasings:
+          - "sudo pvs"
+          - "show me the physical volumes in my LVM setup"
+          - "what disks or partitions are used as LVM PVs"
+          - "list physical volumes with sizes"
+        pattern: "sudo pvs"
+        example: "sudo pvs"
+
+      - intent: "show detailed physical volume information"
+        alternate_phrasings:
+          - "sudo pvdisplay"
+          - "verbose view of all physical volumes"
+          - "show PV attributes in detail"
+        pattern: "sudo pvdisplay"
+        example: "sudo pvdisplay"
+
+    key_flags:
+      - flag: "-v"
+        meaning: "Verbose output with extra fields"
+      - flag: "-o {fields}"
+        meaning: "Select specific output columns"
+    safety:
+      level: "safe"
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands: [vgs, lvs, lvcreate, pvcreate]
+
+  - name: vgs
+    description: "Display a summary table of LVM volume groups"
+    common_intents:
+      - intent: "list all LVM volume groups and free space"
+        alternate_phrasings:
+          - "sudo vgs"
+          - "show my LVM volume groups"
+          - "how much free space is left in each volume group"
+          - "list VGs with available extents"
+        pattern: "sudo vgs"
+        example: "sudo vgs"
+
+      - intent: "show detailed volume group information"
+        alternate_phrasings:
+          - "sudo vgdisplay"
+          - "verbose VG info"
+          - "show VG attributes in detail"
+        pattern: "sudo vgdisplay"
+        example: "sudo vgdisplay"
+
+    key_flags:
+      - flag: "-v"
+        meaning: "Verbose output"
+      - flag: "-o {fields}"
+        meaning: "Select specific output columns"
+    safety:
+      level: "safe"
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands: [pvs, lvs, vgcreate, lvextend]
+
+  - name: lvs
+    description: "Display a summary table of LVM logical volumes"
+    common_intents:
+      - intent: "list all LVM logical volumes"
+        alternate_phrasings:
+          - "sudo lvs"
+          - "show my LVM logical volumes"
+          - "what logical volumes exist in this system"
+          - "list LVs with their sizes and VGs"
+        pattern: "sudo lvs"
+        example: "sudo lvs"
+
+      - intent: "show detailed logical volume information"
+        alternate_phrasings:
+          - "sudo lvdisplay"
+          - "verbose LV info"
+          - "show full LV attributes"
+        pattern: "sudo lvdisplay"
+        example: "sudo lvdisplay"
+
+    key_flags:
+      - flag: "-v"
+        meaning: "Verbose output"
+      - flag: "-a"
+        meaning: "Include hidden internal volumes"
+      - flag: "-o {fields}"
+        meaning: "Select specific output columns"
+    safety:
+      level: "safe"
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands: [pvs, vgs, lvcreate, lvextend]
+
+  - name: lvcreate
+    description: "Create a new logical volume within an LVM volume group"
+    common_intents:
+      - intent: "create a logical volume of a fixed size"
+        alternate_phrasings:
+          - "sudo lvcreate -L {size} -n {name} {vg}"
+          - "make a {size} logical volume called {name} in {vg}"
+          - "carve out a new LV from {vg}"
+          - "allocate {size} from volume group {vg} as a new LV"
+          - "I need more storage from my LVM pool — create an LV"
+        pattern: "sudo lvcreate -L {size} -n {lv_name} {vg_name}"
+        example: "sudo lvcreate -L 20G -n datalv vg0"
+
+      - intent: "create a logical volume using all free space in the volume group"
+        alternate_phrasings:
+          - "sudo lvcreate -l 100%FREE -n {name} {vg}"
+          - "use all remaining free space in {vg} for a new LV"
+          - "fill the rest of {vg} with a new logical volume"
+        pattern: "sudo lvcreate -l 100%FREE -n {lv_name} {vg_name}"
+        example: "sudo lvcreate -l 100%FREE -n datalv vg0"
+
+      - intent: "create a logical volume using a percentage of the volume group"
+        alternate_phrasings:
+          - "sudo lvcreate -l {pct}%VG -n {name} {vg}"
+          - "give {name} {pct}% of the total space in {vg}"
+        pattern: "sudo lvcreate -l {percent}%VG -n {lv_name} {vg_name}"
+        example: "sudo lvcreate -l 60%VG -n homelv vg0"
+
+    key_flags:
+      - flag: "-L {size}"
+        meaning: "Absolute size (e.g., 10G, 500M)"
+      - flag: "-l {extents}"
+        meaning: "Size in extents or percentage (e.g., 100%FREE, 60%VG)"
+      - flag: "-n {name}"
+        meaning: "Name for the new logical volume"
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "creating an LV that fills the VG (no room left for snapshots)"
+      blocked_patterns: []
+    undo:
+      "lvcreate -n {name} {vg}": "sudo lvremove /dev/{vg}/{name}"
+    related_commands: [lvs, vgs, lvextend, mkfs]
+
+  - name: lvextend
+    description: "Increase the size of a logical volume (and optionally its filesystem)"
+    common_intents:
+      - intent: "extend a logical volume to an absolute size"
+        alternate_phrasings:
+          - "sudo lvextend -L {size} {lv_path}"
+          - "grow {lv_path} to {size}"
+          - "resize LV to {size}"
+          - "I need more space on this logical volume — make it {size}"
+        pattern: "sudo lvextend -L {size} {lv_path}"
+        example: "sudo lvextend -L 50G /dev/vg0/datalv"
+
+      - intent: "extend a logical volume by a given amount and resize the filesystem"
+        alternate_phrasings:
+          - "sudo lvextend -L +{size} -r {lv_path}"
+          - "add {size} to {lv_path} and resize the filesystem too"
+          - "grow the LV and ext4/xfs in one step"
+          - "expand logical volume and filesystem together"
+          - "disk is full on an LVM system — add space"
+        pattern: "sudo lvextend -L +{size} -r {lv_path}"
+        example: "sudo lvextend -L +10G -r /dev/vg0/datalv"
+
+      - intent: "extend a logical volume to fill all remaining free space in its volume group"
+        alternate_phrasings:
+          - "sudo lvextend -l +100%FREE -r {lv_path}"
+          - "use all free VG space to grow {lv_path}"
+          - "give all remaining space to this LV"
+          - "max out {lv_path} using every free extent in the VG"
+        pattern: "sudo lvextend -l +100%FREE -r {lv_path}"
+        example: "sudo lvextend -l +100%FREE -r /dev/vg0/datalv"
+
+    key_flags:
+      - flag: "-L {size}"
+        meaning: "New absolute size"
+      - flag: "-L +{size}"
+        meaning: "Increase by the given amount"
+      - flag: "-l +100%FREE"
+        meaning: "Use all remaining free extents in the VG"
+      - flag: "-r"
+        meaning: "Resize the underlying filesystem after extending the LV"
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "any lvextend without -r (filesystem will not grow to match)"
+      blocked_patterns: []
+    undo:
+      "lvextend {lv_path}": "lvreduce is dangerous — requires shrinking the filesystem first with resize2fs. Not recommended without a backup."
+    related_commands: [lvs, vgs, lvcreate, resize2fs]

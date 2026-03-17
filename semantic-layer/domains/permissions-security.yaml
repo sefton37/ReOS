@@ -1,0 +1,1194 @@
+domain: permissions-security
+description: "File permissions, ACLs, firewall, SELinux/AppArmor, encryption, and system hardening"
+related_domains:
+  - file-operations
+  - user-management
+  - networking
+
+commands:
+
+  - name: chmod
+    description: "Change the read/write/execute permissions of files and directories"
+    common_intents:
+      - intent: "make a file executable"
+        alternate_phrasings:
+          - "chmod +x file"
+          - "I need to run this script but it says permission denied"
+          - "add execute permission to a file"
+          - "how do I make this runnable"
+          - "mark a script so I can execute it"
+        pattern: "chmod u+x {file}"
+        example: "chmod u+x deploy.sh"
+      - intent: "set permissions using octal notation"
+        alternate_phrasings:
+          - "chmod 755 file"
+          - "set permissions to 644"
+          - "give owner full access and everyone else read-only"
+          - "use numeric mode to set file permissions"
+        pattern: "chmod {octal_mode} {file}"
+        example: "chmod 644 config.yaml"
+      - intent: "remove write permission from group and others"
+        alternate_phrasings:
+          - "chmod go-w file"
+          - "make this file read-only for everyone except the owner"
+          - "stop other users from modifying this file"
+          - "lock down write access on this file"
+        pattern: "chmod go-w {file}"
+        example: "chmod go-w /etc/myapp.conf"
+      - intent: "give all users read and execute permission"
+        alternate_phrasings:
+          - "chmod a+rx file"
+          - "let everyone read and run this"
+          - "world-readable and world-executable"
+          - "open up read/execute to all users"
+        pattern: "chmod a+rx {file}"
+        example: "chmod a+rx /usr/local/bin/mytool"
+      - intent: "recursively change permissions on a directory"
+        alternate_phrasings:
+          - "chmod -R 755 directory"
+          - "set permissions on this whole folder tree"
+          - "change perms on everything under this directory"
+          - "fix permissions recursively"
+        pattern: "chmod -R {octal_mode} {directory}"
+        example: "chmod -R 755 /var/www/html"
+      - intent: "set permissions so only the owner can read/write (private file)"
+        alternate_phrasings:
+          - "chmod 600 file"
+          - "make this file private — only I should be able to read it"
+          - "nobody else should see this file"
+          - "lock file to owner only"
+        pattern: "chmod 600 {file}"
+        example: "chmod 600 ~/.ssh/id_rsa"
+    key_flags:
+      - flag: "u+x"
+        meaning: "Add execute permission for the owning user"
+      - flag: "a+r"
+        meaning: "Add read permission for all (user, group, others)"
+      - flag: "go-w"
+        meaning: "Remove write permission from group and others"
+      - flag: "-R"
+        meaning: "Apply change recursively to all files and subdirectories"
+      - flag: "=rwx"
+        meaning: "Set exact permissions, clearing any bits not listed"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "recursive chmod on system directories"
+        - "removing execute from binaries"
+      blocked_patterns:
+        - "chmod 777 -R /"
+        - "chmod -R 777 /"
+        - "chmod 777 /etc"
+        - "chmod 777 /usr"
+    undo:
+      "changed permissions": "chmod {original_mode} {file} (check with ls -l first)"
+    related_commands:
+      - chown
+      - setfacl
+      - umask
+      - stat
+
+  - name: chown
+    description: "Change the user and group ownership of files and directories"
+    common_intents:
+      - intent: "change the owner of a file"
+        alternate_phrasings:
+          - "chown user file"
+          - "give this file to a different user"
+          - "transfer ownership of a file"
+          - "this file needs to belong to someone else"
+        pattern: "sudo chown {user} {file}"
+        example: "sudo chown alice /var/data/report.csv"
+      - intent: "change both owner and group of a file"
+        alternate_phrasings:
+          - "chown user:group file"
+          - "set user and group at the same time"
+          - "assign file to a specific user and group"
+          - "change ownership and group together"
+        pattern: "sudo chown {user}:{group} {file}"
+        example: "sudo chown www-data:www-data /var/www/index.html"
+      - intent: "recursively change ownership of a directory"
+        alternate_phrasings:
+          - "chown -R user:group dir"
+          - "make this whole directory tree owned by a user"
+          - "fix ownership on everything under this folder"
+          - "this web root should be owned by the webserver user"
+        pattern: "sudo chown -R {user}:{group} {directory}"
+        example: "sudo chown -R deploy:deploy /opt/myapp"
+      - intent: "change the group of a file without changing the owner"
+        alternate_phrasings:
+          - "chown :group file"
+          - "just change the group, leave the owner alone"
+          - "reassign group ownership only"
+        pattern: "sudo chown :{group} {file}"
+        example: "sudo chown :developers /srv/code/app.py"
+      - intent: "change ownership to match a reference file"
+        alternate_phrasings:
+          - "chown --reference reffile targetfile"
+          - "copy ownership from one file to another"
+          - "make this file have the same owner as that one"
+        pattern: "sudo chown --reference {reference_file} {target_file}"
+        example: "sudo chown --reference /etc/nginx/nginx.conf /etc/nginx/site.conf"
+    key_flags:
+      - flag: "-R"
+        meaning: "Recursively change ownership of all files in a directory tree"
+      - flag: "-h"
+        meaning: "Change ownership of symlink itself, not the file it points to"
+      - flag: "--reference"
+        meaning: "Copy ownership from a reference file instead of specifying user:group"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "recursive chown on system directories"
+        - "chown on /etc, /usr, /var"
+      blocked_patterns: []
+    undo:
+      "changed ownership": "sudo chown {original_user}:{original_group} {file} (check with stat {file} first)"
+    related_commands:
+      - chmod
+      - chgrp
+      - stat
+
+  - name: umask
+    description: "View or set the default permission mask applied to newly created files and directories"
+    common_intents:
+      - intent: "show the current umask value"
+        alternate_phrasings:
+          - "umask"
+          - "what is my current umask"
+          - "what permissions do new files get by default"
+          - "check the default file creation mask"
+        pattern: "umask"
+        example: "umask"
+      - intent: "show current umask in symbolic human-readable form"
+        alternate_phrasings:
+          - "umask -S"
+          - "show the umask in letters not numbers"
+          - "display umask symbolically"
+        pattern: "umask -S"
+        example: "umask -S"
+      - intent: "set umask so new files are private to the owner"
+        alternate_phrasings:
+          - "umask 077"
+          - "make new files only readable by me"
+          - "set strict default permissions — no access for group or others"
+          - "private umask for sensitive work"
+        pattern: "umask {octal_mask}"
+        example: "umask 077"
+      - intent: "set umask to standard 022 (owner write, others read)"
+        alternate_phrasings:
+          - "umask 022"
+          - "reset umask to default"
+          - "set normal umask"
+          - "new files should be world-readable but only owner-writable"
+        pattern: "umask 022"
+        example: "umask 022"
+    key_flags:
+      - flag: "-S"
+        meaning: "Display umask in symbolic (human-readable) notation instead of octal"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "changed umask": "umask {previous_value} (current shell only — does not persist)"
+    related_commands:
+      - chmod
+      - chown
+
+  - name: setfacl
+    description: "Set extended Access Control Lists (ACLs) on files and directories beyond standard owner/group/other"
+    common_intents:
+      - intent: "grant a specific user read and write access to a file"
+        alternate_phrasings:
+          - "setfacl -m u:user:rw file"
+          - "give a specific user access to this file without changing ownership"
+          - "add ACL entry for a user"
+          - "I need one more person to have write access but not change the group"
+        pattern: "setfacl -m u:{username}:rw {file}"
+        example: "setfacl -m u:alice:rw /srv/shared/data.csv"
+      - intent: "grant a specific group access to a file"
+        alternate_phrasings:
+          - "setfacl -m g:group:r file"
+          - "let a group read this file via ACL"
+          - "add group ACL entry"
+          - "give a team read access without chgrp"
+        pattern: "setfacl -m g:{group}:{permissions} {file}"
+        example: "setfacl -m g:analysts:r /var/reports/q1.csv"
+      - intent: "set a default ACL on a directory so new files inherit permissions"
+        alternate_phrasings:
+          - "setfacl -d -m u:user:rw dir"
+          - "new files in this directory should automatically have these ACL entries"
+          - "inherit ACL for files created under a directory"
+          - "default ACL so I don't have to set it every time"
+        pattern: "setfacl -d -m u:{username}:{permissions} {directory}"
+        example: "setfacl -d -m u:bob:rw /srv/project/"
+      - intent: "remove a user's ACL entry from a file"
+        alternate_phrasings:
+          - "setfacl -x u:user file"
+          - "revoke a user's ACL access"
+          - "delete ACL entry for a specific user"
+          - "take away that user's extra access"
+        pattern: "setfacl -x u:{username} {file}"
+        example: "setfacl -x u:alice /srv/shared/data.csv"
+      - intent: "remove all ACL entries from a file"
+        alternate_phrasings:
+          - "setfacl -b file"
+          - "clear all ACLs on this file"
+          - "strip all extended access control entries"
+          - "reset file to just standard unix permissions"
+        pattern: "setfacl -b {file}"
+        example: "setfacl -b /srv/shared/data.csv"
+    key_flags:
+      - flag: "-m"
+        meaning: "Modify (add or update) an ACL entry"
+      - flag: "-x"
+        meaning: "Remove a specific ACL entry"
+      - flag: "-b"
+        meaning: "Remove all extended ACL entries"
+      - flag: "-d"
+        meaning: "Apply change to default ACL (inherited by new files in directory)"
+      - flag: "-R"
+        meaning: "Apply ACL change recursively"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "default ACL changes on shared system directories"
+        - "recursive ACL removal"
+      blocked_patterns: []
+    undo:
+      "added ACL entry": "setfacl -x u:{username} {file}"
+      "removed all ACLs": "setfacl -m u:{username}:{permissions} {file} (must re-add manually)"
+    related_commands:
+      - getfacl
+      - chmod
+      - chown
+
+  - name: getfacl
+    description: "Display the Access Control List (ACL) entries for files and directories"
+    common_intents:
+      - intent: "show the ACL for a file or directory"
+        alternate_phrasings:
+          - "getfacl file"
+          - "what are the ACL entries on this file"
+          - "show me the extended permissions"
+          - "who has access to this file beyond owner/group"
+        pattern: "getfacl {file}"
+        example: "getfacl /srv/shared/data.csv"
+      - intent: "show ACL with numeric user and group IDs"
+        alternate_phrasings:
+          - "getfacl -n file"
+          - "show ACL using UIDs and GIDs not names"
+          - "numeric ACL output"
+        pattern: "getfacl -n {file}"
+        example: "getfacl -n /etc/sudoers"
+      - intent: "display ACL in tabular format"
+        alternate_phrasings:
+          - "getfacl -t file"
+          - "show ACL as a table"
+          - "tabular view of file access list"
+        pattern: "getfacl -t {file}"
+        example: "getfacl -t /srv/project/"
+    key_flags:
+      - flag: "-n"
+        meaning: "Show numeric user/group IDs instead of names"
+      - flag: "-t"
+        meaning: "Display output in tabular format"
+      - flag: "-R"
+        meaning: "Recurse into subdirectories"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "read ACL": "no-op — getfacl is read-only"
+    related_commands:
+      - setfacl
+      - ls
+      - stat
+
+  - name: chattr
+    description: "Change extended file system attributes such as immutability and append-only on Linux filesystems"
+    common_intents:
+      - intent: "make a file immutable so it cannot be modified or deleted"
+        alternate_phrasings:
+          - "chattr +i file"
+          - "lock this file so even root can't change it"
+          - "protect a file from modification or deletion"
+          - "set the immutable flag"
+          - "I need this config to be tamper-proof"
+        pattern: "sudo chattr +i {file}"
+        example: "sudo chattr +i /etc/resolv.conf"
+      - intent: "remove the immutable flag from a file"
+        alternate_phrasings:
+          - "chattr -i file"
+          - "unlock an immutable file"
+          - "I need to edit a file that was locked with chattr"
+          - "clear the immutable attribute"
+        pattern: "sudo chattr -i {file}"
+        example: "sudo chattr -i /etc/resolv.conf"
+      - intent: "set a file to append-only mode"
+        alternate_phrasings:
+          - "chattr +a file"
+          - "make a log file append-only"
+          - "allow only appending, not overwriting"
+          - "protect a log from being truncated or overwritten"
+        pattern: "sudo chattr +a {file}"
+        example: "sudo chattr +a /var/log/secure.log"
+      - intent: "recursively make a directory immutable"
+        alternate_phrasings:
+          - "chattr -R +i directory"
+          - "lock down this whole directory tree"
+          - "make everything under this folder immutable"
+          - "protect a config directory recursively"
+        pattern: "sudo chattr -R +i {directory}"
+        example: "sudo chattr -R +i /etc/myapp/"
+    key_flags:
+      - flag: "+i"
+        meaning: "Set immutable — file cannot be modified, deleted, renamed, or hard-linked"
+      - flag: "-i"
+        meaning: "Clear immutable flag"
+      - flag: "+a"
+        meaning: "Set append-only — file can only be opened for appending (useful for logs)"
+      - flag: "-a"
+        meaning: "Clear append-only flag"
+      - flag: "-R"
+        meaning: "Recurse into subdirectories"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "recursive immutable on system directories"
+        - "append-only on files that need rotation"
+      blocked_patterns: []
+    undo:
+      "set immutable (+i)": "sudo chattr -i {file}"
+      "set append-only (+a)": "sudo chattr -a {file}"
+    related_commands:
+      - lsattr
+      - chmod
+
+  - name: lsattr
+    description: "List extended file system attributes (immutable, append-only, etc.) set by chattr"
+    common_intents:
+      - intent: "show file attributes in current directory"
+        alternate_phrasings:
+          - "lsattr"
+          - "what chattr flags are set on files here"
+          - "check if any files are immutable"
+          - "show extended attributes for files"
+        pattern: "lsattr"
+        example: "lsattr"
+      - intent: "show file attributes for a specific path"
+        alternate_phrasings:
+          - "lsattr /path"
+          - "check the attributes on this file"
+          - "is this file immutable"
+          - "what flags does this file have"
+        pattern: "lsattr {path}"
+        example: "lsattr /etc/resolv.conf"
+      - intent: "recursively show file attributes"
+        alternate_phrasings:
+          - "lsattr -R"
+          - "show attributes for everything under this directory"
+          - "recursive lsattr"
+        pattern: "lsattr -R {path}"
+        example: "lsattr -R /etc/myapp/"
+      - intent: "show attributes including hidden files"
+        alternate_phrasings:
+          - "lsattr -a"
+          - "include dotfiles in attribute listing"
+          - "show hidden file attributes too"
+        pattern: "lsattr -a {path}"
+        example: "lsattr -a ~"
+    key_flags:
+      - flag: "-R"
+        meaning: "Recurse into subdirectories"
+      - flag: "-a"
+        meaning: "Include hidden files (dot files) in the listing"
+      - flag: "-d"
+        meaning: "List attributes of directories themselves, not their contents"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "listed attributes": "no-op — lsattr is read-only"
+    related_commands:
+      - chattr
+      - ls
+      - stat
+
+  - name: ufw
+    description: "Uncomplicated Firewall — user-friendly frontend to iptables for managing firewall rules on Ubuntu/Debian"
+    common_intents:
+      - intent: "enable the firewall"
+        alternate_phrasings:
+          - "ufw enable"
+          - "turn on the firewall"
+          - "activate ufw"
+          - "start blocking traffic"
+          - "my server has no firewall, fix that"
+        pattern: "sudo ufw enable"
+        example: "sudo ufw enable"
+      - intent: "show current firewall rules and status"
+        alternate_phrasings:
+          - "ufw status"
+          - "what ports are open"
+          - "show firewall rules"
+          - "is the firewall running and what rules are active"
+          - "list all ufw rules"
+        pattern: "sudo ufw status numbered"
+        example: "sudo ufw status numbered"
+      - intent: "allow incoming traffic on a port"
+        alternate_phrasings:
+          - "ufw allow 80"
+          - "open port 80 in the firewall"
+          - "allow traffic on port 443"
+          - "I need to open a port for my web server"
+          - "unblock a port"
+        pattern: "sudo ufw allow {port}"
+        example: "sudo ufw allow 443"
+      - intent: "allow a port with a descriptive comment"
+        alternate_phrasings:
+          - "ufw allow 5432 comment postgres"
+          - "open a port and tag it with a label"
+          - "allow port and add a note for what it is"
+        pattern: "sudo ufw allow {port} comment \"{service_name}\""
+        example: "sudo ufw allow 5432 comment \"PostgreSQL\""
+      - intent: "allow traffic from a specific IP on a port"
+        alternate_phrasings:
+          - "ufw allow from ip to port"
+          - "whitelist an IP address for a port"
+          - "only allow this specific machine to connect on this port"
+          - "restrict port 22 to a single IP"
+        pattern: "sudo ufw allow proto tcp from {ip_address} to any port {port}"
+        example: "sudo ufw allow proto tcp from 192.168.1.50 to any port 22"
+      - intent: "deny incoming traffic on a port"
+        alternate_phrasings:
+          - "ufw deny 80"
+          - "block port 80"
+          - "close a port in the firewall"
+          - "stop traffic on this port"
+        pattern: "sudo ufw deny {port}"
+        example: "sudo ufw deny 8080"
+      - intent: "delete a firewall rule by number"
+        alternate_phrasings:
+          - "ufw delete rule_number"
+          - "remove a ufw rule"
+          - "I made a rule that's wrong, delete it"
+          - "undo a firewall rule"
+        pattern: "sudo ufw delete {rule_number}"
+        example: "sudo ufw delete 3"
+    key_flags:
+      - flag: "enable"
+        meaning: "Activate the firewall (starts on boot)"
+      - flag: "disable"
+        meaning: "Deactivate the firewall — DANGEROUS: leaves system unprotected"
+      - flag: "status numbered"
+        meaning: "Show all rules with their index numbers for deletion"
+      - flag: "allow"
+        meaning: "Create a rule to allow traffic"
+      - flag: "deny"
+        meaning: "Create a rule to block traffic"
+      - flag: "delete"
+        meaning: "Remove a rule by its number from 'status numbered'"
+      - flag: "reset"
+        meaning: "Delete all rules and disable ufw — resets to default state"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "ufw enable (will block connections if rules are wrong)"
+        - "ufw deny on port 22 (could lock out SSH)"
+        - "ufw delete"
+      blocked_patterns:
+        - "ufw disable"
+        - "ufw reset"
+    undo:
+      "allowed a port": "sudo ufw delete {rule_number}"
+      "denied a port": "sudo ufw delete {rule_number}"
+      "disabled firewall": "sudo ufw enable"
+    related_commands:
+      - firewall-cmd
+      - iptables
+      - ss
+      - netstat
+
+  - name: firewall-cmd
+    description: "Manage firewalld — the dynamic firewall daemon used on RHEL, Fedora, CentOS, and Rocky Linux"
+    common_intents:
+      - intent: "list all active firewall zones and rules"
+        alternate_phrasings:
+          - "firewall-cmd --list-all-zones"
+          - "show all firewall rules and zones"
+          - "what firewall rules are configured"
+          - "show me what the firewall is doing"
+        pattern: "firewall-cmd --list-all-zones"
+        example: "firewall-cmd --list-all-zones"
+      - intent: "show rules for the active zone"
+        alternate_phrasings:
+          - "firewall-cmd --list-all"
+          - "what rules are in the default zone"
+          - "show current firewall config"
+        pattern: "firewall-cmd --list-all"
+        example: "firewall-cmd --list-all"
+      - intent: "permanently open a port for a service"
+        alternate_phrasings:
+          - "firewall-cmd --permanent --add-service https"
+          - "allow HTTPS through the firewall permanently"
+          - "open port 443 for HTTPS"
+          - "add a service rule to firewalld"
+          - "I need to allow web traffic through the firewall on this RHEL box"
+        pattern: "firewall-cmd --permanent --zone {zone} --add-service {service}"
+        example: "firewall-cmd --permanent --zone public --add-service https"
+      - intent: "permanently close a port or service"
+        alternate_phrasings:
+          - "firewall-cmd --permanent --remove-service http"
+          - "block a service in firewalld"
+          - "close a port permanently"
+          - "remove a firewall allow rule"
+        pattern: "firewall-cmd --permanent --zone {zone} --remove-service {service}"
+        example: "firewall-cmd --permanent --zone public --remove-service http"
+      - intent: "reload firewalld to apply permanent changes"
+        alternate_phrasings:
+          - "firewall-cmd --reload"
+          - "apply my permanent firewall changes"
+          - "make the permanent rules take effect"
+          - "I added a permanent rule but it's not active yet"
+        pattern: "firewall-cmd --reload"
+        example: "firewall-cmd --reload"
+      - intent: "save runtime rules to permanent configuration"
+        alternate_phrasings:
+          - "firewall-cmd --runtime-to-permanent"
+          - "make the current runtime firewall rules permanent"
+          - "persist current firewall state"
+          - "save firewall changes so they survive reboot"
+        pattern: "firewall-cmd --runtime-to-permanent"
+        example: "firewall-cmd --runtime-to-permanent"
+      - intent: "open a specific port number (not a named service)"
+        alternate_phrasings:
+          - "firewall-cmd --add-port 8080/tcp"
+          - "open a custom port in firewalld"
+          - "allow traffic on a non-standard port"
+          - "add a port number rule instead of a service name"
+        pattern: "firewall-cmd --permanent --zone {zone} --add-port {port}/{protocol}"
+        example: "firewall-cmd --permanent --zone public --add-port 8080/tcp"
+    key_flags:
+      - flag: "--permanent"
+        meaning: "Apply change to the permanent (on-disk) configuration — requires --reload to activate"
+      - flag: "--zone"
+        meaning: "Target a specific firewall zone (public, internal, trusted, etc.)"
+      - flag: "--add-service"
+        meaning: "Allow a named service (uses predefined port mappings)"
+      - flag: "--remove-service"
+        meaning: "Block a named service"
+      - flag: "--add-port"
+        meaning: "Open a specific port/protocol combination"
+      - flag: "--reload"
+        meaning: "Reload permanent config, discarding any runtime-only changes"
+      - flag: "--runtime-to-permanent"
+        meaning: "Promote all runtime rules to permanent storage"
+      - flag: "--list-all"
+        meaning: "Show all rules for the active/default zone"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "removing service rules that may include SSH (port 22)"
+        - "--zone block changes"
+        - "--runtime-to-permanent (makes all runtime changes permanent)"
+      blocked_patterns:
+        - "firewall-cmd --panic-on"
+        - "firewall-cmd --permanent --zone block --change-interface"
+    undo:
+      "added service": "firewall-cmd --permanent --zone {zone} --remove-service {service} && firewall-cmd --reload"
+      "removed service": "firewall-cmd --permanent --zone {zone} --add-service {service} && firewall-cmd --reload"
+      "added port": "firewall-cmd --permanent --zone {zone} --remove-port {port}/{protocol} && firewall-cmd --reload"
+    related_commands:
+      - ufw
+      - iptables
+      - ss
+
+  - name: fail2ban-client
+    description: "Control the fail2ban intrusion prevention daemon — manage bans, jails, and service status"
+    common_intents:
+      - intent: "check the status of a fail2ban jail"
+        alternate_phrasings:
+          - "fail2ban-client status sshd"
+          - "how many IPs are banned in the ssh jail"
+          - "show fail2ban stats for a service"
+          - "is fail2ban working and blocking anything"
+          - "show banned IPs for sshd"
+        pattern: "fail2ban-client status {jail}"
+        example: "fail2ban-client status sshd"
+      - intent: "unban an IP address from a jail"
+        alternate_phrasings:
+          - "fail2ban-client set sshd unbanip 1.2.3.4"
+          - "remove an IP from the ban list"
+          - "I accidentally locked myself out, unban my IP"
+          - "whitelist an IP that got banned by fail2ban"
+          - "release a banned IP"
+        pattern: "fail2ban-client set {jail} unbanip {ip_address}"
+        example: "fail2ban-client set sshd unbanip 203.0.113.42"
+      - intent: "check if the fail2ban service is running"
+        alternate_phrasings:
+          - "fail2ban-client ping"
+          - "is fail2ban alive"
+          - "verify fail2ban is running"
+          - "check fail2ban health"
+        pattern: "fail2ban-client ping"
+        example: "fail2ban-client ping"
+      - intent: "show overall fail2ban status and list of active jails"
+        alternate_phrasings:
+          - "fail2ban-client status"
+          - "list all active fail2ban jails"
+          - "what jails does fail2ban have configured"
+          - "show all fail2ban jail names"
+        pattern: "fail2ban-client status"
+        example: "fail2ban-client status"
+    key_flags:
+      - flag: "status {jail}"
+        meaning: "Show stats for a named jail: currently banned IPs, total bans, etc."
+      - flag: "set {jail} unbanip {ip}"
+        meaning: "Remove a specific IP from a jail's ban list immediately"
+      - flag: "ping"
+        meaning: "Test whether fail2ban-server is running and responding"
+      - flag: "status"
+        meaning: "List all active jail names and global stats"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "unbanning IPs — verify the IP is legitimate before unblocking"
+      blocked_patterns: []
+    undo:
+      "unbanned an IP": "IP can be re-banned by fail2ban automatically on next offense, or manually via iptables"
+    related_commands:
+      - ufw
+      - firewall-cmd
+      - iptables
+      - journalctl
+
+  - name: openssl
+    description: "OpenSSL cryptographic toolkit for generating keys, certificates, CSRs, and testing TLS connections"
+    common_intents:
+      - intent: "generate a private RSA key"
+        alternate_phrasings:
+          - "openssl genrsa -out key.pem 2048"
+          - "create a new private key"
+          - "generate an RSA private key"
+          - "I need a private key to create a certificate"
+        pattern: "openssl genrsa -out {key_file} {bits}"
+        example: "openssl genrsa -out server.key 2048"
+      - intent: "generate a self-signed certificate"
+        alternate_phrasings:
+          - "openssl req -new -x509 -key key.pem -out cert.pem -days 365"
+          - "create a self-signed SSL certificate"
+          - "make a cert for local development"
+          - "I need HTTPS locally without a real CA"
+          - "self-sign a certificate"
+        pattern: "openssl req -new -x509 -key {key_file} -out {cert_file} -days {days}"
+        example: "openssl req -new -x509 -key server.key -out server.crt -days 365"
+      - intent: "create a Certificate Signing Request (CSR)"
+        alternate_phrasings:
+          - "openssl req -new -key key.pem -out request.csr"
+          - "generate a CSR for a CA to sign"
+          - "I need to request a certificate from a certificate authority"
+          - "create a CSR file"
+        pattern: "openssl req -new -key {key_file} -out {csr_file}"
+        example: "openssl req -new -key server.key -out server.csr"
+      - intent: "inspect a certificate's details"
+        alternate_phrasings:
+          - "openssl x509 -in cert.pem -text -noout"
+          - "show what's inside a certificate"
+          - "check certificate expiration and subject"
+          - "read a certificate file"
+          - "when does this cert expire"
+        pattern: "openssl x509 -in {cert_file} -text -noout"
+        example: "openssl x509 -in server.crt -text -noout"
+      - intent: "test a TLS connection to a server"
+        alternate_phrasings:
+          - "openssl s_client -connect host:443"
+          - "check if a server's SSL/TLS is working"
+          - "debug a TLS handshake"
+          - "verify the certificate a server presents"
+          - "is this server's HTTPS configured correctly"
+        pattern: "openssl s_client -connect {hostname}:443"
+        example: "openssl s_client -connect example.com:443"
+      - intent: "encrypt a file using symmetric AES encryption"
+        alternate_phrasings:
+          - "openssl enc -aes-256-cbc -in file -out file.enc"
+          - "password-encrypt a file with openssl"
+          - "symmetrically encrypt a file"
+          - "encrypt a file with a passphrase"
+        pattern: "openssl enc -e -aes-256-cbc -salt -pbkdf2 -in {input_file} -out {output_file}"
+        example: "openssl enc -e -aes-256-cbc -salt -pbkdf2 -in secrets.txt -out secrets.enc"
+    key_flags:
+      - flag: "genrsa"
+        meaning: "Generate an RSA private key of specified bit length"
+      - flag: "req -new -x509"
+        meaning: "Generate a self-signed certificate directly"
+      - flag: "req -new"
+        meaning: "Generate a Certificate Signing Request"
+      - flag: "x509 -text -noout"
+        meaning: "Display certificate contents in human-readable form without re-outputting the PEM"
+      - flag: "s_client -connect"
+        meaning: "Open a TLS connection to test server certificate and handshake"
+      - flag: "enc -e / -d"
+        meaning: "Encrypt (-e) or decrypt (-d) using a symmetric cipher"
+      - flag: "-days"
+        meaning: "Certificate validity period in days"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "overwriting existing key files"
+      blocked_patterns: []
+    undo:
+      "encrypted a file": "openssl enc -d -aes-256-cbc -salt -pbkdf2 -in {output_file} -out {original_file}"
+      "generated a key": "rm {key_file} (irreversible — store securely before deleting)"
+    related_commands:
+      - gpg
+      - ssh-keygen
+      - curl
+
+  - name: gpg
+    description: "GNU Privacy Guard — OpenPGP encryption, decryption, signing, and key management"
+    common_intents:
+      - intent: "generate a new GPG key pair"
+        alternate_phrasings:
+          - "gpg --gen-key"
+          - "create a GPG key"
+          - "set up GPG for the first time"
+          - "I need a PGP key to sign things"
+          - "make a new GPG keypair"
+        pattern: "gpg --full-generate-key"
+        example: "gpg --full-generate-key"
+      - intent: "list all GPG keys in the keyring"
+        alternate_phrasings:
+          - "gpg --list-keys"
+          - "show my GPG keys"
+          - "what keys do I have"
+          - "list public keys"
+        pattern: "gpg --list-keys"
+        example: "gpg --list-keys"
+      - intent: "encrypt a file for a recipient"
+        alternate_phrasings:
+          - "gpg --encrypt --recipient user@example.com file"
+          - "encrypt a file with someone's public key"
+          - "gpg encrypt for alice"
+          - "send an encrypted file to someone"
+          - "PGP-encrypt this file"
+        pattern: "gpg --encrypt --recipient {recipient_email} {file}"
+        example: "gpg --encrypt --recipient alice@example.com document.txt"
+      - intent: "decrypt a GPG-encrypted file"
+        alternate_phrasings:
+          - "gpg --decrypt file.gpg"
+          - "decrypt a .gpg file"
+          - "open an encrypted file"
+          - "I received an encrypted file, how do I read it"
+        pattern: "gpg --decrypt {encrypted_file}"
+        example: "gpg --decrypt document.txt.gpg"
+      - intent: "symmetrically encrypt a file with a passphrase"
+        alternate_phrasings:
+          - "gpg -c file"
+          - "encrypt a file without a recipient key, just a password"
+          - "password-protect a file with gpg"
+          - "symmetric gpg encryption"
+        pattern: "gpg --symmetric {file}"
+        example: "gpg --symmetric backup.tar"
+      - intent: "sign a file to prove authenticity"
+        alternate_phrasings:
+          - "gpg --clearsign file"
+          - "add a GPG signature to a file"
+          - "sign a document with my GPG key"
+          - "I want to prove this file came from me"
+        pattern: "gpg --clearsign {file}"
+        example: "gpg --clearsign release-notes.txt"
+      - intent: "import a public key"
+        alternate_phrasings:
+          - "gpg --import key.gpg"
+          - "add a public key to my keyring"
+          - "import someone's GPG key"
+          - "load a key file into gpg"
+        pattern: "gpg --import {key_file}"
+        example: "gpg --import alice_public.gpg"
+      - intent: "export a public key"
+        alternate_phrasings:
+          - "gpg --export --armor user@example.com"
+          - "share my public key"
+          - "get my public key in text format"
+          - "output my GPG public key"
+        pattern: "gpg --export --armor {key_id_or_email}"
+        example: "gpg --export --armor alice@example.com"
+    key_flags:
+      - flag: "--encrypt / -e"
+        meaning: "Encrypt using recipient's public key"
+      - flag: "--decrypt / -d"
+        meaning: "Decrypt a GPG-encrypted file"
+      - flag: "--symmetric / -c"
+        meaning: "Encrypt with a passphrase (no public key needed)"
+      - flag: "--sign / -s"
+        meaning: "Sign a file using your private key"
+      - flag: "--clearsign"
+        meaning: "Create a cleartext signed message"
+      - flag: "--armor / -a"
+        meaning: "Output in ASCII-armored format (text) instead of binary"
+      - flag: "--recipient / -r"
+        meaning: "Specify the recipient's key identifier or email"
+      - flag: "--list-keys / -k"
+        meaning: "List public keys in the keyring"
+      - flag: "--import"
+        meaning: "Import a key from a file into the local keyring"
+      - flag: "--export"
+        meaning: "Export a key from the keyring to stdout or file"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "exporting secret keys (--export-secret-keys)"
+        - "deleting keys from keyring"
+      blocked_patterns: []
+    undo:
+      "encrypted a file": "gpg --decrypt {file}.gpg > {original_file}"
+      "imported a key": "gpg --delete-key {key_id}"
+    related_commands:
+      - openssl
+      - ssh-keygen
+      - age
+
+  - name: chroot
+    description: "Run a command or shell with a different root directory, isolating it from the rest of the filesystem"
+    common_intents:
+      - intent: "enter a chroot environment using a directory as the new root"
+        alternate_phrasings:
+          - "chroot /path/to/root"
+          - "chroot into a directory"
+          - "run a shell inside a chroot jail"
+          - "I need to repair a system by chrooting into its filesystem"
+          - "enter a chroot for system recovery"
+        pattern: "sudo chroot {path_to_new_root}"
+        example: "sudo chroot /mnt/rescue"
+      - intent: "run a specific command inside a chroot environment"
+        alternate_phrasings:
+          - "chroot /newroot command"
+          - "execute a command inside a chroot"
+          - "run a single command in an isolated root"
+        pattern: "sudo chroot {path_to_new_root} {command}"
+        example: "sudo chroot /mnt/rescue /bin/bash"
+      - intent: "chroot as a specific user and group"
+        alternate_phrasings:
+          - "chroot --userspec user:group /newroot"
+          - "run chroot as a non-root user"
+          - "chroot with a different UID and GID"
+        pattern: "sudo chroot --userspec {user}:{group} {path_to_new_root}"
+        example: "sudo chroot --userspec appuser:appgroup /opt/sandbox"
+    key_flags:
+      - flag: "--userspec"
+        meaning: "Run the command as the specified user:group inside the chroot"
+      - flag: "--groups"
+        meaning: "Specify supplementary groups inside the chroot"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "all chroot operations — escaping a chroot is possible with sufficient privileges"
+      blocked_patterns: []
+    undo:
+      "entered chroot": "exit (exits the chroot shell)"
+    related_commands:
+      - systemd-nspawn
+      - unshare
+      - docker
+
+  - name: setcap
+    description: "Set Linux capabilities on a binary so it can perform privileged operations without running as root"
+    common_intents:
+      - intent: "grant a binary the capability to bind low-numbered ports without root"
+        alternate_phrasings:
+          - "setcap cap_net_bind_service+ep /path/to/binary"
+          - "let a non-root program bind to port 80 or 443"
+          - "allow binding to privileged ports without sudo"
+          - "give a service the ability to use ports below 1024"
+        pattern: "sudo setcap 'cap_net_bind_service+ep' {binary}"
+        example: "sudo setcap 'cap_net_bind_service+ep' /usr/bin/node"
+      - intent: "grant raw socket capabilities (for network tools)"
+        alternate_phrasings:
+          - "setcap cap_net_raw+ep binary"
+          - "allow a program to send raw network packets"
+          - "give a tool permission to use raw sockets"
+        pattern: "sudo setcap 'cap_net_raw+ep' {binary}"
+        example: "sudo setcap 'cap_net_raw+ep' /usr/bin/ping"
+      - intent: "set multiple capabilities on a binary"
+        alternate_phrasings:
+          - "setcap 'cap_a,cap_b+ep' binary"
+          - "assign several capabilities at once"
+          - "grant multiple privilege capabilities to a program"
+        pattern: "sudo setcap '{cap1,cap2+ep}' {binary}"
+        example: "sudo setcap 'cap_dac_read_search,cap_sys_tty_config+ep' /usr/bin/mytool"
+      - intent: "remove all capabilities from a binary"
+        alternate_phrasings:
+          - "setcap -r binary"
+          - "strip all capabilities from a file"
+          - "clear capabilities on a binary"
+          - "revoke elevated capabilities"
+        pattern: "sudo setcap -r {binary}"
+        example: "sudo setcap -r /usr/bin/node"
+    key_flags:
+      - flag: "+ep"
+        meaning: "Grant capability in both effective and permitted sets"
+      - flag: "+p"
+        meaning: "Grant capability in permitted set only"
+      - flag: "-r"
+        meaning: "Remove all capabilities from the specified file"
+      - flag: "-v"
+        meaning: "Verify that the specified capabilities are set (returns error if not)"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "any setcap operation — granting capabilities can escalate privilege"
+      blocked_patterns: []
+    undo:
+      "set capabilities": "sudo setcap -r {binary}"
+    related_commands:
+      - getcap
+      - chown
+      - chmod
+
+  - name: getcap
+    description: "Display the Linux capabilities set on files and binaries"
+    common_intents:
+      - intent: "show capabilities set on specific files"
+        alternate_phrasings:
+          - "getcap /path/to/binary"
+          - "what capabilities does this binary have"
+          - "check if a file has special privileges"
+          - "show setcap flags on this program"
+        pattern: "getcap {file}"
+        example: "getcap /usr/bin/ping"
+      - intent: "recursively scan a directory for files with capabilities"
+        alternate_phrasings:
+          - "getcap -r /usr"
+          - "find all binaries with capabilities set"
+          - "scan for files with elevated capabilities"
+          - "audit capability assignments across the system"
+        pattern: "getcap -r {directory}"
+        example: "getcap -r /usr/bin/"
+    key_flags:
+      - flag: "-r"
+        meaning: "Recursively scan directory for files with capabilities set"
+      - flag: "-v"
+        meaning: "Verbose — show all files checked even if no capabilities are set"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "read capabilities": "no-op — getcap is read-only"
+    related_commands:
+      - setcap
+      - ls
+      - find
+
+  - name: apparmor_status
+    description: "Show the current AppArmor status and list of loaded, enforcing, and complaining profiles (alias: aa-status)"
+    common_intents:
+      - intent: "show AppArmor status and list all loaded profiles"
+        alternate_phrasings:
+          - "aa-status"
+          - "is AppArmor enabled and what profiles are loaded"
+          - "show AppArmor profile enforcement status"
+          - "list enforcing and complaining AppArmor profiles"
+          - "check if AppArmor is running"
+        pattern: "sudo apparmor_status"
+        example: "sudo apparmor_status"
+      - intent: "show AppArmor status in JSON format"
+        alternate_phrasings:
+          - "aa-status --json"
+          - "get AppArmor status as JSON for scripting"
+          - "machine-readable AppArmor status"
+        pattern: "sudo aa-status --json"
+        example: "sudo aa-status --json"
+      - intent: "show the count of enforcing profiles only"
+        alternate_phrasings:
+          - "aa-status --enforced"
+          - "how many AppArmor profiles are in enforce mode"
+          - "count enforcing policies"
+        pattern: "sudo aa-status --enforced"
+        example: "sudo aa-status --enforced"
+    key_flags:
+      - flag: "--json"
+        meaning: "Output status in JSON format"
+      - flag: "--pretty-json"
+        meaning: "Output status in indented/pretty JSON format"
+      - flag: "--enforced"
+        meaning: "Print count of profiles currently in enforce mode"
+      - flag: "--complaining"
+        meaning: "Print count of profiles in complain (permissive) mode"
+      - flag: "--profiled"
+        meaning: "Print total count of loaded profiles"
+    safety:
+      level: safe
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "read status": "no-op — apparmor_status is read-only"
+    related_commands:
+      - aa-enforce
+      - aa-complain
+      - aa-disable
+
+  - name: aa-enforce
+    description: "Set an AppArmor profile to enforcing mode, actively blocking policy violations"
+    common_intents:
+      - intent: "put an AppArmor profile into enforce mode"
+        alternate_phrasings:
+          - "aa-enforce /etc/apparmor.d/usr.bin.firefox"
+          - "activate a specific AppArmor profile"
+          - "start enforcing AppArmor restrictions for a program"
+          - "switch an AppArmor profile from complain to enforce"
+          - "enforce AppArmor policy for a program"
+        pattern: "sudo aa-enforce {profile_path}"
+        example: "sudo aa-enforce /etc/apparmor.d/usr.sbin.nginx"
+      - intent: "enforce multiple profiles at once"
+        alternate_phrasings:
+          - "aa-enforce profile1 profile2"
+          - "activate enforcement on several AppArmor profiles"
+          - "enforce a batch of profiles"
+        pattern: "sudo aa-enforce {profile1} {profile2}"
+        example: "sudo aa-enforce /etc/apparmor.d/usr.sbin.nginx /etc/apparmor.d/usr.sbin.mysqld"
+    key_flags:
+      - flag: "-d / --dir"
+        meaning: "Specify an alternate AppArmor policy directory"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "enforcing a new profile — may break a service if profile is incomplete"
+      blocked_patterns: []
+    undo:
+      "enforced a profile": "sudo aa-complain {profile_path} (sets profile back to complain/audit mode)"
+    related_commands:
+      - apparmor_status
+      - aa-complain
+      - aa-disable
+
+  - name: getenforce
+    description: "Print the current SELinux enforcement mode: Enforcing, Permissive, or Disabled"
+    common_intents:
+      - intent: "check the current SELinux mode"
+        alternate_phrasings:
+          - "getenforce"
+          - "is SELinux in enforcing or permissive mode"
+          - "what mode is SELinux in"
+          - "is SELinux blocking things right now"
+          - "check SELinux enforcement status"
+        pattern: "getenforce"
+        example: "getenforce"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "read mode": "no-op — getenforce is read-only"
+    related_commands:
+      - sestatus
+      - setenforce
+      - sestatus
+
+  - name: setenforce
+    description: "Toggle SELinux between enforcing and permissive modes at runtime (does not persist across reboots)"
+    common_intents:
+      - intent: "put SELinux into permissive mode (logs but does not block)"
+        alternate_phrasings:
+          - "setenforce 0"
+          - "disable SELinux enforcement temporarily"
+          - "set SELinux to permissive to debug an access denied error"
+          - "stop SELinux from blocking things without fully disabling it"
+          - "I'm troubleshooting an SELinux denial, put it in permissive"
+        pattern: "sudo setenforce 0"
+        example: "sudo setenforce 0"
+      - intent: "put SELinux back into enforcing mode"
+        alternate_phrasings:
+          - "setenforce 1"
+          - "re-enable SELinux enforcement"
+          - "turn SELinux back on after debugging"
+          - "restore SELinux to enforcing after testing in permissive"
+        pattern: "sudo setenforce 1"
+        example: "sudo setenforce 1"
+    key_flags:
+      - flag: "0 / Permissive"
+        meaning: "Switch to permissive mode — SELinux logs denials but does not enforce"
+      - flag: "1 / Enforcing"
+        meaning: "Switch to enforcing mode — SELinux actively blocks policy violations"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "setenforce 0 — disables SELinux protection, should only be used temporarily for debugging"
+      blocked_patterns:
+        - "setenforce 0"
+    undo:
+      "set permissive (0)": "sudo setenforce 1"
+      "set enforcing (1)": "sudo setenforce 0"
+    related_commands:
+      - getenforce
+      - sestatus
+
+  - name: sestatus
+    description: "Print detailed SELinux status including mode, policy name, MLS/MCS status, and loaded boolean values"
+    common_intents:
+      - intent: "show full SELinux status and configuration"
+        alternate_phrasings:
+          - "sestatus"
+          - "what is the SELinux policy and current mode"
+          - "show detailed SELinux configuration"
+          - "is SELinux enabled and what policy is it using"
+          - "full SELinux status report"
+        pattern: "sestatus"
+        example: "sestatus"
+      - intent: "show the state of all SELinux policy booleans"
+        alternate_phrasings:
+          - "sestatus -b"
+          - "list all SELinux booleans and their on/off state"
+          - "show SELinux boolean flags"
+          - "what SELinux booleans are enabled"
+        pattern: "sestatus -b"
+        example: "sestatus -b"
+      - intent: "show current file and process security contexts"
+        alternate_phrasings:
+          - "sestatus -v"
+          - "display SELinux contexts for files and processes"
+          - "what labels do key files and processes have in SELinux"
+          - "show SELinux security contexts verbosely"
+        pattern: "sestatus -v"
+        example: "sestatus -v"
+    key_flags:
+      - flag: "-b"
+        meaning: "List all policy booleans and their current on/off state"
+      - flag: "-v"
+        meaning: "Verbose — show security contexts for files and processes"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "read status": "no-op — sestatus is read-only"
+    related_commands:
+      - getenforce
+      - setenforce
+      - getsebool
+      - setsebool

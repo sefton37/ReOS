@@ -1,0 +1,1384 @@
+domain: package-management
+description: "Installing, removing, updating, and querying system and language-specific packages"
+related_domains:
+  - system-info
+  - permissions-security
+
+commands:
+
+  # ──────────────────────────────────────────────
+  # apt  (Debian / Ubuntu — modern interactive CLI)
+  # ──────────────────────────────────────────────
+  - name: apt
+    description: "High-level package manager for Debian/Ubuntu; preferred for interactive use over apt-get"
+    common_intents:
+      - intent: "update the package index"
+        alternate_phrasings:
+          - "apt update"
+          - "refresh the list of available packages"
+          - "sync package metadata so I can see what's new"
+          - "my apt says the package doesn't exist, how do I fix that"
+          - "fetch latest package lists"
+        pattern: "sudo apt update"
+        example: "sudo apt update"
+
+      - intent: "install a package"
+        alternate_phrasings:
+          - "apt install {package}"
+          - "I need to get {package} installed on this system"
+          - "download and install {package}"
+          - "how do I add {package} to my Ubuntu box"
+          - "put {package} on this machine"
+        pattern: "sudo apt install {package}"
+        example: "sudo apt install curl"
+
+      - intent: "remove a package"
+        alternate_phrasings:
+          - "apt remove {package}"
+          - "uninstall {package}"
+          - "get rid of {package}"
+          - "I don't need {package} anymore, delete it"
+          - "strip {package} from the system"
+        pattern: "sudo apt remove {package}"
+        example: "sudo apt remove thunderbird"
+
+      - intent: "remove a package and its configuration files"
+        alternate_phrasings:
+          - "apt purge {package}"
+          - "completely wipe {package} including its config"
+          - "remove {package} and clean up all its leftover files"
+          - "uninstall {package} and nuke the config too"
+          - "fully purge {package}"
+        pattern: "sudo apt purge {package}"
+        example: "sudo apt purge apache2"
+
+      - intent: "upgrade all installed packages"
+        alternate_phrasings:
+          - "apt upgrade"
+          - "update everything that's installed"
+          - "apply all pending package updates"
+          - "my system is out of date, how do I update all packages"
+          - "bring all packages to their latest versions"
+        pattern: "sudo apt upgrade"
+        example: "sudo apt upgrade"
+
+      - intent: "remove packages that are no longer needed"
+        alternate_phrasings:
+          - "apt autoremove"
+          - "clean up unused dependencies"
+          - "get rid of orphaned packages"
+          - "I keep seeing 'packages can be autoremoved', how do I clear that"
+          - "free up space by removing unneeded packages"
+        pattern: "sudo apt autoremove"
+        example: "sudo apt autoremove"
+
+      - intent: "search for a package by name or description"
+        alternate_phrasings:
+          - "apt search {query}"
+          - "find packages related to {query}"
+          - "is there an apt package for {query}"
+          - "what packages match {query}"
+          - "look up {query} in the package database"
+        pattern: "apt search {query}"
+        example: "apt search image editor"
+
+      - intent: "show detailed information about a package"
+        alternate_phrasings:
+          - "apt show {package}"
+          - "what is {package} and what does it do"
+          - "give me details on the {package} package"
+          - "describe {package}"
+          - "what version of {package} is available"
+        pattern: "apt show {package}"
+        example: "apt show git"
+
+      - intent: "list all installed packages"
+        alternate_phrasings:
+          - "apt list --installed"
+          - "show me everything that's installed"
+          - "what packages do I have on this system"
+          - "list installed software"
+        pattern: "apt list --installed"
+        example: "apt list --installed"
+
+    key_flags:
+      - flag: "-y / --yes"
+        meaning: "Automatically answer yes to all prompts (non-interactive install/upgrade)"
+      - flag: "--no-install-recommends"
+        meaning: "Skip recommended but non-essential packages, reducing install footprint"
+      - flag: "--only-upgrade"
+        meaning: "Only upgrade an already-installed package; do not install if absent"
+
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "apt remove {package}"
+        - "apt purge {package}"
+        - "apt autoremove"
+      blocked_patterns:
+        - "apt remove --purge base-files"
+        - "apt remove --purge libc6"
+        - "apt remove --purge systemd"
+
+    undo:
+      "apt install {package}": "sudo apt remove {package}"
+      "apt remove {package}": "sudo apt install {package}"
+      "apt purge {package}": "reinstall via sudo apt install {package} (config files are gone)"
+
+    distro_notes:
+      debian_ubuntu: "apt (this command)"
+      fedora_rhel: "dnf install / dnf remove"
+      arch: "pacman -S / pacman -Rs"
+      opensuse: "zypper install / zypper remove"
+
+    related_commands:
+      - apt-get
+      - dpkg
+      - apt-cache
+
+  # ──────────────────────────────────────────────
+  # apt-get  (Debian / Ubuntu — scriptable back-end)
+  # ──────────────────────────────────────────────
+  - name: apt-get
+    description: "Low-level Debian/Ubuntu package manager; stable CLI for use in scripts and automation"
+    common_intents:
+      - intent: "update the package index"
+        alternate_phrasings:
+          - "apt-get update"
+          - "refresh package lists for scripting"
+          - "sync apt metadata in a shell script"
+          - "run the update step before installing in CI"
+        pattern: "sudo apt-get update"
+        example: "sudo apt-get update"
+
+      - intent: "install a package non-interactively"
+        alternate_phrasings:
+          - "apt-get install -y {package}"
+          - "install {package} without prompts for use in a Dockerfile"
+          - "silently install {package} in a script"
+          - "automate installation of {package}"
+        pattern: "sudo apt-get install -y {package}"
+        example: "sudo apt-get install -y curl wget"
+
+      - intent: "remove a package"
+        alternate_phrasings:
+          - "apt-get remove {package}"
+          - "uninstall {package} via apt-get"
+          - "scripted removal of {package}"
+        pattern: "sudo apt-get remove {package}"
+        example: "sudo apt-get remove nginx"
+
+      - intent: "remove a package including its configuration files"
+        alternate_phrasings:
+          - "apt-get purge {package}"
+          - "purge {package} config in a teardown script"
+          - "completely remove {package} in automation"
+        pattern: "sudo apt-get purge {package}"
+        example: "sudo apt-get purge mysql-server"
+
+      - intent: "upgrade all packages to their newest versions"
+        alternate_phrasings:
+          - "apt-get upgrade"
+          - "run a full system upgrade in a script"
+          - "update all installed packages non-interactively"
+        pattern: "sudo apt-get upgrade -y"
+        example: "sudo apt-get upgrade -y"
+
+      - intent: "upgrade packages and handle dependency changes"
+        alternate_phrasings:
+          - "apt-get dist-upgrade"
+          - "smart upgrade that removes obsolete packages"
+          - "full dist upgrade including dependency resolution"
+          - "upgrade the whole distribution"
+        pattern: "sudo apt-get dist-upgrade"
+        example: "sudo apt-get dist-upgrade"
+
+      - intent: "remove all packages no longer needed"
+        alternate_phrasings:
+          - "apt-get autoremove"
+          - "clean up unused deps in a script"
+          - "remove orphaned packages after upgrade"
+        pattern: "sudo apt-get autoremove -y"
+        example: "sudo apt-get autoremove -y"
+
+      - intent: "clean up local cache of downloaded packages"
+        alternate_phrasings:
+          - "apt-get autoclean"
+          - "free disk space from old .deb files"
+          - "clear partial package downloads"
+          - "apt cache is using too much space"
+        pattern: "sudo apt-get autoclean"
+        example: "sudo apt-get autoclean"
+
+    key_flags:
+      - flag: "-y / --yes"
+        meaning: "Automatic yes to prompts; useful in scripts and CI pipelines"
+      - flag: "--no-install-recommends"
+        meaning: "Avoid pulling in optional recommended packages"
+      - flag: "-q / --quiet"
+        meaning: "Suppress progress output (useful in CI)"
+      - flag: "dist-upgrade"
+        meaning: "Intelligently handles changing dependencies, may install new packages or remove conflicting ones"
+
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "apt-get dist-upgrade"
+        - "apt-get autoremove"
+        - "apt-get purge {package}"
+      blocked_patterns:
+        - "apt-get remove --purge libc6"
+        - "apt-get remove --purge base-files"
+        - "apt-get dist-upgrade -y"   # dangerous to run unattended without review
+
+    undo:
+      "apt-get install {package}": "sudo apt-get remove {package}"
+      "apt-get remove {package}": "sudo apt-get install {package}"
+      "apt-get purge {package}": "reinstall via sudo apt-get install {package} (config gone)"
+
+    distro_notes:
+      note: "apt-get is the scriptable counterpart to apt; prefer apt for interactive use"
+
+    related_commands:
+      - apt
+      - dpkg
+      - apt-cache
+
+  # ──────────────────────────────────────────────
+  # dpkg  (Debian low-level package tool)
+  # ──────────────────────────────────────────────
+  - name: dpkg
+    description: "Low-level Debian package manager for installing, removing, and inspecting local .deb files"
+    common_intents:
+      - intent: "install a local .deb file"
+        alternate_phrasings:
+          - "dpkg -i {file.deb}"
+          - "install a downloaded .deb package"
+          - "I have a .deb file, how do I install it"
+          - "install this deb I just downloaded"
+          - "manually install a debian package file"
+        pattern: "sudo dpkg -i {path/to/file.deb}"
+        example: "sudo dpkg -i ~/Downloads/vscode_1.85.0_amd64.deb"
+
+      - intent: "remove a package (keep config files)"
+        alternate_phrasings:
+          - "dpkg -r {package}"
+          - "uninstall a package with dpkg"
+          - "remove {package} but keep its config"
+        pattern: "sudo dpkg -r {package}"
+        example: "sudo dpkg -r vim-common"
+
+      - intent: "purge a package including configuration files"
+        alternate_phrasings:
+          - "dpkg --purge {package}"
+          - "dpkg -P {package}"
+          - "wipe {package} completely including config"
+          - "fully remove {package} with dpkg"
+        pattern: "sudo dpkg -P {package}"
+        example: "sudo dpkg -P apache2"
+
+      - intent: "list all installed packages"
+        alternate_phrasings:
+          - "dpkg -l"
+          - "show every installed package with dpkg"
+          - "dpkg list packages"
+          - "what's installed according to dpkg"
+        pattern: "dpkg -l"
+        example: "dpkg -l"
+
+      - intent: "check if a specific package is installed"
+        alternate_phrasings:
+          - "dpkg -l {package}"
+          - "is {package} installed"
+          - "how do I know if {package} is on the system"
+          - "check dpkg status of {package}"
+        pattern: "dpkg -l {package}"
+        example: "dpkg -l curl"
+
+      - intent: "list all files installed by a package"
+        alternate_phrasings:
+          - "dpkg -L {package}"
+          - "what files does {package} install"
+          - "where does {package} put its files"
+          - "show me every file owned by {package}"
+        pattern: "dpkg -L {package}"
+        example: "dpkg -L openssh-server"
+
+      - intent: "find which package owns a given file"
+        alternate_phrasings:
+          - "dpkg -S {/path/to/file}"
+          - "what package does {file} belong to"
+          - "which package installed this binary"
+          - "who owns /usr/bin/{command}"
+        pattern: "dpkg -S {path/to/file}"
+        example: "dpkg -S /usr/bin/python3"
+
+      - intent: "list contents of a local .deb file without installing"
+        alternate_phrasings:
+          - "dpkg -c {file.deb}"
+          - "inspect the contents of a .deb before installing"
+          - "what files are inside this .deb"
+          - "peek inside a debian package"
+        pattern: "dpkg -c {path/to/file.deb}"
+        example: "dpkg -c ~/Downloads/package.deb"
+
+    key_flags:
+      - flag: "-i / --install"
+        meaning: "Install a .deb package file from disk"
+      - flag: "-r / --remove"
+        meaning: "Remove package, leaving config files intact"
+      - flag: "-P / --purge"
+        meaning: "Remove package and all associated config files"
+      - flag: "-l / --list"
+        meaning: "List packages matching a pattern, showing status and version"
+      - flag: "-L / --listfiles"
+        meaning: "List all files installed by a package"
+      - flag: "-S / --search"
+        meaning: "Search for the package owning a file path"
+      - flag: "-c / --contents"
+        meaning: "List contents of a local .deb archive"
+
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "dpkg -P {package}"
+        - "dpkg -r {package}"
+      blocked_patterns:
+        - "dpkg --purge libc6"
+        - "dpkg --purge base-files"
+        - "dpkg --force-remove-essential"
+
+    undo:
+      "dpkg -i {file.deb}": "sudo dpkg -r {package}"
+      "dpkg -r {package}": "sudo dpkg -i {file.deb} (need original .deb)"
+      "dpkg -P {package}": "reinstall via apt install {package} (config gone)"
+
+    distro_notes:
+      note: "dpkg is Debian/Ubuntu-specific; on RPM-based distros use 'rpm -i' instead"
+      rpm_equivalent: "rpm -ivh {file.rpm}"
+
+    related_commands:
+      - apt
+      - apt-get
+
+  # ──────────────────────────────────────────────
+  # dnf  (Fedora 22+, RHEL 8+, CentOS Stream)
+  # ──────────────────────────────────────────────
+  - name: dnf
+    description: "Package manager for Fedora, RHEL, and CentOS Stream; successor to yum"
+    common_intents:
+      - intent: "install a package"
+        alternate_phrasings:
+          - "dnf install {package}"
+          - "get {package} on my Fedora machine"
+          - "I need to install {package} on RHEL"
+          - "add {package} via dnf"
+          - "how do I install {package} on Fedora"
+        pattern: "sudo dnf install {package}"
+        example: "sudo dnf install git"
+
+      - intent: "remove a package"
+        alternate_phrasings:
+          - "dnf remove {package}"
+          - "uninstall {package} with dnf"
+          - "get rid of {package} on Fedora"
+          - "delete {package} via dnf"
+        pattern: "sudo dnf remove {package}"
+        example: "sudo dnf remove httpd"
+
+      - intent: "upgrade all installed packages"
+        alternate_phrasings:
+          - "dnf upgrade"
+          - "update everything with dnf"
+          - "apply all Fedora updates"
+          - "my system is out of date, how do I update"
+          - "run a full system upgrade on RHEL"
+        pattern: "sudo dnf upgrade"
+        example: "sudo dnf upgrade"
+
+      - intent: "search for a package"
+        alternate_phrasings:
+          - "dnf search {query}"
+          - "find a package matching {query} with dnf"
+          - "is there a dnf package for {query}"
+          - "what dnf packages relate to {query}"
+        pattern: "dnf search {query}"
+        example: "dnf search python"
+
+      - intent: "show package information"
+        alternate_phrasings:
+          - "dnf info {package}"
+          - "what is the {package} package"
+          - "show version and description of {package}"
+          - "details about {package} in dnf"
+        pattern: "dnf info {package}"
+        example: "dnf info vim-enhanced"
+
+      - intent: "find which package provides a command or file"
+        alternate_phrasings:
+          - "dnf provides {command}"
+          - "what package contains {command}"
+          - "which rpm installs {binary}"
+          - "command not found, how do I find what provides {command}"
+        pattern: "dnf provides {command}"
+        example: "dnf provides ifconfig"
+
+      - intent: "list installed packages"
+        alternate_phrasings:
+          - "dnf list installed"
+          - "show all installed dnf packages"
+          - "what's installed on this Fedora system"
+        pattern: "dnf list --installed"
+        example: "dnf list --installed"
+
+      - intent: "clean cached package data"
+        alternate_phrasings:
+          - "dnf clean all"
+          - "clear the dnf cache"
+          - "free up disk space from dnf metadata"
+          - "dnf is using too much space"
+        pattern: "sudo dnf clean all"
+        example: "sudo dnf clean all"
+
+    key_flags:
+      - flag: "--assumeyes / -y"
+        meaning: "Automatically answer yes to all prompts"
+      - flag: "--best"
+        meaning: "Try to upgrade to the best available version, fail if not possible"
+      - flag: "--allowerasing"
+        meaning: "Allow removing installed packages to resolve dependency conflicts"
+      - flag: "provides"
+        meaning: "Subcommand to find which package supplies a given file or command"
+
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "dnf remove {package}"
+        - "dnf autoremove"
+      blocked_patterns:
+        - "dnf remove glibc"
+        - "dnf remove systemd"
+        - "dnf remove dnf"
+
+    undo:
+      "dnf install {package}": "sudo dnf remove {package}"
+      "dnf remove {package}": "sudo dnf install {package}"
+
+    distro_notes:
+      fedora_rhel_centos: "dnf (this command)"
+      debian_ubuntu: "apt install / apt remove"
+      arch: "pacman -S / pacman -Rs"
+      opensuse: "zypper install / zypper remove"
+      note: "yum is an alias for dnf on modern distros; use dnf for new scripts"
+
+    related_commands:
+      - yum
+      - rpm
+
+  # ──────────────────────────────────────────────
+  # yum  (legacy RHEL/CentOS 7 and older)
+  # ──────────────────────────────────────────────
+  - name: yum
+    description: "Legacy RPM-based package manager for RHEL 7 / CentOS 7; aliased to dnf on modern systems"
+    common_intents:
+      - intent: "install a package"
+        alternate_phrasings:
+          - "yum install {package}"
+          - "install {package} on CentOS 7"
+          - "get {package} on my old RHEL box"
+          - "yum-based install of {package}"
+        pattern: "sudo yum install {package}"
+        example: "sudo yum install wget"
+
+      - intent: "remove a package"
+        alternate_phrasings:
+          - "yum remove {package}"
+          - "uninstall {package} with yum"
+          - "delete {package} on CentOS"
+        pattern: "sudo yum remove {package}"
+        example: "sudo yum remove httpd"
+
+      - intent: "update all packages"
+        alternate_phrasings:
+          - "yum update"
+          - "apply all yum updates"
+          - "upgrade everything on this CentOS system"
+        pattern: "sudo yum update"
+        example: "sudo yum update"
+
+      - intent: "search for a package"
+        alternate_phrasings:
+          - "yum search {query}"
+          - "find yum packages matching {query}"
+          - "look up {query} in the yum database"
+        pattern: "yum search {query}"
+        example: "yum search java"
+
+      - intent: "show package information"
+        alternate_phrasings:
+          - "yum info {package}"
+          - "describe the {package} yum package"
+          - "what version of {package} is available in yum"
+        pattern: "yum info {package}"
+        example: "yum info curl"
+
+      - intent: "find which package provides a command or file"
+        alternate_phrasings:
+          - "yum whatprovides {command}"
+          - "which package contains {command}"
+          - "what rpm do I need for {binary}"
+          - "command not found on CentOS, which package has it"
+        pattern: "yum whatprovides {command}"
+        example: "yum whatprovides ifconfig"
+
+      - intent: "list installed packages"
+        alternate_phrasings:
+          - "yum list installed"
+          - "show all packages on this yum system"
+          - "what is installed via yum"
+        pattern: "yum list installed"
+        example: "yum list installed"
+
+    key_flags:
+      - flag: "-y"
+        meaning: "Answer yes to all prompts automatically"
+      - flag: "whatprovides"
+        meaning: "Find the package that supplies a given file or executable"
+      - flag: "deplist"
+        meaning: "List dependencies of a package"
+      - flag: "localinstall"
+        meaning: "Install a local RPM file (use 'yum install ./file.rpm' on dnf)"
+
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "yum remove {package}"
+        - "yum update"
+      blocked_patterns:
+        - "yum remove glibc"
+        - "yum remove yum"
+
+    undo:
+      "yum install {package}": "sudo yum remove {package}"
+      "yum remove {package}": "sudo yum install {package}"
+
+    distro_notes:
+      note: "On RHEL 8+, Fedora 22+, and CentOS Stream, yum is an alias for dnf"
+      rhel7_centos7: "yum (this command, distinct from dnf)"
+      modern: "prefer dnf for new scripts and systems"
+
+    related_commands:
+      - dnf
+      - rpm
+
+  # ──────────────────────────────────────────────
+  # pacman  (Arch Linux)
+  # ──────────────────────────────────────────────
+  - name: pacman
+    description: "Package manager for Arch Linux; uses -S (sync), -R (remove), -Q (query), -U (upgrade local) operations"
+    common_intents:
+      - intent: "install a package"
+        alternate_phrasings:
+          - "pacman -S {package}"
+          - "install {package} on Arch"
+          - "get {package} via pacman"
+          - "add {package} to my Arch install"
+          - "how do I install software on Arch Linux"
+        pattern: "sudo pacman -S {package}"
+        example: "sudo pacman -S neovim"
+
+      - intent: "sync package database and upgrade all packages"
+        alternate_phrasings:
+          - "pacman -Syu"
+          - "update Arch Linux"
+          - "upgrade everything on Arch"
+          - "run a full Arch system update"
+          - "my Arch packages are out of date"
+        pattern: "sudo pacman -Syu"
+        example: "sudo pacman -Syu"
+
+      - intent: "remove a package and its unneeded dependencies"
+        alternate_phrasings:
+          - "pacman -Rs {package}"
+          - "uninstall {package} and orphaned deps on Arch"
+          - "remove {package} cleanly from Arch"
+          - "delete {package} with pacman"
+          - "get rid of {package} and its deps"
+        pattern: "sudo pacman -Rs {package}"
+        example: "sudo pacman -Rs firefox"
+
+      - intent: "search the package database"
+        alternate_phrasings:
+          - "pacman -Ss {query}"
+          - "find packages matching {query} on Arch"
+          - "search pacman for {query}"
+          - "is there a pacman package for {query}"
+        pattern: "pacman -Ss {query}"
+        example: "pacman -Ss audio"
+
+      - intent: "show information about a package"
+        alternate_phrasings:
+          - "pacman -Si {package}"
+          - "describe the {package} package in pacman"
+          - "what is {package} and what version is available"
+        pattern: "pacman -Si {package}"
+        example: "pacman -Si git"
+
+      - intent: "list explicitly installed packages"
+        alternate_phrasings:
+          - "pacman -Qe"
+          - "show packages I installed explicitly"
+          - "list my manually installed packages on Arch"
+          - "what did I intentionally install"
+        pattern: "pacman -Qe"
+        example: "pacman -Qe"
+
+      - intent: "list orphan packages (unused dependencies)"
+        alternate_phrasings:
+          - "pacman -Qtdq"
+          - "find orphaned packages on Arch"
+          - "what packages are no longer needed"
+          - "show deps that nothing depends on anymore"
+        pattern: "pacman -Qtdq"
+        example: "pacman -Qtdq"
+
+      - intent: "install a local package file"
+        alternate_phrasings:
+          - "pacman -U {file.pkg.tar.zst}"
+          - "install a locally built Arch package"
+          - "install from .pkg.tar.zst file"
+          - "install this AUR-built package"
+        pattern: "sudo pacman -U {path/to/file.pkg.tar.zst}"
+        example: "sudo pacman -U ~/builds/myapp-1.0-x86_64.pkg.tar.zst"
+
+      - intent: "clear the package cache"
+        alternate_phrasings:
+          - "pacman -Scc"
+          - "free up disk space used by the pacman cache"
+          - "clean pacman's cached packages"
+          - "pacman cache is huge, clear it"
+        pattern: "sudo pacman -Scc"
+        example: "sudo pacman -Scc"
+
+    key_flags:
+      - flag: "-S"
+        meaning: "Sync (install from repos or sync package database)"
+      - flag: "-R"
+        meaning: "Remove a package"
+      - flag: "-Q"
+        meaning: "Query installed packages"
+      - flag: "-U"
+        meaning: "Upgrade or install from a local package file"
+      - flag: "-y / --refresh"
+        meaning: "Force refresh of package databases (use with -S)"
+      - flag: "-u / --upgrades"
+        meaning: "Upgrade out-of-date packages (use with -S)"
+      - flag: "s (with -Q or -S)"
+        meaning: "Search (pacman -Ss searches repos; pacman -Qs searches installed)"
+      - flag: "c (with -R)"
+        meaning: "Cascade: remove the package and all packages that depend on it"
+
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "pacman -Rs {package}"
+        - "pacman -Scc"
+        - "pacman -Rc {package}"
+      blocked_patterns:
+        - "pacman -Rns base"
+        - "pacman -Rns base-devel"
+        - "pacman -Rns linux"
+        - "pacman -Rns glibc"
+        - "pacman -Rc systemd"
+
+    undo:
+      "pacman -S {package}": "sudo pacman -Rs {package}"
+      "pacman -Rs {package}": "sudo pacman -S {package}"
+
+    distro_notes:
+      arch_manjaro: "pacman (this command)"
+      debian_ubuntu: "apt"
+      fedora_rhel: "dnf"
+      opensuse: "zypper"
+      note: "AUR packages require an AUR helper (yay, paru) or manual makepkg; pacman cannot access AUR directly"
+
+    related_commands:
+      - makepkg
+
+  # ──────────────────────────────────────────────
+  # zypper  (openSUSE / SUSE Linux Enterprise)
+  # ──────────────────────────────────────────────
+  - name: zypper
+    description: "Package manager for openSUSE and SUSE Linux Enterprise"
+    common_intents:
+      - intent: "install a package"
+        alternate_phrasings:
+          - "zypper install {package}"
+          - "zypper in {package}"
+          - "get {package} on openSUSE"
+          - "install {package} with zypper"
+          - "how do I add a package on SUSE"
+        pattern: "sudo zypper install {package}"
+        example: "sudo zypper install vim"
+
+      - intent: "remove a package"
+        alternate_phrasings:
+          - "zypper remove {package}"
+          - "zypper rm {package}"
+          - "uninstall {package} on openSUSE"
+          - "delete {package} with zypper"
+        pattern: "sudo zypper remove {package}"
+        example: "sudo zypper remove apache2"
+
+      - intent: "update all installed packages"
+        alternate_phrasings:
+          - "zypper update"
+          - "zypper up"
+          - "upgrade all packages on openSUSE"
+          - "apply all SUSE updates"
+          - "my openSUSE is out of date"
+        pattern: "sudo zypper update"
+        example: "sudo zypper update"
+
+      - intent: "refresh the package repository metadata"
+        alternate_phrasings:
+          - "zypper refresh"
+          - "zypper ref"
+          - "sync zypper repo data"
+          - "update zypper's package lists"
+        pattern: "sudo zypper refresh"
+        example: "sudo zypper refresh"
+
+      - intent: "search for a package"
+        alternate_phrasings:
+          - "zypper search {query}"
+          - "zypper se {query}"
+          - "find a zypper package matching {query}"
+          - "look up {query} in zypper"
+        pattern: "zypper search {query}"
+        example: "zypper search nodejs"
+
+      - intent: "list configured repositories"
+        alternate_phrasings:
+          - "zypper repos"
+          - "zypper lr"
+          - "show zypper repo sources"
+          - "what repos does zypper use"
+        pattern: "zypper repos --sort-by-priority"
+        example: "zypper repos --sort-by-priority"
+
+    key_flags:
+      - flag: "in / install"
+        meaning: "Install a package"
+      - flag: "rm / remove"
+        meaning: "Remove a package"
+      - flag: "up / update"
+        meaning: "Update installed packages"
+      - flag: "ref / refresh"
+        meaning: "Refresh repository metadata"
+      - flag: "se / search"
+        meaning: "Search for packages"
+      - flag: "lr / repos"
+        meaning: "List configured repositories"
+      - flag: "-y / --no-confirm"
+        meaning: "Do not ask for confirmation"
+
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "zypper remove {package}"
+        - "zypper update"
+      blocked_patterns:
+        - "zypper remove glibc"
+        - "zypper remove systemd"
+
+    undo:
+      "zypper install {package}": "sudo zypper remove {package}"
+      "zypper remove {package}": "sudo zypper install {package}"
+
+    distro_notes:
+      opensuse_sle: "zypper (this command)"
+      debian_ubuntu: "apt"
+      fedora_rhel: "dnf"
+      arch: "pacman"
+
+    related_commands:
+      - rpm
+
+  # ──────────────────────────────────────────────
+  # snap  (Canonical universal package format)
+  # ──────────────────────────────────────────────
+  - name: snap
+    description: "Install and manage sandboxed Snap packages; works across multiple Linux distros"
+    common_intents:
+      - intent: "install a snap package"
+        alternate_phrasings:
+          - "snap install {package}"
+          - "install {package} via snap"
+          - "get {package} as a snap"
+          - "I want to install {package} from the snap store"
+          - "add the {package} snap"
+        pattern: "sudo snap install {package}"
+        example: "sudo snap install vlc"
+
+      - intent: "remove a snap package"
+        alternate_phrasings:
+          - "snap remove {package}"
+          - "uninstall {package} snap"
+          - "delete the {package} snap"
+          - "get rid of the {package} snap"
+        pattern: "sudo snap remove {package}"
+        example: "sudo snap remove vlc"
+
+      - intent: "update all snap packages"
+        alternate_phrasings:
+          - "snap refresh"
+          - "update all snaps manually"
+          - "upgrade my snap packages"
+          - "my snaps are out of date"
+        pattern: "sudo snap refresh"
+        example: "sudo snap refresh"
+
+      - intent: "update a specific snap package"
+        alternate_phrasings:
+          - "snap refresh {package}"
+          - "update the {package} snap"
+          - "upgrade just {package} snap"
+        pattern: "sudo snap refresh {package}"
+        example: "sudo snap refresh firefox"
+
+      - intent: "list installed snaps"
+        alternate_phrasings:
+          - "snap list"
+          - "show all installed snap packages"
+          - "what snaps do I have"
+        pattern: "snap list"
+        example: "snap list"
+
+      - intent: "search for a snap"
+        alternate_phrasings:
+          - "snap find {query}"
+          - "search the snap store for {query}"
+          - "is there a snap for {query}"
+          - "look up {query} in the snap store"
+        pattern: "snap find {query}"
+        example: "snap find text editor"
+
+      - intent: "revert a snap to its previous version"
+        alternate_phrasings:
+          - "snap revert {package}"
+          - "undo the last snap update for {package}"
+          - "go back to the previous version of the {package} snap"
+          - "the new {package} snap broke, roll it back"
+        pattern: "sudo snap revert {package}"
+        example: "sudo snap revert firefox"
+
+    key_flags:
+      - flag: "--classic"
+        meaning: "Install in classic confinement (bypasses snap sandbox; use only when required)"
+      - flag: "--channel={channel}"
+        meaning: "Install from a specific channel (stable, candidate, beta, edge)"
+      - flag: "--dangerous"
+        meaning: "Install a local snap file without signature verification"
+      - flag: "--devmode"
+        meaning: "Install in developer mode (bypasses sandbox; for testing only)"
+
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - "snap install {package} --classic"
+        - "snap install {package} --devmode"
+        - "snap install {package} --dangerous"
+        - "snap remove {package}"
+      blocked_patterns:
+        - "snap install --dangerous {untrusted_file}"
+
+    undo:
+      "snap install {package}": "sudo snap remove {package}"
+      "snap remove {package}": "sudo snap install {package}"
+      "snap refresh {package}": "sudo snap revert {package}"
+
+    distro_notes:
+      ubuntu: "snap is first-class and pre-installed"
+      other_distros: "snapd daemon must be installed and running; not available on all distros"
+      fedora_note: "snap works on Fedora via snapd; flatpak is often preferred"
+
+    related_commands:
+      - flatpak
+      - apt
+
+  # ──────────────────────────────────────────────
+  # flatpak  (sandboxed app distribution)
+  # ──────────────────────────────────────────────
+  - name: flatpak
+    description: "Install and run sandboxed Flatpak applications from Flathub or other remotes"
+    common_intents:
+      - intent: "install a flatpak application"
+        alternate_phrasings:
+          - "flatpak install {remote} {app-id}"
+          - "install {application} from Flathub"
+          - "get {application} as a flatpak"
+          - "I want to install {application} via flatpak"
+          - "add the {application} flatpak"
+        pattern: "flatpak install {remote} {com.example.App}"
+        example: "flatpak install flathub org.gimp.GIMP"
+
+      - intent: "remove a flatpak application"
+        alternate_phrasings:
+          - "flatpak uninstall {app-id}"
+          - "remove the {application} flatpak"
+          - "delete {application} flatpak"
+          - "uninstall {application} that I installed via flatpak"
+        pattern: "flatpak uninstall {com.example.App}"
+        example: "flatpak uninstall org.gimp.GIMP"
+
+      - intent: "update all flatpak applications"
+        alternate_phrasings:
+          - "flatpak update"
+          - "upgrade all my flatpaks"
+          - "bring all flatpak apps up to date"
+          - "my flatpak apps are outdated"
+        pattern: "flatpak update"
+        example: "flatpak update"
+
+      - intent: "list installed flatpak applications"
+        alternate_phrasings:
+          - "flatpak list --app"
+          - "show all installed flatpaks"
+          - "what flatpak apps do I have"
+          - "list my flatpak applications"
+        pattern: "flatpak list --app"
+        example: "flatpak list --app"
+
+      - intent: "add Flathub as a remote source"
+        alternate_phrasings:
+          - "flatpak remote-add flathub"
+          - "enable Flathub for flatpak"
+          - "how do I set up flatpak with Flathub"
+          - "I can't find any flatpaks, how do I add the repo"
+        pattern: "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
+        example: "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
+
+      - intent: "show information about an installed flatpak"
+        alternate_phrasings:
+          - "flatpak info {app-id}"
+          - "show version and details of {application} flatpak"
+          - "what version of {application} is installed as a flatpak"
+        pattern: "flatpak info {com.example.App}"
+        example: "flatpak info org.mozilla.firefox"
+
+      - intent: "remove unused flatpak runtimes to free space"
+        alternate_phrasings:
+          - "flatpak remove --unused"
+          - "clean up unused flatpak runtimes"
+          - "flatpak is using too much disk space"
+          - "delete orphaned flatpak components"
+        pattern: "flatpak remove --unused"
+        example: "flatpak remove --unused"
+
+    key_flags:
+      - flag: "--user"
+        meaning: "Install or operate on per-user flatpak data (no root required)"
+      - flag: "--system"
+        meaning: "Install or operate system-wide (default; requires root)"
+      - flag: "--app"
+        meaning: "Filter list output to applications only (exclude runtimes)"
+      - flag: "--if-not-exists"
+        meaning: "Do not fail if remote already exists (safe for idempotent scripts)"
+      - flag: "--unused"
+        meaning: "Target unused runtimes and extensions"
+
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "flatpak uninstall {app-id}"
+        - "flatpak remove --unused"
+      blocked_patterns: []
+
+    undo:
+      "flatpak install {remote} {app-id}": "flatpak uninstall {app-id}"
+      "flatpak uninstall {app-id}": "flatpak install {remote} {app-id}"
+
+    distro_notes:
+      note: "flatpak works across distros; Flathub is the primary application source"
+      fedora: "flatpak pre-installed; Flathub not enabled by default on some spins"
+      ubuntu: "flatpak available but snapd is the default; must add Flathub manually"
+      arch: "install flatpak via pacman -S flatpak; then add Flathub remote"
+
+    related_commands:
+      - snap
+      - apt
+
+  # ──────────────────────────────────────────────
+  # pip  (Python package installer)
+  # ──────────────────────────────────────────────
+  - name: pip
+    description: "Python package manager; installs packages from PyPI into Python environments"
+    common_intents:
+      - intent: "install a Python package"
+        alternate_phrasings:
+          - "pip install {package}"
+          - "get the {package} Python library"
+          - "add {package} to my Python environment"
+          - "I need {package} for a Python project"
+          - "how do I install {package} for Python"
+        pattern: "pip install {package}"
+        example: "pip install requests"
+
+      - intent: "install a package to user directory without root"
+        alternate_phrasings:
+          - "pip install --user {package}"
+          - "install {package} just for my user"
+          - "install Python package without sudo"
+          - "I don't have root, how do I pip install"
+          - "install {package} locally without system-wide changes"
+        pattern: "pip install --user {package}"
+        example: "pip install --user black"
+
+      - intent: "upgrade an installed package"
+        alternate_phrasings:
+          - "pip install --upgrade {package}"
+          - "pip install -U {package}"
+          - "update {package} to the latest version"
+          - "my {package} is out of date"
+          - "upgrade the Python {package} package"
+        pattern: "pip install --upgrade {package}"
+        example: "pip install --upgrade requests"
+
+      - intent: "uninstall a package"
+        alternate_phrasings:
+          - "pip uninstall {package}"
+          - "remove the {package} Python library"
+          - "delete {package} from my Python environment"
+          - "get rid of the {package} pip package"
+        pattern: "pip uninstall {package}"
+        example: "pip uninstall requests"
+
+      - intent: "install packages from a requirements file"
+        alternate_phrasings:
+          - "pip install -r requirements.txt"
+          - "install all dependencies listed in requirements.txt"
+          - "restore Python dependencies from requirements file"
+          - "set up a project's Python deps from requirements"
+        pattern: "pip install -r {requirements.txt}"
+        example: "pip install -r requirements.txt"
+
+      - intent: "list installed Python packages"
+        alternate_phrasings:
+          - "pip list"
+          - "show all installed Python packages"
+          - "what pip packages do I have"
+          - "list my Python dependencies"
+        pattern: "pip list"
+        example: "pip list"
+
+      - intent: "show information about an installed package"
+        alternate_phrasings:
+          - "pip show {package}"
+          - "what version of {package} is installed"
+          - "where is {package} installed"
+          - "describe the {package} pip package"
+        pattern: "pip show {package}"
+        example: "pip show numpy"
+
+      - intent: "list outdated packages"
+        alternate_phrasings:
+          - "pip list --outdated"
+          - "which Python packages have newer versions"
+          - "show packages that need updating"
+          - "what pip packages are behind"
+        pattern: "pip list --outdated"
+        example: "pip list --outdated"
+
+      - intent: "export installed packages to a requirements file"
+        alternate_phrasings:
+          - "pip freeze > requirements.txt"
+          - "save my pip dependencies to a file"
+          - "generate requirements.txt from current environment"
+          - "capture the current Python environment"
+        pattern: "pip freeze > {requirements.txt}"
+        example: "pip freeze > requirements.txt"
+
+      - intent: "install a specific version of a package"
+        alternate_phrasings:
+          - "pip install {package}=={version}"
+          - "install version {version} of {package}"
+          - "pin {package} to a specific version"
+          - "I need exactly version {version} of {package}"
+        pattern: "pip install {package}=={version}"
+        example: "pip install Django==4.2.0"
+
+    key_flags:
+      - flag: "--user"
+        meaning: "Install into the user's home directory (~/.local); no sudo needed"
+      - flag: "-U / --upgrade"
+        meaning: "Upgrade an already-installed package to the latest available version"
+      - flag: "-r / --requirement"
+        meaning: "Install packages listed in a requirements file"
+      - flag: "--no-deps"
+        meaning: "Do not install package dependencies (use with caution)"
+      - flag: "-e / --editable"
+        meaning: "Install a package in editable/development mode from a local directory"
+
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for:
+        - "pip uninstall {package}"
+      blocked_patterns:
+        - "sudo pip install"   # dangerous; prefer --user or venv
+
+    undo:
+      "pip install {package}": "pip uninstall {package}"
+      "pip uninstall {package}": "pip install {package}"
+
+    distro_notes:
+      best_practice: "Always prefer using a virtual environment (python -m venv .venv) over global pip installs"
+      avoid_sudo_pip: "Never run 'sudo pip install'; it can corrupt the system Python. Use --user or a venv."
+      pip3: "On systems with both Python 2 and 3, use pip3 to target Python 3 explicitly"
+      pipx: "For CLI tools, prefer 'pipx install {tool}' which isolates each tool in its own venv"
+
+    related_commands:
+      - python
+      - pipx
+      - conda
+
+  # ──────────────────────────────────────────────
+  # npm  (Node.js / JavaScript package manager)
+  # ──────────────────────────────────────────────
+  - name: npm
+    description: "Node.js package manager; installs JavaScript packages from the npm registry"
+    common_intents:
+      - intent: "install all project dependencies from package.json"
+        alternate_phrasings:
+          - "npm install"
+          - "restore node_modules from package.json"
+          - "set up a Node project's dependencies"
+          - "I cloned a repo and need to install its deps"
+          - "install everything in package.json"
+        pattern: "npm install"
+        example: "npm install"
+
+      - intent: "install a specific package and save it as a dependency"
+        alternate_phrasings:
+          - "npm install {package}"
+          - "npm install --save {package}"
+          - "add {package} to this Node project"
+          - "install {package} and save it to package.json"
+          - "I need the {package} npm module"
+        pattern: "npm install {package}"
+        example: "npm install axios"
+
+      - intent: "install a package as a dev dependency"
+        alternate_phrasings:
+          - "npm install --save-dev {package}"
+          - "npm install -D {package}"
+          - "add {package} as a dev-only dependency"
+          - "install {package} for testing/building but not production"
+          - "add {package} to devDependencies"
+        pattern: "npm install --save-dev {package}"
+        example: "npm install --save-dev jest"
+
+      - intent: "install a package globally"
+        alternate_phrasings:
+          - "npm install -g {package}"
+          - "install {package} globally with npm"
+          - "add {package} as a global npm CLI tool"
+          - "make {package} available everywhere on the system"
+        pattern: "npm install -g {package}"
+        example: "npm install -g typescript"
+
+      - intent: "uninstall a package"
+        alternate_phrasings:
+          - "npm uninstall {package}"
+          - "remove {package} from this project"
+          - "delete {package} from node_modules and package.json"
+          - "get rid of the {package} npm dependency"
+        pattern: "npm uninstall {package}"
+        example: "npm uninstall lodash"
+
+      - intent: "update all packages to their latest allowed versions"
+        alternate_phrasings:
+          - "npm update"
+          - "upgrade all npm dependencies"
+          - "bring all packages up to their allowed semver range"
+          - "update node_modules to latest compatible versions"
+        pattern: "npm update"
+        example: "npm update"
+
+      - intent: "list installed packages"
+        alternate_phrasings:
+          - "npm list"
+          - "npm ls"
+          - "show all packages in node_modules"
+          - "what npm packages are installed in this project"
+        pattern: "npm list"
+        example: "npm list"
+
+      - intent: "list globally installed packages"
+        alternate_phrasings:
+          - "npm list -g --depth 0"
+          - "show my globally installed npm packages"
+          - "what npm tools are installed globally"
+          - "list top-level global npm packages"
+        pattern: "npm list -g --depth 0"
+        example: "npm list -g --depth 0"
+
+      - intent: "show outdated packages"
+        alternate_phrasings:
+          - "npm outdated"
+          - "which npm packages have newer versions"
+          - "are any of my npm deps out of date"
+          - "show available updates for npm packages"
+        pattern: "npm outdated"
+        example: "npm outdated"
+
+    key_flags:
+      - flag: "-g / --global"
+        meaning: "Operate on globally installed packages rather than the local project"
+      - flag: "--save-dev / -D"
+        meaning: "Save package to devDependencies in package.json"
+      - flag: "--save-exact / -E"
+        meaning: "Save the exact version rather than a semver range"
+      - flag: "--legacy-peer-deps"
+        meaning: "Ignore peer dependency conflicts (useful when upgrading)"
+      - flag: "--depth 0"
+        meaning: "Show only top-level packages (not their transitive deps)"
+
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for:
+        - "npm uninstall {package}"
+        - "npm install -g {package}"
+      blocked_patterns:
+        - "sudo npm install -g"   # dangerous on Linux; prefer nvm or nodenv
+
+    undo:
+      "npm install {package}": "npm uninstall {package}"
+      "npm uninstall {package}": "npm install {package}"
+
+    distro_notes:
+      global_installs: "Avoid 'sudo npm install -g'; use nvm or nodenv to manage Node/npm versions per user"
+      alternatives: "yarn and pnpm are alternative Node package managers with similar commands"
+      yarn_equiv: "npm install → yarn add; npm uninstall → yarn remove; npm install (no args) → yarn"
+      pnpm_equiv: "npm install → pnpm add; same general command structure"
+
+    related_commands:
+      - npx
+      - yarn
+      - pnpm
+      - node
+
+  # ──────────────────────────────────────────────
+  # cargo  (Rust package / build manager)
+  # ──────────────────────────────────────────────
+  - name: cargo
+    description: "Rust's build system and package manager; manages project dependencies (crates) and installs Rust binaries"
+    common_intents:
+      - intent: "install a Rust binary from crates.io"
+        alternate_phrasings:
+          - "cargo install {crate}"
+          - "install the {crate} Rust tool"
+          - "get {crate} binary via cargo"
+          - "I want to use the {crate} command-line tool written in Rust"
+          - "add the {crate} Rust crate as a global binary"
+        pattern: "cargo install {crate}"
+        example: "cargo install ripgrep"
+
+      - intent: "uninstall a Rust binary"
+        alternate_phrasings:
+          - "cargo uninstall {crate}"
+          - "remove the {crate} Rust binary"
+          - "delete {crate} installed via cargo"
+          - "get rid of the cargo-installed {crate} tool"
+        pattern: "cargo uninstall {crate}"
+        example: "cargo uninstall ripgrep"
+
+      - intent: "add a dependency to the current project"
+        alternate_phrasings:
+          - "cargo add {crate}"
+          - "add the {crate} crate to Cargo.toml"
+          - "include {crate} as a dependency in this Rust project"
+          - "I want to use {crate} in my Rust code"
+        pattern: "cargo add {crate}"
+        example: "cargo add serde"
+
+      - intent: "search for a crate on crates.io"
+        alternate_phrasings:
+          - "cargo search {query}"
+          - "find Rust crates matching {query}"
+          - "search crates.io for {query}"
+          - "is there a Rust crate for {query}"
+        pattern: "cargo search {query}"
+        example: "cargo search json parser"
+
+      - intent: "list installed cargo binaries"
+        alternate_phrasings:
+          - "cargo install --list"
+          - "show all cargo-installed binaries"
+          - "what have I installed with cargo"
+          - "list my global Rust tools"
+        pattern: "cargo install --list"
+        example: "cargo install --list"
+
+      - intent: "update dependencies in the current project"
+        alternate_phrasings:
+          - "cargo update"
+          - "upgrade crate dependencies to latest compatible versions"
+          - "refresh Cargo.lock to use newest allowed crate versions"
+          - "update my Rust project's dependencies"
+        pattern: "cargo update"
+        example: "cargo update"
+
+      - intent: "install a specific version of a crate"
+        alternate_phrasings:
+          - "cargo install {crate}@{version}"
+          - "install version {version} of {crate}"
+          - "pin {crate} to a specific version"
+          - "I need exactly version {version} of the {crate} tool"
+        pattern: "cargo install {crate}@{version}"
+        example: "cargo install rustfmt@1.5.1"
+
+    key_flags:
+      - flag: "--list (with install)"
+        meaning: "Show all globally installed binaries and their versions"
+      - flag: "--git {url}"
+        meaning: "Install a binary directly from a Git repository"
+      - flag: "--path {dir}"
+        meaning: "Install from a local directory instead of crates.io"
+      - flag: "--force"
+        meaning: "Force reinstall even if the package is already up-to-date"
+      - flag: "--locked"
+        meaning: "Require that Cargo.lock is up-to-date (do not update it)"
+
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for:
+        - "cargo install {crate} --git {url}"   # installing from arbitrary git repos
+      blocked_patterns: []
+
+    undo:
+      "cargo install {crate}": "cargo uninstall {crate}"
+      "cargo uninstall {crate}": "cargo install {crate}"
+      "cargo add {crate}": "cargo remove {crate}"
+
+    distro_notes:
+      install_location: "cargo install puts binaries in ~/.cargo/bin; ensure this is in $PATH"
+      system_vs_user: "cargo always installs to the current user's ~/.cargo — there is no system-wide install"
+      vs_apt_npm: "cargo install is for CLI tools; crate dependencies for a project use 'cargo add' / Cargo.toml"
+      rustup: "Use 'rustup' to manage Rust toolchain versions; cargo comes bundled with the Rust toolchain"
+
+    related_commands:
+      - rustup
+      - rustc

@@ -1,0 +1,791 @@
+domain: compression
+description: "Archiving, compressing, and extracting files and directories"
+related_domains:
+  - file-operations
+  - storage
+
+commands:
+  - name: tar
+    description: "Create, extract, and inspect tape archives, optionally with gzip/bzip2/xz compression"
+    common_intents:
+      - intent: "create a gzip-compressed tar archive of a directory"
+        alternate_phrasings:
+          - "tar czf"
+          - "pack up this folder into a tarball"
+          - "I need to compress a whole directory into a single file I can move around"
+          - "make a .tar.gz out of this"
+          - "how do I bundle up a directory so I can copy it somewhere"
+        pattern: "tar czf {archive.tar.gz} {directory}"
+        example: "tar czf backup.tar.gz /home/user/projects"
+      - intent: "extract a compressed tar archive into the current directory"
+        alternate_phrasings:
+          - "tar xf"
+          - "unpack this tarball"
+          - "how do I get the files out of this .tar.gz"
+          - "ugh I just need to extract this thing"
+          - "decompress and expand the archive here"
+        pattern: "tar xf {archive.tar.gz}"
+        example: "tar xf project.tar.gz"
+      - intent: "extract a tar archive into a specific destination directory"
+        alternate_phrasings:
+          - "tar xf -C"
+          - "extract to a different folder"
+          - "untar into a specific directory instead of here"
+          - "I want the contents to land in /opt not wherever I am"
+        pattern: "tar xf {archive.tar.gz} -C {destination}"
+        example: "tar xf release.tar.gz -C /opt/myapp"
+      - intent: "list the contents of a tar archive without extracting"
+        alternate_phrasings:
+          - "tar tvf"
+          - "what's in this tarball"
+          - "peek inside the archive before extracting"
+          - "show me what files are in this .tar.gz"
+        pattern: "tar tvf {archive.tar.gz}"
+        example: "tar tvf backup.tar.gz"
+      - intent: "create an uncompressed tar archive"
+        alternate_phrasings:
+          - "tar cf"
+          - "bundle files without compressing"
+          - "make a plain .tar with no compression"
+          - "just archive it, don't bother compressing"
+        pattern: "tar cf {archive.tar} {files}"
+        example: "tar cf data.tar /var/data"
+      - intent: "create a bzip2-compressed tar archive"
+        alternate_phrasings:
+          - "tar cjf"
+          - "pack into a .tar.bz2"
+          - "use bzip2 compression when archiving this"
+          - "I need better compression than gzip, use bzip2"
+        pattern: "tar cjf {archive.tar.bz2} {directory}"
+        example: "tar cjf archive.tar.bz2 mydir/"
+      - intent: "create an xz-compressed tar archive"
+        alternate_phrasings:
+          - "tar cJf"
+          - "pack into a .tar.xz"
+          - "highest compression tarball"
+          - "use xz for maximum compression"
+        pattern: "tar cJf {archive.tar.xz} {directory}"
+        example: "tar cJf release.tar.xz src/"
+      - intent: "create a tar archive from a directory using relative paths"
+        alternate_phrasings:
+          - "tar czf -C"
+          - "archive a folder so it unpacks without the full path prefix"
+          - "tar up a directory using relative paths so it extracts cleanly"
+          - "I don't want the full absolute path baked into the archive"
+        pattern: "tar czf {archive.tar.gz} -C {parent_directory} {directory_name}"
+        example: "tar czf app.tar.gz -C /home/user myapp"
+      - intent: "extract specific files matching a pattern from an archive"
+        alternate_phrasings:
+          - "tar xf --wildcards"
+          - "pull only certain files out of this tarball"
+          - "extract just the HTML files from the archive"
+          - "I only need a subset of files from this tar"
+        pattern: "tar xf {archive.tar} --wildcards '{pattern}'"
+        example: "tar xf backup.tar --wildcards '*.conf'"
+    key_flags:
+      - flag: "c"
+        meaning: "Create a new archive"
+      - flag: "x"
+        meaning: "Extract files from an archive"
+      - flag: "t"
+        meaning: "List archive contents without extracting"
+      - flag: "f"
+        meaning: "Specifies the archive filename (always required with a path)"
+      - flag: "z"
+        meaning: "Filter through gzip (for .tar.gz / .tgz)"
+      - flag: "j"
+        meaning: "Filter through bzip2 (for .tar.bz2)"
+      - flag: "J"
+        meaning: "Filter through xz (for .tar.xz)"
+      - flag: "v"
+        meaning: "Verbose — print each file as it is processed"
+      - flag: "-C"
+        meaning: "Change to a different directory before performing the operation"
+      - flag: "-a"
+        meaning: "Auto-detect compression format from archive filename extension"
+      - flag: "--exclude"
+        meaning: "Exclude files matching a pattern from the archive"
+      - flag: "--wildcards"
+        meaning: "Match filenames against a shell glob pattern during extraction"
+      - flag: "--strip-components"
+        meaning: "Strip leading path components when extracting"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "extracting an archive that may overwrite existing files"
+        - "extracting to / or /etc"
+        - "archives containing absolute paths"
+      blocked_patterns:
+        - "tar * -C /"
+        - "tar * -C /etc"
+        - "tar * -C /usr"
+        - "tar * -C /bin"
+        - "tar * -C /sbin"
+        - "tar xf * / "
+    undo:
+      "create archive": "rm {archive}"
+      "extract archive": "rm -rf {extracted_directory}"
+    related_commands:
+      - gzip
+      - bzip2
+      - xz
+      - zstd
+      - zip
+
+  - name: gzip
+    description: "Compress or decompress files using gzip (LZ77) compression, replacing the original by default"
+    common_intents:
+      - intent: "compress a file with gzip"
+        alternate_phrasings:
+          - "gzip a file"
+          - "make this file smaller with gzip"
+          - "compress this .log file so it takes less space"
+          - "shrink this file"
+        pattern: "gzip {file}"
+        example: "gzip access.log"
+      - intent: "decompress a gzip file"
+        alternate_phrasings:
+          - "gzip -d"
+          - "ungzip this file"
+          - "expand a .gz file"
+          - "I need to read the contents of this .gz file"
+        pattern: "gzip -d {file.gz}"
+        example: "gzip -d access.log.gz"
+      - intent: "compress a file and keep the original"
+        alternate_phrasings:
+          - "gzip -k"
+          - "compress without deleting the source"
+          - "gzip but don't remove the original file"
+          - "I want the compressed version but need to keep the original too"
+        pattern: "gzip -k {file}"
+        example: "gzip -k database_dump.sql"
+      - intent: "compress a file to a specific output filename"
+        alternate_phrasings:
+          - "gzip -c stdout redirect"
+          - "gzip to a different name"
+          - "compress and write to a custom output path"
+          - "gzip output to a specific file"
+        pattern: "gzip -c {file} > {output.gz}"
+        example: "gzip -c report.csv > /backups/report.csv.gz"
+      - intent: "list compression ratio and stats for a gzip file"
+        alternate_phrasings:
+          - "gzip -l"
+          - "how compressed is this .gz file"
+          - "show compression ratio of the archive"
+          - "what's the size before and after compression"
+        pattern: "gzip -l {file.gz}"
+        example: "gzip -l archive.log.gz"
+    key_flags:
+      - flag: "-d"
+        meaning: "Decompress (equivalent to gunzip)"
+      - flag: "-k"
+        meaning: "Keep the original file after compression"
+      - flag: "-c"
+        meaning: "Write output to stdout, keeping the original file"
+      - flag: "-l"
+        meaning: "List compression statistics for a .gz file"
+      - flag: "-v"
+        meaning: "Verbose — show filename and compression ratio"
+      - flag: "-r"
+        meaning: "Recursively compress all files in a directory"
+      - flag: "-1 to -9"
+        meaning: "Compression level: 1=fastest/least, 9=slowest/most, 6=default"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "compressing a file that will replace the original (default behavior)"
+      blocked_patterns: []
+    undo:
+      "compress file": "gzip -d {file.gz}"
+      "decompress file": "gzip {file}"
+    related_commands:
+      - gunzip
+      - tar
+      - bzip2
+      - xz
+      - zstd
+
+  - name: gunzip
+    description: "Decompress gzip-compressed files (alias for gzip --decompress)"
+    common_intents:
+      - intent: "decompress a .gz file"
+        alternate_phrasings:
+          - "gunzip a file"
+          - "extract a gzip file"
+          - "how do I open a .gz file"
+          - "just unzip this gz already"
+        pattern: "gunzip {file.gz}"
+        example: "gunzip data.csv.gz"
+      - intent: "decompress a .gz file and keep the original"
+        alternate_phrasings:
+          - "gunzip -k"
+          - "decompress without removing the .gz"
+          - "keep the archive after gunzipping"
+          - "I want both the compressed and uncompressed versions"
+        pattern: "gunzip -k {file.gz}"
+        example: "gunzip -k backup.sql.gz"
+      - intent: "decompress a .gz file to stdout"
+        alternate_phrasings:
+          - "gunzip -c"
+          - "pipe gunzip output to another command"
+          - "read a gzip file without extracting to disk"
+          - "stream decompressed content"
+        pattern: "gunzip -c {file.gz}"
+        example: "gunzip -c app.log.gz | grep ERROR"
+    key_flags:
+      - flag: "-k"
+        meaning: "Keep the original .gz file after decompression"
+      - flag: "-c"
+        meaning: "Write output to stdout, keeping the .gz file"
+      - flag: "-f"
+        meaning: "Force decompression even if the output file already exists"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "decompressing when the output file already exists"
+      blocked_patterns: []
+    undo:
+      "decompress file": "gzip {file}"
+    related_commands:
+      - gzip
+      - tar
+
+  - name: bzip2
+    description: "Compress or decompress files using bzip2 block-sorting compression, typically better ratio than gzip"
+    common_intents:
+      - intent: "compress a file with bzip2"
+        alternate_phrasings:
+          - "bzip2 a file"
+          - "compress with bzip2 for better compression than gzip"
+          - "make a .bz2 file"
+          - "pack this file using bzip2"
+        pattern: "bzip2 {file}"
+        example: "bzip2 dump.sql"
+      - intent: "decompress a bzip2 file"
+        alternate_phrasings:
+          - "bzip2 -d"
+          - "unpack a .bz2 file"
+          - "decompress bzip2"
+          - "how do I open a .bz2 file"
+        pattern: "bzip2 -d {file.bz2}"
+        example: "bzip2 -d dump.sql.bz2"
+      - intent: "compress a file to stdout"
+        alternate_phrasings:
+          - "bzip2 -c"
+          - "bzip2 to a pipe"
+          - "compress and stream to stdout"
+          - "pipe bzip2 output without writing to disk"
+        pattern: "bzip2 -zc {file} > {output.bz2}"
+        example: "bzip2 -zc bigfile.xml > bigfile.xml.bz2"
+      - intent: "test the integrity of a bzip2 file"
+        alternate_phrasings:
+          - "bzip2 -t"
+          - "verify a .bz2 archive is not corrupted"
+          - "check if this bzip2 file is valid"
+          - "is this .bz2 file intact"
+        pattern: "bzip2 -t {file.bz2}"
+        example: "bzip2 -t backup.tar.bz2"
+    key_flags:
+      - flag: "-d"
+        meaning: "Decompress (equivalent to bunzip2)"
+      - flag: "-z"
+        meaning: "Force compression (default operation)"
+      - flag: "-k"
+        meaning: "Keep the original file after compression"
+      - flag: "-c"
+        meaning: "Write output to stdout"
+      - flag: "-t"
+        meaning: "Test archive integrity without decompressing"
+      - flag: "-v"
+        meaning: "Verbose — show compression ratio per file"
+      - flag: "-f"
+        meaning: "Force overwrite of existing output files"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "compressing when the original will be deleted by default"
+      blocked_patterns: []
+    undo:
+      "compress file": "bzip2 -d {file.bz2}"
+      "decompress file": "bzip2 {file}"
+    related_commands:
+      - bunzip2
+      - tar
+      - gzip
+
+  - name: bunzip2
+    description: "Decompress bzip2-compressed files (alias for bzip2 --decompress)"
+    common_intents:
+      - intent: "decompress a .bz2 file"
+        alternate_phrasings:
+          - "bunzip2 a file"
+          - "extract a bzip2 archive"
+          - "how do I open a .bz2 file"
+          - "ugh how do I unpack this .bz2"
+        pattern: "bunzip2 {file.bz2}"
+        example: "bunzip2 backup.tar.bz2"
+      - intent: "decompress a .bz2 file and keep the original"
+        alternate_phrasings:
+          - "bunzip2 -k"
+          - "decompress .bz2 without removing the archive"
+          - "keep the .bz2 after decompressing"
+        pattern: "bunzip2 -k {file.bz2}"
+        example: "bunzip2 -k data.bz2"
+    key_flags:
+      - flag: "-k"
+        meaning: "Keep the original .bz2 file after decompression"
+      - flag: "-c"
+        meaning: "Write output to stdout"
+      - flag: "-f"
+        meaning: "Force decompression even if the output file exists"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "decompressing when the output file already exists"
+      blocked_patterns: []
+    undo:
+      "decompress file": "bzip2 {file}"
+    related_commands:
+      - bzip2
+      - tar
+
+  - name: xz
+    description: "Compress or decompress files with XZ/LZMA compression, offering high compression ratios"
+    common_intents:
+      - intent: "compress a file with xz"
+        alternate_phrasings:
+          - "xz a file"
+          - "compress with xz for maximum compression ratio"
+          - "make a .xz file"
+          - "I need the smallest possible compressed file"
+        pattern: "xz {file}"
+        example: "xz kernel-source.tar"
+      - intent: "decompress an xz file"
+        alternate_phrasings:
+          - "xz -d"
+          - "unpack a .xz file"
+          - "decompress xz"
+          - "how do I open a .xz file"
+        pattern: "xz -d {file.xz}"
+        example: "xz -d package.tar.xz"
+      - intent: "compress a file and keep the original"
+        alternate_phrasings:
+          - "xz -k"
+          - "compress with xz without deleting the source"
+          - "keep original after xz"
+          - "I want the .xz but need the original too"
+        pattern: "xz -k {file}"
+        example: "xz -k bigdump.sql"
+      - intent: "compress with fastest (least) compression"
+        alternate_phrasings:
+          - "xz -0"
+          - "fast xz compression"
+          - "xz quickly, I don't care about compression ratio"
+          - "speed over size for xz"
+        pattern: "xz -0 {file}"
+        example: "xz -0 rapidbackup.tar"
+      - intent: "compress with maximum compression"
+        alternate_phrasings:
+          - "xz -9"
+          - "best possible xz compression"
+          - "squeeze this file as small as it will go"
+          - "extreme xz compression, I have time"
+        pattern: "xz -9 {file}"
+        example: "xz -9 release-archive.tar"
+    key_flags:
+      - flag: "-d"
+        meaning: "Decompress (equivalent to unxz)"
+      - flag: "-k"
+        meaning: "Keep the original file after compression"
+      - flag: "-c"
+        meaning: "Write output to stdout (implies -k)"
+      - flag: "-0 to -9"
+        meaning: "Compression level: 0=fastest, 9=best compression, 6=default"
+      - flag: "-T"
+        meaning: "Number of threads to use (0=auto-detect)"
+      - flag: "-F"
+        meaning: "Specify file format (e.g., lzma for legacy .lzma files)"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "compressing when the original will be deleted by default"
+      blocked_patterns: []
+    undo:
+      "compress file": "xz -d {file.xz}"
+      "decompress file": "xz {file}"
+    related_commands:
+      - unxz
+      - tar
+      - gzip
+      - zstd
+
+  - name: unxz
+    description: "Decompress XZ-compressed files (alias for xz --decompress)"
+    common_intents:
+      - intent: "decompress a .xz file"
+        alternate_phrasings:
+          - "unxz a file"
+          - "extract an xz archive"
+          - "how do I open a .xz file"
+          - "just unpack this .xz"
+        pattern: "unxz {file.xz}"
+        example: "unxz linux-6.1.tar.xz"
+      - intent: "decompress a .xz file and keep the original"
+        alternate_phrasings:
+          - "unxz -k"
+          - "decompress xz without removing the archive"
+          - "keep the .xz file after extracting"
+        pattern: "unxz -k {file.xz}"
+        example: "unxz -k package.xz"
+    key_flags:
+      - flag: "-k"
+        meaning: "Keep the original .xz file after decompression"
+      - flag: "-c"
+        meaning: "Write output to stdout"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "decompressing when the output file already exists"
+      blocked_patterns: []
+    undo:
+      "decompress file": "xz {file}"
+    related_commands:
+      - xz
+      - tar
+
+  - name: zip
+    description: "Package and compress files into a Zip archive compatible with Windows and other platforms"
+    common_intents:
+      - intent: "create a zip archive from a directory"
+        alternate_phrasings:
+          - "zip -r"
+          - "zip up a folder"
+          - "compress a directory into a .zip file"
+          - "I need to send this folder to someone on Windows"
+          - "pack this into a zip so anyone can open it"
+        pattern: "zip -r {archive.zip} {directory}"
+        example: "zip -r project.zip ./myproject"
+      - intent: "create a zip archive from specific files"
+        alternate_phrasings:
+          - "zip files"
+          - "compress these files into a zip"
+          - "make a zip from a list of files"
+          - "bundle these files into a .zip"
+        pattern: "zip {archive.zip} {file1} {file2}"
+        example: "zip report.zip summary.pdf data.csv"
+      - intent: "create a password-protected zip archive"
+        alternate_phrasings:
+          - "zip -re --encrypt"
+          - "zip with a password"
+          - "make an encrypted zip"
+          - "I need to send sensitive files, add a password to the zip"
+        pattern: "zip -re {archive.zip} {directory}"
+        example: "zip -re secrets.zip ./confidential"
+      - intent: "add or update files in an existing zip archive"
+        alternate_phrasings:
+          - "zip -u"
+          - "update a zip with new files"
+          - "add a file to an existing zip"
+          - "I forgot to include a file, add it to the zip"
+        pattern: "zip -u {archive.zip} {file}"
+        example: "zip -u project.zip README.md"
+      - intent: "list the contents of a zip archive"
+        alternate_phrasings:
+          - "zip -sf"
+          - "show what's in a .zip without extracting"
+          - "what files are in this zip"
+          - "peek inside a zip file"
+        pattern: "zip -sf {archive.zip}"
+        example: "zip -sf release.zip"
+    key_flags:
+      - flag: "-r"
+        meaning: "Recursively include directory contents"
+      - flag: "-e"
+        meaning: "Encrypt the archive with a password"
+      - flag: "-d"
+        meaning: "Delete files from an existing archive"
+      - flag: "-u"
+        meaning: "Update or add files to an existing archive"
+      - flag: "-x"
+        meaning: "Exclude files matching a pattern"
+      - flag: "-0 to -9"
+        meaning: "Compression level: 0=store only, 9=maximum compression"
+      - flag: "-s"
+        meaning: "Split archive into multiple parts of specified size"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "overwriting an existing zip archive"
+        - "using passwords stored in command history"
+      blocked_patterns: []
+    undo:
+      "create archive": "rm {archive.zip}"
+      "add files to archive": "zip -d {archive.zip} {file}"
+    related_commands:
+      - unzip
+      - tar
+      - 7z
+
+  - name: unzip
+    description: "Extract files from Zip archives"
+    common_intents:
+      - intent: "extract a zip archive to the current directory"
+        alternate_phrasings:
+          - "unzip a file"
+          - "extract a .zip here"
+          - "open this zip file"
+          - "how do I unzip this"
+          - "just unpack this zip"
+        pattern: "unzip {archive.zip}"
+        example: "unzip release.zip"
+      - intent: "extract a zip archive to a specific directory"
+        alternate_phrasings:
+          - "unzip -d"
+          - "extract zip to a folder"
+          - "unzip into a specific destination"
+          - "I want the contents in a particular directory, not here"
+        pattern: "unzip {archive.zip} -d {destination}"
+        example: "unzip package.zip -d /opt/myapp"
+      - intent: "list the contents of a zip archive without extracting"
+        alternate_phrasings:
+          - "unzip -l"
+          - "what's inside this zip"
+          - "show files in zip without extracting"
+          - "just list what's in the zip"
+        pattern: "unzip -l {archive.zip}"
+        example: "unzip -l backup.zip"
+      - intent: "extract specific files from a zip archive"
+        alternate_phrasings:
+          - "unzip -j"
+          - "pull individual files out of a zip"
+          - "extract only certain files from a zip"
+          - "I only need one file from inside this zip"
+        pattern: "unzip -j {archive.zip} {path/in/archive}"
+        example: "unzip -j project.zip docs/README.md"
+      - intent: "test the integrity of a zip archive"
+        alternate_phrasings:
+          - "unzip -t"
+          - "verify a zip file isn't corrupted"
+          - "test if this zip is valid before extracting"
+          - "is this zip file OK or is it damaged"
+        pattern: "unzip -t {archive.zip}"
+        example: "unzip -t important-backup.zip"
+    key_flags:
+      - flag: "-d"
+        meaning: "Extract files to a specified destination directory"
+      - flag: "-l"
+        meaning: "List archive contents without extracting"
+      - flag: "-t"
+        meaning: "Test archive integrity without extracting"
+      - flag: "-j"
+        meaning: "Junk (ignore) paths — extract all files to the destination flat"
+      - flag: "-o"
+        meaning: "Overwrite existing files without prompting"
+      - flag: "-n"
+        meaning: "Never overwrite existing files"
+      - flag: "-c"
+        meaning: "Extract files to stdout alongside their names"
+      - flag: "-O"
+        meaning: "Specify character encoding for filenames (e.g., gbk for Windows archives)"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "extracting when output files already exist (use -o to force, -n to skip)"
+      blocked_patterns: []
+    undo:
+      "extract archive": "rm -rf {extracted_files}"
+    related_commands:
+      - zip
+      - 7z
+      - tar
+
+  - name: zstd
+    description: "Compress or decompress files with Zstandard — fast compression with good ratios"
+    common_intents:
+      - intent: "compress a file with zstd"
+        alternate_phrasings:
+          - "zstd a file"
+          - "compress with zstandard"
+          - "make a .zst file"
+          - "use zstd for fast compression"
+        pattern: "zstd {file}"
+        example: "zstd biglog.txt"
+      - intent: "decompress a zstd file"
+        alternate_phrasings:
+          - "zstd -d"
+          - "decompress a .zst file"
+          - "unpack zstandard archive"
+          - "how do I open a .zst file"
+        pattern: "zstd -d {file.zst}"
+        example: "zstd -d snapshot.tar.zst"
+      - intent: "compress a file with a specific compression level"
+        alternate_phrasings:
+          - "zstd -N level"
+          - "faster zstd compression"
+          - "dial up compression ratio in zstd"
+          - "balance speed vs compression in zstd"
+        pattern: "zstd -{level} {file}"
+        example: "zstd -19 archive.tar"
+      - intent: "compress with ultra-high compression levels"
+        alternate_phrasings:
+          - "zstd --ultra"
+          - "maximum zstd compression"
+          - "I want the best possible zstd ratio, memory isn't a concern"
+          - "squeeze this down as far as zstd can"
+        pattern: "zstd --ultra -{level} {file}"
+        example: "zstd --ultra -22 huge-dataset.tar"
+      - intent: "compress using multiple threads"
+        alternate_phrasings:
+          - "zstd -T0"
+          - "multi-threaded zstd"
+          - "use all CPU cores for zstd compression"
+          - "parallel zstd, this is taking forever"
+        pattern: "zstd -T0 {file}"
+        example: "zstd -T0 large-backup.tar"
+      - intent: "decompress a zstd file to stdout"
+        alternate_phrasings:
+          - "zstd -dc"
+          - "stream decompressed zstd output"
+          - "pipe zstd output to another command"
+          - "read a .zst without writing to disk"
+        pattern: "zstd -d -c {file.zst}"
+        example: "zstd -d -c logs.zst | grep ERROR"
+    key_flags:
+      - flag: "-d"
+        meaning: "Decompress"
+      - flag: "-c"
+        meaning: "Write output to stdout"
+      - flag: "-k"
+        meaning: "Keep the original file after compression"
+      - flag: "-1 to -19"
+        meaning: "Compression level: 1=fastest, 19=slowest/best, 3=default"
+      - flag: "--fast"
+        meaning: "Ultra-fast compression levels (faster than -1)"
+      - flag: "--ultra"
+        meaning: "Unlock compression levels 20-22 (more memory required)"
+      - flag: "-T"
+        meaning: "Number of threads (0=auto-detect all CPU cores)"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "compressing when the original file will be replaced"
+      blocked_patterns: []
+    undo:
+      "compress file": "zstd -d {file.zst}"
+      "decompress file": "zstd {file}"
+    related_commands:
+      - tar
+      - gzip
+      - xz
+
+  - name: 7z
+    description: "High-ratio file archiver supporting 7z, zip, gzip, bzip2, tar, and many other formats"
+    common_intents:
+      - intent: "create a 7z archive"
+        alternate_phrasings:
+          - "7z a"
+          - "compress into a .7z file"
+          - "archive a directory with 7-zip"
+          - "make a 7z archive for maximum compression"
+        pattern: "7z a {archive.7z} {file_or_directory}"
+        example: "7z a project.7z ./src"
+      - intent: "extract a 7z archive preserving directory structure"
+        alternate_phrasings:
+          - "7z x"
+          - "unpack a .7z file"
+          - "extract 7z keeping the folder layout"
+          - "how do I open a .7z file on Linux"
+        pattern: "7z x {archive.7z}"
+        example: "7z x release.7z"
+      - intent: "extract a 7z archive to a specific directory"
+        alternate_phrasings:
+          - "7z x -o"
+          - "extract 7z to a folder"
+          - "unpack 7z into a specific location"
+          - "I want it extracted in /opt not here"
+        pattern: "7z x {archive.7z} -o{destination}"
+        example: "7z x app.7z -o/opt/myapp"
+      - intent: "list the contents of an archive"
+        alternate_phrasings:
+          - "7z l"
+          - "what's in this 7z archive"
+          - "show files inside a .7z without extracting"
+          - "peek at the contents of a 7z archive"
+        pattern: "7z l {archive.7z}"
+        example: "7z l backup.7z"
+      - intent: "test the integrity of an archive"
+        alternate_phrasings:
+          - "7z t"
+          - "verify this 7z archive is not corrupted"
+          - "check if the 7z file is valid"
+          - "is this archive intact"
+        pattern: "7z t {archive.7z}"
+        example: "7z t importantdata.7z"
+      - intent: "create an archive with maximum compression"
+        alternate_phrasings:
+          - "7z a -mx=9"
+          - "ultra compression 7z"
+          - "compress as small as possible with 7-zip"
+          - "I need the smallest 7z archive possible"
+        pattern: "7z a -mx={level} {archive.7z} {file_or_directory}"
+        example: "7z a -mx=9 compressed.7z ./data"
+      - intent: "archive a directory for Linux backup (preserving permissions via tar)"
+        alternate_phrasings:
+          - "7z tar pipe backup"
+          - "use 7z with tar to keep Unix permissions"
+          - "7z backup that preserves file ownership"
+          - "7z doesn't store permissions so I need to tar first"
+        pattern: "tar cf - {directory} | 7z a -si {archive.tar.7z}"
+        example: "tar cf - /home/user | 7z a -si user-backup.tar.7z"
+    key_flags:
+      - flag: "a"
+        meaning: "Add files to a new or existing archive"
+      - flag: "x"
+        meaning: "Extract with full paths (preserves directory structure)"
+      - flag: "e"
+        meaning: "Extract without paths (all files land flat in output directory)"
+      - flag: "l"
+        meaning: "List contents of an archive"
+      - flag: "t"
+        meaning: "Test archive integrity"
+      - flag: "d"
+        meaning: "Delete files from an archive"
+      - flag: "u"
+        meaning: "Update files in an archive"
+      - flag: "-o{dir}"
+        meaning: "Set the output directory for extraction (no space between -o and path)"
+      - flag: "-mx={0-9}"
+        meaning: "Compression level: 0=no compression, 9=ultra"
+      - flag: "-p{password}"
+        meaning: "Set encryption password"
+      - flag: "-mhe=on"
+        meaning: "Encrypt archive headers (hides filenames)"
+      - flag: "-si"
+        meaning: "Read data from stdin"
+      - flag: "-so"
+        meaning: "Write output to stdout"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "extracting when output files already exist"
+        - "using 7z for Linux backups without tar wrapper (owner/group not preserved)"
+      blocked_patterns: []
+    undo:
+      "create archive": "rm {archive.7z}"
+      "extract archive": "rm -rf {extracted_directory}"
+    related_commands:
+      - tar
+      - zip
+      - unzip
+      - zstd

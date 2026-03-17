@@ -1,0 +1,1192 @@
+domain: docker
+description: "Container lifecycle, images, volumes, networks, and Docker Compose orchestration"
+related_domains:
+  - process-management
+  - networking
+  - storage
+
+commands:
+  - name: docker run
+    description: "Create and start a new container from an image"
+    common_intents:
+      - intent: "run a container from an image"
+        alternate_phrasings:
+          - "docker run {image}"
+          - "start a container using the {image} image"
+          - "I just want to spin up a quick container from {image} and see what happens"
+          - "launch {image}"
+          - "create a container from {image} and run it"
+        pattern: "docker run {image}"
+        example: "docker run ubuntu"
+      - intent: "run a container in the background (detached)"
+        alternate_phrasings:
+          - "docker run -d {image}"
+          - "start {image} as a background service"
+          - "run it detached so it doesn't block my terminal"
+          - "launch {image} in daemon mode"
+          - "run {image} without attaching to it"
+        pattern: "docker run -d {image}"
+        example: "docker run -d nginx"
+      - intent: "run a container interactively with a shell"
+        alternate_phrasings:
+          - "docker run -it {image} bash"
+          - "get a shell inside a container"
+          - "I need to poke around inside an image interactively"
+          - "open a bash shell in {image}"
+          - "run {image} with an interactive terminal"
+        pattern: "docker run --rm -it {image} {shell}"
+        example: "docker run --rm -it ubuntu /bin/bash"
+      - intent: "run a container with a published port"
+        alternate_phrasings:
+          - "docker run -p {host_port}:{container_port} {image}"
+          - "expose port {container_port} on the host"
+          - "map container port {container_port} to host port {host_port}"
+          - "forward port {host_port} into the container"
+          - "make the app inside the container reachable on port {host_port}"
+        pattern: "docker run -d -p {host_port}:{container_port} {image}"
+        example: "docker run -d -p 8080:80 nginx"
+      - intent: "run a container with a volume mount"
+        alternate_phrasings:
+          - "docker run -v {host_path}:{container_path} {image}"
+          - "mount a host directory into the container"
+          - "share a folder from my machine into the container"
+          - "bind mount {host_path} into {container_path}"
+          - "run {image} with my local files accessible inside it"
+        pattern: "docker run -v {host_path}:{container_path} {image}"
+        example: "docker run -v /data/app:/app nginx"
+      - intent: "run a container with environment variables"
+        alternate_phrasings:
+          - "docker run -e {VAR}={value} {image}"
+          - "pass an environment variable into a container"
+          - "set {VAR} inside the container at startup"
+          - "configure {image} with env vars"
+          - "inject environment variables when running {image}"
+        pattern: "docker run -e {VARIABLE}={value} {image}"
+        example: "docker run -e NODE_ENV=production myapp"
+    key_flags:
+      - flag: "-d / --detach"
+        meaning: "Run container in background and print container ID"
+      - flag: "-it"
+        meaning: "Interactive mode with a pseudo-TTY (combine -i and -t)"
+      - flag: "--rm"
+        meaning: "Automatically remove the container when it exits"
+      - flag: "-p / --publish"
+        meaning: "Publish a container port to the host: host_port:container_port"
+      - flag: "-v / --volume"
+        meaning: "Bind mount a host path into the container"
+      - flag: "-e / --env"
+        meaning: "Set an environment variable inside the container"
+      - flag: "--name"
+        meaning: "Assign a name to the container"
+      - flag: "--network"
+        meaning: "Connect the container to a specific network"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "docker run with --privileged flag"
+        - "docker run with --pid=host or --net=host"
+      blocked_patterns:
+        - "docker run --privileged -v /:/host"
+        - "docker run --privileged.*-v /.*:/.*"
+    undo:
+      "running container": "docker stop {container} && docker rm {container}"
+    related_commands:
+      - docker ps
+      - docker stop
+      - docker rm
+      - docker exec
+
+  - name: docker ps
+    description: "List running (or all) containers"
+    common_intents:
+      - intent: "list running containers"
+        alternate_phrasings:
+          - "docker ps"
+          - "what containers are running"
+          - "show me all active containers"
+          - "is my container still up"
+          - "list containers"
+        pattern: "docker ps"
+        example: "docker ps"
+      - intent: "list all containers including stopped ones"
+        alternate_phrasings:
+          - "docker ps -a"
+          - "show stopped containers too"
+          - "I want to see containers that exited, not just running ones"
+          - "list every container even dead ones"
+          - "show all containers regardless of state"
+        pattern: "docker ps -a"
+        example: "docker ps -a"
+      - intent: "filter containers by name"
+        alternate_phrasings:
+          - "docker ps --filter name={name}"
+          - "find a container called {name}"
+          - "is there a container matching {name}"
+          - "show containers whose name contains {name}"
+        pattern: "docker ps --filter \"name={name}\""
+        example: "docker ps --filter \"name=web\""
+    key_flags:
+      - flag: "-a / --all"
+        meaning: "Show all containers, not just running ones"
+      - flag: "-q / --quiet"
+        meaning: "Only display container IDs"
+      - flag: "--filter"
+        meaning: "Filter output by condition (name, status, ancestor, etc.)"
+      - flag: "--format"
+        meaning: "Format output with a Go template"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - docker run
+      - docker stop
+      - docker rm
+      - docker inspect
+
+  - name: docker images
+    description: "List locally available Docker images"
+    common_intents:
+      - intent: "list all local images"
+        alternate_phrasings:
+          - "docker images"
+          - "what images do I have locally"
+          - "show me all downloaded images"
+          - "list docker images"
+          - "what images are on this machine"
+        pattern: "docker images"
+        example: "docker images"
+      - intent: "list dangling (untagged) images"
+        alternate_phrasings:
+          - "docker images -f dangling=true"
+          - "show me untagged images taking up space"
+          - "find images with no tag"
+          - "list orphaned images"
+          - "what images have no name"
+        pattern: "docker images -f dangling=true"
+        example: "docker images -f dangling=true"
+      - intent: "show only image IDs"
+        alternate_phrasings:
+          - "docker images -q"
+          - "give me just the image IDs"
+          - "list image IDs only for scripting"
+          - "quiet image list"
+        pattern: "docker images -q"
+        example: "docker images -q"
+    key_flags:
+      - flag: "-a / --all"
+        meaning: "Show all images including intermediate layers"
+      - flag: "-q / --quiet"
+        meaning: "Only show image IDs"
+      - flag: "-f / --filter"
+        meaning: "Filter images (e.g. dangling=true)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - docker pull
+      - docker rmi
+      - docker build
+      - docker inspect
+
+  - name: docker build
+    description: "Build an image from a Dockerfile"
+    common_intents:
+      - intent: "build an image from the current directory"
+        alternate_phrasings:
+          - "docker build ."
+          - "build my Dockerfile"
+          - "create a docker image from the current directory"
+          - "package this app into an image"
+          - "compile the Dockerfile in this folder"
+        pattern: "docker build ."
+        example: "docker build ."
+      - intent: "build an image with a tag"
+        alternate_phrasings:
+          - "docker build -t {name}:{tag} ."
+          - "build and name the image {name}"
+          - "create image called {name}:{tag}"
+          - "build and tag it as {name}"
+          - "docker build with a specific tag"
+        pattern: "docker build -t {name}:{tag} ."
+        example: "docker build -t myapp:latest ."
+      - intent: "build an image without using the cache"
+        alternate_phrasings:
+          - "docker build --no-cache ."
+          - "force a fresh build, ignore cache"
+          - "rebuild everything from scratch"
+          - "my build is stale, skip the cache"
+          - "build with no-cache flag"
+        pattern: "docker build --no-cache -t {name}:{tag} ."
+        example: "docker build --no-cache -t myapp:latest ."
+      - intent: "build using a specific Dockerfile"
+        alternate_phrasings:
+          - "docker build -f {Dockerfile} ."
+          - "use a different Dockerfile path"
+          - "build from {Dockerfile} not the default one"
+          - "specify which Dockerfile to use"
+        pattern: "docker build -f {path/to/Dockerfile} ."
+        example: "docker build -f docker/Dockerfile.prod ."
+    key_flags:
+      - flag: "-t / --tag"
+        meaning: "Name and optionally tag the image (name:tag)"
+      - flag: "-f / --file"
+        meaning: "Path to a specific Dockerfile"
+      - flag: "--no-cache"
+        meaning: "Do not use cache when building layers"
+      - flag: "--build-arg"
+        meaning: "Set build-time variables"
+      - flag: "--platform"
+        meaning: "Target platform for the build (e.g. linux/amd64)"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "built image": "docker rmi {image}"
+    related_commands:
+      - docker run
+      - docker push
+      - docker images
+      - docker rmi
+
+  - name: docker exec
+    description: "Execute a command inside a running container"
+    common_intents:
+      - intent: "open an interactive shell in a running container"
+        alternate_phrasings:
+          - "docker exec -it {container} bash"
+          - "shell into a running container"
+          - "get inside a container that is already running"
+          - "ssh into my container"
+          - "open a terminal in container {container}"
+        pattern: "docker exec -it {container} {shell}"
+        example: "docker exec -it mycontainer /bin/bash"
+      - intent: "run a one-off command in a container"
+        alternate_phrasings:
+          - "docker exec {container} {command}"
+          - "run {command} inside the running container"
+          - "execute a command in container {container} without interactive mode"
+          - "run a script inside a live container"
+        pattern: "docker exec {container} {command}"
+        example: "docker exec mycontainer ls /app"
+      - intent: "run a command as a specific user inside a container"
+        alternate_phrasings:
+          - "docker exec -u {user} {container} {command}"
+          - "exec as root inside container"
+          - "run as user {user} inside the container"
+          - "switch user before running command in container"
+        pattern: "docker exec -u {user} {container} {command}"
+        example: "docker exec -u root mycontainer whoami"
+    key_flags:
+      - flag: "-it"
+        meaning: "Interactive mode with a pseudo-TTY"
+      - flag: "-d / --detach"
+        meaning: "Run command in background"
+      - flag: "-u / --user"
+        meaning: "Run as a specific user"
+      - flag: "-w / --workdir"
+        meaning: "Set the working directory inside the container"
+      - flag: "-e / --env"
+        meaning: "Set an environment variable for the executed command"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "exec as root in a production container"
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - docker run
+      - docker ps
+      - docker logs
+
+  - name: docker logs
+    description: "Fetch and tail output logs from a container"
+    common_intents:
+      - intent: "view logs from a container"
+        alternate_phrasings:
+          - "docker logs {container}"
+          - "what is my container printing"
+          - "show output from container {container}"
+          - "check logs for {container}"
+          - "see what happened in that container"
+        pattern: "docker logs {container}"
+        example: "docker logs mycontainer"
+      - intent: "follow/tail container logs in real time"
+        alternate_phrasings:
+          - "docker logs -f {container}"
+          - "stream live logs from container {container}"
+          - "watch logs as they come in"
+          - "tail the container output"
+          - "keep logs open and show new lines"
+        pattern: "docker logs -f {container}"
+        example: "docker logs -f mycontainer"
+      - intent: "show only the last N lines of container logs"
+        alternate_phrasings:
+          - "docker logs --tail {n} {container}"
+          - "show the last {n} lines of logs"
+          - "I only want recent log output"
+          - "tail {n} lines from {container}"
+          - "last few lines of container {container}"
+        pattern: "docker logs --tail {n} {container}"
+        example: "docker logs --tail 50 mycontainer"
+      - intent: "show logs with timestamps"
+        alternate_phrasings:
+          - "docker logs -t {container}"
+          - "add timestamps to container log output"
+          - "when did each log line happen"
+          - "show logs with timing information"
+        pattern: "docker logs -t {container}"
+        example: "docker logs -t mycontainer"
+    key_flags:
+      - flag: "-f / --follow"
+        meaning: "Stream new log output in real time"
+      - flag: "--tail"
+        meaning: "Number of lines to show from the end of the logs"
+      - flag: "-t / --timestamps"
+        meaning: "Show timestamps on each log line"
+      - flag: "--since"
+        meaning: "Show logs since a timestamp or duration (e.g. 10m)"
+      - flag: "--until"
+        meaning: "Show logs up to a given timestamp"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - docker ps
+      - docker exec
+      - docker inspect
+
+  - name: docker stop
+    description: "Gracefully stop one or more running containers"
+    common_intents:
+      - intent: "stop a running container"
+        alternate_phrasings:
+          - "docker stop {container}"
+          - "shut down container {container}"
+          - "bring down a container gracefully"
+          - "turn off {container}"
+          - "stop the {container} container"
+        pattern: "docker stop {container}"
+        example: "docker stop mycontainer"
+      - intent: "stop multiple containers at once"
+        alternate_phrasings:
+          - "docker stop {container1} {container2}"
+          - "stop all of these containers at once"
+          - "shut down {container1} and {container2}"
+          - "stop several containers"
+        pattern: "docker stop {container1} {container2} ..."
+        example: "docker stop web db cache"
+    key_flags:
+      - flag: "-t / --time"
+        meaning: "Seconds to wait before killing the container (default 10)"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "stopping a production service container"
+      blocked_patterns: []
+    undo:
+      "stopped container": "docker start {container}"
+    related_commands:
+      - docker start
+      - docker rm
+      - docker ps
+      - docker kill
+
+  - name: docker start
+    description: "Start one or more stopped containers"
+    common_intents:
+      - intent: "restart a stopped container"
+        alternate_phrasings:
+          - "docker start {container}"
+          - "bring back a stopped container"
+          - "resume container {container}"
+          - "start the {container} container again"
+          - "turn {container} back on"
+        pattern: "docker start {container}"
+        example: "docker start mycontainer"
+      - intent: "start a container and attach to its output"
+        alternate_phrasings:
+          - "docker start -a {container}"
+          - "start and attach stdout to it"
+          - "start the container and watch its output"
+          - "resume with attach mode"
+        pattern: "docker start -a {container}"
+        example: "docker start -a mycontainer"
+    key_flags:
+      - flag: "-a / --attach"
+        meaning: "Attach stdout/stderr and forward signals"
+      - flag: "-i / --interactive"
+        meaning: "Attach the container's stdin"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "started container": "docker stop {container}"
+    related_commands:
+      - docker stop
+      - docker ps
+      - docker run
+
+  - name: docker rm
+    description: "Remove one or more stopped containers"
+    common_intents:
+      - intent: "remove a stopped container"
+        alternate_phrasings:
+          - "docker rm {container}"
+          - "delete container {container}"
+          - "clean up a stopped container"
+          - "get rid of {container}"
+          - "remove the {container} container"
+        pattern: "docker rm {container}"
+        example: "docker rm mycontainer"
+      - intent: "force remove a running container"
+        alternate_phrasings:
+          - "docker rm -f {container}"
+          - "kill and remove {container} immediately"
+          - "force delete a container that is still running"
+          - "hard remove {container} without stopping it first"
+        pattern: "docker rm -f {container}"
+        example: "docker rm -f mycontainer"
+      - intent: "remove all stopped containers"
+        alternate_phrasings:
+          - "docker container prune"
+          - "clean up all stopped containers"
+          - "delete every exited container"
+          - "prune dead containers"
+          - "get rid of all containers that have exited"
+        pattern: "docker container prune"
+        example: "docker container prune"
+    key_flags:
+      - flag: "-f / --force"
+        meaning: "Force remove a running container (sends SIGKILL)"
+      - flag: "-v / --volumes"
+        meaning: "Remove anonymous volumes attached to the container"
+    safety:
+      level: dangerous
+      requires_sudo: false
+      confirmation_required_for:
+        - "docker rm -f on a running container"
+        - "docker container prune (removes all stopped containers)"
+      blocked_patterns:
+        - "docker rm -f $(docker ps -aq)"
+        - "docker rm -f \\$\\(docker ps"
+    undo:
+      "removed container": "cannot undo — container is gone; re-run from image"
+    related_commands:
+      - docker stop
+      - docker ps
+      - docker rmi
+      - docker system prune
+
+  - name: docker rmi
+    description: "Remove one or more local Docker images"
+    common_intents:
+      - intent: "remove a local image"
+        alternate_phrasings:
+          - "docker rmi {image}"
+          - "delete image {image}"
+          - "get rid of the {image} image"
+          - "free up space by removing {image}"
+          - "uninstall a docker image"
+        pattern: "docker rmi {image}"
+        example: "docker rmi myapp:latest"
+      - intent: "force remove an image in use by a stopped container"
+        alternate_phrasings:
+          - "docker rmi -f {image}"
+          - "force delete image even if containers reference it"
+          - "remove {image} regardless of dependencies"
+          - "hard delete {image}"
+        pattern: "docker rmi -f {image}"
+        example: "docker rmi -f myapp:latest"
+      - intent: "remove all dangling (untagged) images"
+        alternate_phrasings:
+          - "docker image prune"
+          - "clean up untagged images"
+          - "delete all dangling images"
+          - "remove none:none images"
+          - "clear out leftover build layers"
+        pattern: "docker image prune"
+        example: "docker image prune"
+    key_flags:
+      - flag: "-f / --force"
+        meaning: "Force removal even if a container references the image"
+      - flag: "--no-prune"
+        meaning: "Do not delete untagged parent images"
+    safety:
+      level: dangerous
+      requires_sudo: false
+      confirmation_required_for:
+        - "removing an image used by any container"
+        - "docker image prune (bulk deletion)"
+      blocked_patterns: []
+    undo:
+      "removed image": "docker pull {image} (if from a registry)"
+    related_commands:
+      - docker images
+      - docker build
+      - docker pull
+      - docker system prune
+
+  - name: docker pull
+    description: "Download a Docker image from a registry"
+    common_intents:
+      - intent: "pull an image from Docker Hub"
+        alternate_phrasings:
+          - "docker pull {image}"
+          - "download the {image} image"
+          - "fetch {image} from Docker Hub"
+          - "get the latest {image} image"
+          - "grab {image} from the registry"
+        pattern: "docker pull {image}:{tag}"
+        example: "docker pull nginx:latest"
+      - intent: "pull a specific version of an image"
+        alternate_phrasings:
+          - "docker pull {image}:{tag}"
+          - "get version {tag} of {image}"
+          - "download {image} at tag {tag}"
+          - "fetch a pinned version of {image}"
+          - "pull {image} version {tag} not latest"
+        pattern: "docker pull {image}:{tag}"
+        example: "docker pull postgres:15"
+      - intent: "pull all tags of an image"
+        alternate_phrasings:
+          - "docker pull -a {image}"
+          - "download all tags for {image}"
+          - "fetch every version of {image}"
+          - "pull all variants of {image}"
+        pattern: "docker pull -a {image}"
+        example: "docker pull -a ubuntu"
+    key_flags:
+      - flag: "-a / --all-tags"
+        meaning: "Download all tagged images in the repository"
+      - flag: "-q / --quiet"
+        meaning: "Suppress verbose output"
+      - flag: "--platform"
+        meaning: "Pull image for a specific platform (e.g. linux/arm64)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "pulled image": "docker rmi {image}:{tag}"
+    related_commands:
+      - docker push
+      - docker images
+      - docker run
+
+  - name: docker push
+    description: "Upload a local image to a registry"
+    common_intents:
+      - intent: "push an image to a registry"
+        alternate_phrasings:
+          - "docker push {image}:{tag}"
+          - "upload {image} to the registry"
+          - "publish my image to Docker Hub"
+          - "send {image}:{tag} to the remote registry"
+          - "deploy image to registry"
+        pattern: "docker push {image}:{tag}"
+        example: "docker push myrepo/myapp:latest"
+      - intent: "push all tags of an image"
+        alternate_phrasings:
+          - "docker push -a {image}"
+          - "push every tag for {image}"
+          - "upload all tagged versions of {image}"
+          - "push all variants of {image}"
+        pattern: "docker push -a {image}"
+        example: "docker push -a myrepo/myapp"
+    key_flags:
+      - flag: "-a / --all-tags"
+        meaning: "Push all tagged images for the repository"
+      - flag: "-q / --quiet"
+        meaning: "Suppress verbose progress output"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "pushing to a public registry"
+        - "pushing with :latest tag (may overwrite)"
+      blocked_patterns: []
+    undo:
+      "pushed image": "cannot un-push; delete the tag via registry API or docker hub UI"
+    related_commands:
+      - docker pull
+      - docker build
+      - docker login
+      - docker images
+
+  - name: docker compose up
+    description: "Create and start services defined in a Compose file"
+    common_intents:
+      - intent: "start all compose services"
+        alternate_phrasings:
+          - "docker compose up"
+          - "bring up the whole stack"
+          - "start the docker-compose project"
+          - "launch all services defined in compose"
+          - "spin everything up"
+        pattern: "docker compose up"
+        example: "docker compose up"
+      - intent: "start compose services in the background"
+        alternate_phrasings:
+          - "docker compose up -d"
+          - "start the stack detached"
+          - "run compose in background so my terminal is free"
+          - "bring up services without blocking"
+          - "launch stack in daemon mode"
+        pattern: "docker compose up -d"
+        example: "docker compose up -d"
+      - intent: "start compose services and rebuild images first"
+        alternate_phrasings:
+          - "docker compose up --build"
+          - "rebuild and start services"
+          - "force rebuild before bringing up the stack"
+          - "recompile images and start everything"
+          - "up but rebuild changed services"
+        pattern: "docker compose up --build -d"
+        example: "docker compose up --build -d"
+      - intent: "start specific compose services only"
+        alternate_phrasings:
+          - "docker compose up {service}"
+          - "only start the {service} service"
+          - "bring up just {service}, not the whole stack"
+          - "run only the {service} container"
+          - "start {service} from the compose file"
+        pattern: "docker compose up -d {service}"
+        example: "docker compose up -d web"
+    key_flags:
+      - flag: "-d / --detach"
+        meaning: "Run containers in the background"
+      - flag: "--build"
+        meaning: "Build images before starting containers"
+      - flag: "--remove-orphans"
+        meaning: "Remove containers for services not in the Compose file"
+      - flag: "--scale"
+        meaning: "Scale a service to N instances: --scale service=N"
+      - flag: "-f / --file"
+        meaning: "Specify an alternate Compose file"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "running stack": "docker compose down"
+    related_commands:
+      - docker compose down
+      - docker compose logs
+      - docker compose ps
+      - docker compose build
+
+  - name: docker compose down
+    description: "Stop and remove containers, networks created by docker compose up"
+    common_intents:
+      - intent: "stop and remove all compose services"
+        alternate_phrasings:
+          - "docker compose down"
+          - "tear down the stack"
+          - "stop and clean up compose containers"
+          - "shut down the whole compose project"
+          - "bring the stack down"
+        pattern: "docker compose down"
+        example: "docker compose down"
+      - intent: "stop compose services and remove volumes"
+        alternate_phrasings:
+          - "docker compose down -v"
+          - "tear down and delete all volumes too"
+          - "stop everything and wipe the data volumes"
+          - "full teardown including volumes"
+          - "remove containers and their volumes"
+        pattern: "docker compose down -v"
+        example: "docker compose down -v"
+      - intent: "stop compose services and remove all images"
+        alternate_phrasings:
+          - "docker compose down --rmi all"
+          - "tear down and delete the images too"
+          - "stop everything and clean up images"
+          - "full nuclear teardown"
+          - "remove containers and all images"
+        pattern: "docker compose down --rmi all"
+        example: "docker compose down --rmi all"
+    key_flags:
+      - flag: "-v / --volumes"
+        meaning: "Remove named and anonymous volumes declared in the Compose file"
+      - flag: "--rmi all"
+        meaning: "Remove all images used by services"
+      - flag: "--rmi local"
+        meaning: "Remove only images without a custom tag"
+      - flag: "--remove-orphans"
+        meaning: "Remove containers for services not defined in the Compose file"
+      - flag: "-t / --timeout"
+        meaning: "Specify a shutdown timeout in seconds"
+    safety:
+      level: dangerous
+      requires_sudo: false
+      confirmation_required_for:
+        - "docker compose down -v (irreversible volume deletion)"
+        - "docker compose down --rmi all (deletes images)"
+      blocked_patterns: []
+    undo:
+      "torn down stack": "docker compose up -d"
+      "deleted volumes": "cannot undo — data is gone"
+    related_commands:
+      - docker compose up
+      - docker compose stop
+      - docker volume ls
+
+  - name: docker compose logs
+    description: "View log output from compose services"
+    common_intents:
+      - intent: "view logs for all compose services"
+        alternate_phrasings:
+          - "docker compose logs"
+          - "show output from all services"
+          - "what is the stack printing"
+          - "check compose logs"
+          - "see logs for everything in the compose project"
+        pattern: "docker compose logs"
+        example: "docker compose logs"
+      - intent: "follow/tail compose logs in real time"
+        alternate_phrasings:
+          - "docker compose logs -f"
+          - "stream live logs from compose"
+          - "watch compose output as it happens"
+          - "tail compose logs"
+          - "keep logs open for all services"
+        pattern: "docker compose logs -f"
+        example: "docker compose logs -f"
+      - intent: "follow logs for a specific compose service"
+        alternate_phrasings:
+          - "docker compose logs -f {service}"
+          - "tail logs for only the {service} service"
+          - "stream just the {service} output"
+          - "watch {service} logs"
+          - "follow {service} container logs"
+        pattern: "docker compose logs -f {service}"
+        example: "docker compose logs -f web"
+    key_flags:
+      - flag: "-f / --follow"
+        meaning: "Follow log output in real time"
+      - flag: "-t / --timestamps"
+        meaning: "Show timestamps on each line"
+      - flag: "--tail"
+        meaning: "Number of lines to show from each service's end"
+      - flag: "--since"
+        meaning: "Show logs since a timestamp or relative duration"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - docker compose up
+      - docker compose ps
+      - docker logs
+
+  - name: docker compose build
+    description: "Build or rebuild images defined in a Compose file"
+    common_intents:
+      - intent: "build all images in the compose project"
+        alternate_phrasings:
+          - "docker compose build"
+          - "rebuild compose images"
+          - "compile images for all services"
+          - "build the images defined in compose"
+          - "run docker build for each compose service"
+        pattern: "docker compose build"
+        example: "docker compose build"
+      - intent: "build a specific compose service image"
+        alternate_phrasings:
+          - "docker compose build {service}"
+          - "rebuild just the {service} image"
+          - "build only {service} from the compose file"
+          - "compile the image for {service}"
+        pattern: "docker compose build {service}"
+        example: "docker compose build web"
+      - intent: "build compose images without using cache"
+        alternate_phrasings:
+          - "docker compose build --no-cache"
+          - "rebuild compose images from scratch"
+          - "force fresh build of compose images"
+          - "skip cache when building compose"
+          - "compose build no cache"
+        pattern: "docker compose build --no-cache"
+        example: "docker compose build --no-cache"
+    key_flags:
+      - flag: "--no-cache"
+        meaning: "Do not use cache when building images"
+      - flag: "--pull"
+        meaning: "Always attempt to pull a newer version of the base image"
+      - flag: "--build-arg"
+        meaning: "Set build-time variables"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "built image": "docker rmi {image}"
+    related_commands:
+      - docker compose up
+      - docker build
+      - docker images
+
+  - name: docker compose ps
+    description: "List containers in a Docker Compose project"
+    common_intents:
+      - intent: "list compose service containers"
+        alternate_phrasings:
+          - "docker compose ps"
+          - "what containers are running in this compose project"
+          - "show the status of compose services"
+          - "check which compose services are up"
+          - "list compose containers"
+        pattern: "docker compose ps"
+        example: "docker compose ps"
+    key_flags:
+      - flag: "-a / --all"
+        meaning: "Show all stopped containers in addition to running ones"
+      - flag: "-q / --quiet"
+        meaning: "Only display container IDs"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - docker compose up
+      - docker compose down
+      - docker ps
+
+  - name: docker volume
+    description: "Create and manage persistent Docker volumes"
+    common_intents:
+      - intent: "list all volumes"
+        alternate_phrasings:
+          - "docker volume ls"
+          - "what volumes do I have"
+          - "show all docker volumes"
+          - "list persistent volumes"
+          - "see what data volumes exist"
+        pattern: "docker volume ls"
+        example: "docker volume ls"
+      - intent: "create a named volume"
+        alternate_phrasings:
+          - "docker volume create {volume_name}"
+          - "make a new docker volume called {volume_name}"
+          - "create persistent storage named {volume_name}"
+          - "add a volume {volume_name}"
+          - "set up a docker volume"
+        pattern: "docker volume create {volume_name}"
+        example: "docker volume create mydata"
+      - intent: "inspect a volume to see its details"
+        alternate_phrasings:
+          - "docker volume inspect {volume_name}"
+          - "where is volume {volume_name} stored on disk"
+          - "show details about volume {volume_name}"
+          - "get info on a docker volume"
+          - "what is the mountpoint for volume {volume_name}"
+        pattern: "docker volume inspect {volume_name}"
+        example: "docker volume inspect mydata"
+      - intent: "remove a volume"
+        alternate_phrasings:
+          - "docker volume rm {volume_name}"
+          - "delete volume {volume_name}"
+          - "get rid of a docker volume"
+          - "remove the {volume_name} volume"
+          - "wipe the {volume_name} data volume"
+        pattern: "docker volume rm {volume_name}"
+        example: "docker volume rm mydata"
+      - intent: "remove all unused volumes"
+        alternate_phrasings:
+          - "docker volume prune"
+          - "clean up unused volumes"
+          - "delete all volumes not in use by any container"
+          - "free up disk space from orphaned volumes"
+          - "prune dangling docker volumes"
+        pattern: "docker volume prune"
+        example: "docker volume prune"
+    key_flags:
+      - flag: "create"
+        meaning: "Create a new volume"
+      - flag: "ls"
+        meaning: "List volumes"
+      - flag: "inspect"
+        meaning: "Display detailed information on a volume"
+      - flag: "rm"
+        meaning: "Remove one or more volumes"
+      - flag: "prune"
+        meaning: "Remove all unused local volumes"
+    safety:
+      level: dangerous
+      requires_sudo: false
+      confirmation_required_for:
+        - "docker volume rm (permanent data loss)"
+        - "docker volume prune (removes all unused volumes)"
+      blocked_patterns: []
+    undo:
+      "removed volume": "cannot undo — data is permanently deleted"
+    related_commands:
+      - docker run
+      - docker system prune
+      - docker compose down
+
+  - name: docker network
+    description: "Create and manage Docker networks"
+    common_intents:
+      - intent: "list all networks"
+        alternate_phrasings:
+          - "docker network ls"
+          - "what networks does docker know about"
+          - "show all docker networks"
+          - "list container networks"
+          - "see what networks are configured"
+        pattern: "docker network ls"
+        example: "docker network ls"
+      - intent: "create a custom network"
+        alternate_phrasings:
+          - "docker network create {network_name}"
+          - "make a new docker network called {network_name}"
+          - "create a bridge network for my containers"
+          - "set up a private network {network_name}"
+          - "add a docker network"
+        pattern: "docker network create {network_name}"
+        example: "docker network create mynet"
+      - intent: "connect a container to a network"
+        alternate_phrasings:
+          - "docker network connect {network} {container}"
+          - "add container {container} to network {network}"
+          - "attach {container} to the {network} network"
+          - "join {container} to {network}"
+          - "put container {container} on network {network}"
+        pattern: "docker network connect {network_name} {container_name}"
+        example: "docker network connect mynet mycontainer"
+      - intent: "disconnect a container from a network"
+        alternate_phrasings:
+          - "docker network disconnect {network} {container}"
+          - "remove container {container} from network {network}"
+          - "detach {container} from network {network}"
+          - "take {container} off {network}"
+        pattern: "docker network disconnect {network_name} {container_name}"
+        example: "docker network disconnect mynet mycontainer"
+      - intent: "remove unused networks"
+        alternate_phrasings:
+          - "docker network prune"
+          - "clean up unused docker networks"
+          - "delete networks not used by any container"
+          - "prune orphaned networks"
+          - "free up docker network resources"
+        pattern: "docker network prune"
+        example: "docker network prune"
+    key_flags:
+      - flag: "ls"
+        meaning: "List all networks"
+      - flag: "create"
+        meaning: "Create a network"
+      - flag: "-d / --driver"
+        meaning: "Network driver to use (bridge, overlay, host, none)"
+      - flag: "connect"
+        meaning: "Connect a container to a network"
+      - flag: "disconnect"
+        meaning: "Disconnect a container from a network"
+      - flag: "inspect"
+        meaning: "Display detailed network information"
+      - flag: "rm"
+        meaning: "Remove one or more networks"
+      - flag: "prune"
+        meaning: "Remove all unused networks"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "docker network rm (may break running containers)"
+        - "docker network prune"
+      blocked_patterns: []
+    undo:
+      "removed network": "docker network create {network_name}"
+    related_commands:
+      - docker run
+      - docker inspect
+      - docker compose up
+
+  - name: docker system prune
+    description: "Remove all unused containers, networks, images, and optionally volumes"
+    common_intents:
+      - intent: "clean up all unused docker resources"
+        alternate_phrasings:
+          - "docker system prune"
+          - "free up docker disk space"
+          - "clean up unused docker stuff"
+          - "docker is eating all my disk, clean it up"
+          - "remove all dangling and stopped docker resources"
+        pattern: "docker system prune"
+        example: "docker system prune"
+      - intent: "aggressively clean up everything including volumes"
+        alternate_phrasings:
+          - "docker system prune -a --volumes"
+          - "nuke all unused docker resources including volumes"
+          - "full docker cleanup"
+          - "reclaim all docker disk space including data volumes"
+          - "wipe out everything docker is not actively using"
+        pattern: "docker system prune -a --volumes"
+        example: "docker system prune -a --volumes"
+    key_flags:
+      - flag: "-a / --all"
+        meaning: "Remove all unused images, not just dangling ones"
+      - flag: "--volumes"
+        meaning: "Also prune unused volumes"
+      - flag: "-f / --force"
+        meaning: "Do not prompt for confirmation"
+      - flag: "--filter"
+        meaning: "Limit removal to resources older than a duration (e.g. until=24h)"
+    safety:
+      level: dangerous
+      requires_sudo: false
+      confirmation_required_for:
+        - "docker system prune (removes all stopped containers and unused images)"
+        - "docker system prune -a --volumes (also deletes volume data)"
+      blocked_patterns:
+        - "docker system prune -f --volumes"
+        - "docker system prune -af"
+    undo:
+      "pruned resources": "cannot undo — re-pull images and recreate containers from scratch"
+    related_commands:
+      - docker volume prune
+      - docker image prune
+      - docker container prune
+      - docker system df
+
+  - name: docker system df
+    description: "Show Docker disk usage for images, containers, and volumes"
+    common_intents:
+      - intent: "check how much disk docker is using"
+        alternate_phrasings:
+          - "docker system df"
+          - "how much space is docker taking up"
+          - "see docker disk usage"
+          - "docker is using too much disk, how bad is it"
+          - "show docker storage summary"
+        pattern: "docker system df"
+        example: "docker system df"
+      - intent: "show verbose breakdown of docker disk usage"
+        alternate_phrasings:
+          - "docker system df -v"
+          - "show detailed docker disk usage per image and container"
+          - "break down exactly what is using space in docker"
+          - "verbose docker disk info"
+          - "show per-item docker disk usage"
+        pattern: "docker system df -v"
+        example: "docker system df -v"
+    key_flags:
+      - flag: "-v / --verbose"
+        meaning: "Show detailed space usage per image, container, and volume"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - docker system prune
+      - docker images
+      - docker volume ls
+
+  - name: docker inspect
+    description: "Return low-level metadata about containers, images, volumes, or networks"
+    common_intents:
+      - intent: "inspect a container or image"
+        alternate_phrasings:
+          - "docker inspect {target}"
+          - "show full details about {target}"
+          - "what is the full config for container {target}"
+          - "dump metadata for {target}"
+          - "get low-level info on {target}"
+        pattern: "docker inspect {container_or_image}"
+        example: "docker inspect mycontainer"
+      - intent: "get a container's IP address"
+        alternate_phrasings:
+          - "docker inspect --format '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' {container}"
+          - "what is the IP address of container {container}"
+          - "find the internal IP of {container}"
+          - "get IP for {container}"
+          - "what IP does {container} have"
+        pattern: "docker inspect --format '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' {container}"
+        example: "docker inspect --format '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' mycontainer"
+      - intent: "extract a specific field from inspect output"
+        alternate_phrasings:
+          - "docker inspect --format '{{.{Field}}}' {target}"
+          - "get just the {field} from docker inspect"
+          - "extract {field} from container metadata"
+          - "show only {field} from docker inspect output"
+        pattern: "docker inspect --format '{{.{Field}}}' {container}"
+        example: "docker inspect --format '{{.State.Status}}' mycontainer"
+    key_flags:
+      - flag: "--format / -f"
+        meaning: "Format output using a Go template to extract specific fields"
+      - flag: "--type"
+        meaning: "Return JSON for a specific object type (container, image, network, volume)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - docker ps
+      - docker images
+      - docker network inspect
+      - docker volume inspect
+
+  - name: docker cp
+    description: "Copy files or directories between the host and a container"
+    common_intents:
+      - intent: "copy a file from the host into a container"
+        alternate_phrasings:
+          - "docker cp {file} {container}:{path}"
+          - "upload a file into a running container"
+          - "put {file} inside container {container}"
+          - "copy a local file into the container"
+          - "move {file} to {container} at {path}"
+        pattern: "docker cp {host_path} {container}:{container_path}"
+        example: "docker cp config.json mycontainer:/app/config.json"
+      - intent: "copy a file from a container to the host"
+        alternate_phrasings:
+          - "docker cp {container}:{path} {host_path}"
+          - "download a file from inside a container"
+          - "pull {path} out of container {container}"
+          - "extract a file from a running container"
+          - "get a file from container {container} to my local machine"
+        pattern: "docker cp {container}:{container_path} {host_path}"
+        example: "docker cp mycontainer:/app/logs/app.log ./logs/"
+    key_flags:
+      - flag: "-L / --follow-link"
+        meaning: "Follow symlinks when copying from host; copies the linked file not the symlink"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "overwriting files inside a production container"
+      blocked_patterns: []
+    undo:
+      "copied file into container": "docker cp {container}:{path} {original_backup}"
+    related_commands:
+      - docker exec
+      - docker run
+      - docker volume

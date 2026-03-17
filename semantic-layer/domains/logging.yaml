@@ -1,0 +1,830 @@
+domain: logging
+description: "System logs, kernel messages, log rotation, audit trails, and login history"
+related_domains:
+  - service-management
+  - system-info
+  - permissions-security
+
+commands:
+  - name: journalctl
+    description: "Query and display messages from the systemd journal"
+    common_intents:
+      - intent: "follow the journal live, like tail -f"
+        alternate_phrasings:
+          - "journalctl -f"
+          - "stream new log entries as they come in"
+          - "I need to watch logs in real time, can you show me how to tail the journal"
+          - "tail the journal"
+          - "keep showing me new log messages"
+        pattern: "journalctl -f"
+        example: "journalctl -f"
+
+      - intent: "show logs for a specific systemd unit"
+        alternate_phrasings:
+          - "journalctl -u {unit}"
+          - "logs for {unit}"
+          - "what has {unit} been logging"
+          - "I need to debug nginx, how do I see its journal entries"
+          - "service logs for {unit}"
+        pattern: "journalctl -u {unit}"
+        example: "journalctl -u nginx.service"
+
+      - intent: "follow logs for a specific unit live"
+        alternate_phrasings:
+          - "journalctl -fu {unit}"
+          - "tail logs for {unit}"
+          - "stream {unit} output"
+          - "watch {unit} logs as they happen"
+          - "keep showing me {unit} messages"
+        pattern: "journalctl -fu {unit}"
+        example: "journalctl -fu sshd.service"
+
+      - intent: "show logs since last boot"
+        alternate_phrasings:
+          - "journalctl -b"
+          - "logs from this boot only"
+          - "what happened since the machine restarted"
+          - "show me everything logged since startup"
+          - "this boot's journal"
+        pattern: "journalctl -b"
+        example: "journalctl -b"
+
+      - intent: "show only error messages from this boot"
+        alternate_phrasings:
+          - "journalctl -b -p err"
+          - "errors since last boot"
+          - "what errors have been logged since startup"
+          - "show me failures and errors from current boot"
+          - "something is broken, show me all errors from this session"
+        pattern: "journalctl -b -p {level}"
+        example: "journalctl -b -p err"
+
+      - intent: "show errors from the previous boot"
+        alternate_phrasings:
+          - "journalctl -b -1 -p err"
+          - "logs from the last crash"
+          - "what errors happened before the machine rebooted"
+          - "previous boot errors"
+          - "show me what went wrong before the reboot"
+        pattern: "journalctl -b -1 -p err"
+        example: "journalctl -b -1 -p err"
+
+      - intent: "list all available boots"
+        alternate_phrasings:
+          - "journalctl --list-boots"
+          - "how many times has this machine booted"
+          - "show me the boot history"
+          - "what boots are in the journal"
+        pattern: "journalctl --list-boots"
+        example: "journalctl --list-boots"
+
+      - intent: "show kernel messages from the journal"
+        alternate_phrasings:
+          - "journalctl -k"
+          - "kernel log via journalctl"
+          - "show only kernel messages in the journal"
+          - "dmesg equivalent from journal"
+          - "what is the kernel logging"
+        pattern: "journalctl -k"
+        example: "journalctl -k"
+
+      - intent: "filter journal by time range"
+        alternate_phrasings:
+          - "journalctl --since --until"
+          - "show logs between two times"
+          - "what was logged yesterday afternoon"
+          - "journal entries from a specific window"
+          - "logs from the last hour"
+        pattern: "journalctl --since \"{since}\" --until \"{until}\""
+        example: "journalctl --since \"2024-03-01 08:00:00\" --until \"2024-03-01 10:00:00\""
+
+      - intent: "show recent logs, last N lines"
+        alternate_phrasings:
+          - "journalctl -n 50"
+          - "last 100 journal entries"
+          - "show me the most recent log lines"
+          - "tail the journal without following"
+          - "give me the last few log messages"
+        pattern: "journalctl -n {lines}"
+        example: "journalctl -n 100"
+
+      - intent: "show logs for a specific process by PID"
+        alternate_phrasings:
+          - "journalctl _PID={pid}"
+          - "journal entries from process {pid}"
+          - "what did that PID log"
+          - "logs from a specific PID"
+        pattern: "journalctl _PID={pid}"
+        example: "journalctl _PID=1234"
+
+      - intent: "show logs for a specific user by UID"
+        alternate_phrasings:
+          - "journalctl _UID={uid}"
+          - "journal entries for user ID {uid}"
+          - "what has user {uid} been doing in the logs"
+          - "filter journal by user"
+        pattern: "journalctl _UID={uid}"
+        example: "journalctl _UID=1000"
+
+      - intent: "show logs for a specific executable"
+        alternate_phrasings:
+          - "journalctl /usr/bin/sshd"
+          - "logs produced by this binary"
+          - "journal entries from a specific executable path"
+          - "what has {binary} been logging"
+        pattern: "journalctl {path/to/executable}"
+        example: "journalctl /usr/bin/sshd"
+
+      - intent: "search journal by syslog identifier tag"
+        alternate_phrasings:
+          - "journalctl -t {tag}"
+          - "show only entries tagged {tag}"
+          - "journal messages with a specific syslog identifier"
+          - "filter by program name in syslog"
+        pattern: "journalctl -t {identifier}"
+        example: "journalctl -t systemd-resolved"
+
+      - intent: "vacuum old journal logs by time"
+        alternate_phrasings:
+          - "journalctl --vacuum-time=2d"
+          - "delete journal logs older than 2 days"
+          - "free up disk space by cleaning old journal entries"
+          - "trim the journal to the last week"
+          - "journal is taking too much space, remove old entries"
+        pattern: "journalctl --vacuum-time={duration}"
+        example: "journalctl --vacuum-time=2d"
+
+    key_flags:
+      - flag: "-f / --follow"
+        meaning: "Stream new journal entries in real time"
+      - flag: "-u / --unit"
+        meaning: "Filter by systemd unit name"
+      - flag: "-b / --boot"
+        meaning: "Show entries from a specific boot (default: current boot)"
+      - flag: "-p / --priority"
+        meaning: "Filter by message priority level (emerg, alert, crit, err, warning, notice, info, debug)"
+      - flag: "-k / --dmesg"
+        meaning: "Show only kernel messages"
+      - flag: "-n / --lines"
+        meaning: "Show only the last N lines"
+      - flag: "--since / --until"
+        meaning: "Restrict output to a time range"
+      - flag: "--list-boots"
+        meaning: "List all recorded boot sessions"
+      - flag: "--vacuum-time"
+        meaning: "Remove journal entries older than the given duration"
+      - flag: "_PID="
+        meaning: "Filter by process ID (journal field match)"
+      - flag: "_UID="
+        meaning: "Filter by user ID (journal field match)"
+      - flag: "-t / --identifier"
+        meaning: "Filter by syslog identifier (program tag)"
+    safety:
+      level: safe
+      requires_sudo: false
+      notes: "--vacuum-time modifies data; --vacuum-size and --rotate are also destructive"
+      confirmation_required_for:
+        - "--vacuum-time"
+        - "--vacuum-size"
+        - "--rotate"
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - dmesg
+      - tail
+      - ausearch
+
+  - name: dmesg
+    description: "Print or control the kernel ring buffer (hardware, driver, and boot messages)"
+    common_intents:
+      - intent: "show all kernel messages"
+        alternate_phrasings:
+          - "sudo dmesg"
+          - "what is the kernel saying"
+          - "I plugged in a device and want to see the kernel log"
+          - "read the kernel ring buffer"
+          - "show me dmesg output"
+        pattern: "sudo dmesg"
+        example: "sudo dmesg"
+
+      - intent: "show kernel error messages only"
+        alternate_phrasings:
+          - "sudo dmesg -l err"
+          - "kernel errors"
+          - "did the kernel report any errors"
+          - "show only error-level kernel messages"
+          - "something is crashing, check the kernel log for errors"
+        pattern: "sudo dmesg -l {level}"
+        example: "sudo dmesg -l err"
+
+      - intent: "follow kernel messages live"
+        alternate_phrasings:
+          - "sudo dmesg -w"
+          - "tail the kernel log"
+          - "watch kernel messages as they come in"
+          - "stream dmesg output"
+          - "I'm debugging a driver and need to see kernel output in real time"
+        pattern: "sudo dmesg -w"
+        example: "sudo dmesg -w"
+
+      - intent: "show kernel messages with human-readable timestamps"
+        alternate_phrasings:
+          - "sudo dmesg -T"
+          - "dmesg with real timestamps"
+          - "show when kernel events actually happened"
+          - "kernel log with dates not offsets"
+          - "dmesg timestamps are confusing, make them readable"
+        pattern: "sudo dmesg -T"
+        example: "sudo dmesg -T"
+
+      - intent: "show kernel messages in human-readable formatted output"
+        alternate_phrasings:
+          - "sudo dmesg -H"
+          - "readable dmesg output"
+          - "dmesg with paging and colors"
+          - "make dmesg output easier to read"
+        pattern: "sudo dmesg -H"
+        example: "sudo dmesg -H"
+
+      - intent: "check kernel messages related to memory"
+        alternate_phrasings:
+          - "sudo dmesg | grep -i memory"
+          - "how much physical RAM does the kernel see"
+          - "dmesg memory info"
+          - "show RAM detected at boot"
+        pattern: "sudo dmesg | grep -i {keyword}"
+        example: "sudo dmesg | grep -i memory"
+
+    key_flags:
+      - flag: "-l / --level"
+        meaning: "Filter by log level (emerg, alert, crit, err, warn, notice, info, debug)"
+      - flag: "-w / --follow"
+        meaning: "Wait for and print new kernel messages as they arrive"
+      - flag: "-T / --ctime"
+        meaning: "Show human-readable timestamps instead of boot-relative offsets"
+      - flag: "-H / --human"
+        meaning: "Human-readable output with paging and color"
+      - flag: "-L / --color"
+        meaning: "Colorize output"
+    safety:
+      level: safe
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - journalctl
+      - tail
+
+  - name: tail
+    description: "Display the last lines of a file; follow a file as it grows"
+    common_intents:
+      - intent: "follow a log file live"
+        alternate_phrasings:
+          - "tail -f /var/log/syslog"
+          - "watch syslog in real time"
+          - "stream a log file as it updates"
+          - "I want to see new lines appearing in a log file as they come in"
+          - "tail -f the error log"
+        pattern: "tail -f {path/to/logfile}"
+        example: "tail -f /var/log/syslog"
+
+      - intent: "follow /var/log/auth.log live"
+        alternate_phrasings:
+          - "tail -f /var/log/auth.log"
+          - "watch authentication log"
+          - "monitor login attempts in real time"
+          - "stream auth log"
+        pattern: "tail -f /var/log/auth.log"
+        example: "tail -f /var/log/auth.log"
+
+      - intent: "show last N lines of a log file"
+        alternate_phrasings:
+          - "tail -n 100 /var/log/syslog"
+          - "last 50 lines of the log"
+          - "show me the bottom of the log file"
+          - "recent entries in {logfile}"
+          - "what is at the end of the log"
+        pattern: "tail -n {lines} {path/to/logfile}"
+        example: "tail -n 100 /var/log/syslog"
+
+      - intent: "follow a log file even if it is rotated or recreated"
+        alternate_phrasings:
+          - "tail -F /var/log/nginx/access.log"
+          - "keep following a log even after rotation"
+          - "tail a log that gets rotated"
+          - "retry following a log file that disappears and reappears"
+          - "logrotate restarts the file, how do I keep tailing it"
+        pattern: "tail -F {path/to/logfile}"
+        example: "tail -F /var/log/nginx/access.log"
+
+      - intent: "follow multiple log files at once"
+        alternate_phrasings:
+          - "tail -f /var/log/syslog /var/log/auth.log"
+          - "watch two log files simultaneously"
+          - "monitor multiple logs at the same time"
+          - "tail several files together"
+        pattern: "tail -f {logfile1} {logfile2}"
+        example: "tail -f /var/log/syslog /var/log/auth.log"
+
+    key_flags:
+      - flag: "-f / --follow"
+        meaning: "Output appended data as the file grows; stops if file is deleted/replaced"
+      - flag: "-F"
+        meaning: "Like -f but retries if the file is inaccessible; handles log rotation"
+      - flag: "-n / --lines"
+        meaning: "Output the last N lines instead of the default 10"
+      - flag: "-c / --bytes"
+        meaning: "Output the last N bytes"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - journalctl
+      - dmesg
+      - head
+
+  - name: logrotate
+    description: "Rotate, compress, and manage log files according to a configuration policy"
+    common_intents:
+      - intent: "force log rotation right now"
+        alternate_phrasings:
+          - "logrotate --force /etc/logrotate.conf"
+          - "rotate logs immediately without waiting for the schedule"
+          - "manually trigger log rotation"
+          - "run logrotate now"
+          - "logs are huge, rotate them immediately"
+        pattern: "logrotate --force {path/to/logrotate.conf}"
+        example: "logrotate --force /etc/logrotate.conf"
+
+      - intent: "preview what logrotate would do without making changes"
+        alternate_phrasings:
+          - "logrotate --debug /etc/logrotate.conf"
+          - "dry run logrotate"
+          - "see what logrotate would do"
+          - "test logrotate config without rotating anything"
+          - "I want to check my logrotate config before running it for real"
+        pattern: "logrotate --debug {path/to/logrotate.conf}"
+        example: "logrotate --debug /etc/logrotate.conf"
+
+      - intent: "run logrotate with verbose output"
+        alternate_phrasings:
+          - "logrotate -v /etc/logrotate.conf"
+          - "logrotate with details"
+          - "show what logrotate is doing as it runs"
+          - "verbose log rotation"
+        pattern: "logrotate -v {path/to/logrotate.conf}"
+        example: "logrotate -v /etc/logrotate.conf"
+
+    key_flags:
+      - flag: "--force"
+        meaning: "Force rotation even if it is not needed according to the schedule"
+      - flag: "--debug / -d"
+        meaning: "Dry-run mode — show what would happen without making any changes"
+      - flag: "-v / --verbose"
+        meaning: "Print detailed information about what logrotate is doing"
+      - flag: "--state"
+        meaning: "Use an alternative state file (or /dev/null to ignore state)"
+      - flag: "--log"
+        meaning: "Write verbose output to a log file"
+    safety:
+      level: moderate
+      requires_sudo: true
+      notes: "--force rotates logs immediately and may cause loss of buffered log data; use --debug first"
+      confirmation_required_for:
+        - "--force"
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - journalctl
+      - tail
+
+  - name: logger
+    description: "Add messages to the system log (syslog/journal) from the command line or scripts"
+    common_intents:
+      - intent: "write a message to the system log"
+        alternate_phrasings:
+          - "logger 'deployment complete'"
+          - "add a note to syslog"
+          - "log a message from a script"
+          - "how do I write to syslog from the shell"
+          - "mark an event in the system log"
+        pattern: "logger '{message}'"
+        example: "logger 'deployment complete'"
+
+      - intent: "log a message with a custom tag"
+        alternate_phrasings:
+          - "logger -t mytag 'message'"
+          - "log with a specific program name"
+          - "add a syslog entry with a custom identifier"
+          - "tag the log message so I can filter it later"
+        pattern: "logger -t {tag} '{message}'"
+        example: "logger -t deploy 'rollout finished'"
+
+      - intent: "log a message with a specific priority"
+        alternate_phrasings:
+          - "logger -p user.warning 'message'"
+          - "log a warning to syslog"
+          - "write an error-level message to the system log"
+          - "set the severity of a logged message"
+          - "log at priority level {priority}"
+        pattern: "logger -p {facility}.{level} '{message}'"
+        example: "logger -p user.warning 'disk space low'"
+
+      - intent: "pipe command output to the system log"
+        alternate_phrasings:
+          - "echo 'done' | logger"
+          - "send stdout to syslog"
+          - "log output of a command"
+          - "pipe into logger from a script"
+        pattern: "{command} | logger -t {tag}"
+        example: "echo 'backup finished' | logger -t backup"
+
+    key_flags:
+      - flag: "-t / --tag"
+        meaning: "Add a custom tag (identifier) to each logged line"
+      - flag: "-p / --priority"
+        meaning: "Set the message priority as facility.level (e.g., user.warning)"
+      - flag: "-n / --server"
+        meaning: "Send to a remote syslog server at the given hostname"
+      - flag: "-P / --port"
+        meaning: "Remote syslog server port (default 514)"
+      - flag: "-f / --file"
+        meaning: "Log the contents of a file instead of a command-line message"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - journalctl
+      - tail
+
+  - name: last
+    description: "Show a listing of last logged-in users from /var/log/wtmp"
+    common_intents:
+      - intent: "show recent login history for all users"
+        alternate_phrasings:
+          - "last"
+          - "who has logged in recently"
+          - "show me the login history on this machine"
+          - "list recent user logins"
+          - "check who has been on this system"
+        pattern: "last"
+        example: "last"
+
+      - intent: "show login history for a specific user"
+        alternate_phrasings:
+          - "last alice"
+          - "when did {username} last log in"
+          - "login history for a specific account"
+          - "has {username} been on the system lately"
+          - "check if {username} has logged in"
+        pattern: "last {username}"
+        example: "last alice"
+
+      - intent: "show all reboot history"
+        alternate_phrasings:
+          - "last reboot"
+          - "when did the machine last restart"
+          - "show system reboot history"
+          - "how many times has this server rebooted"
+          - "uptime history / reboot log"
+        pattern: "last reboot"
+        example: "last reboot"
+
+      - intent: "show login history with full timestamps"
+        alternate_phrasings:
+          - "last -F"
+          - "show exact login and logout times"
+          - "last with full date and time"
+          - "I need precise timestamps, not abbreviated ones"
+        pattern: "last -F"
+        example: "last -F"
+
+      - intent: "show login history since a specific date"
+        alternate_phrasings:
+          - "last --since -7days"
+          - "logins in the last week"
+          - "who logged in this month"
+          - "show logins from a specific period"
+          - "login history since yesterday"
+        pattern: "last --since {timespec}"
+        example: "last --since -7days"
+
+    key_flags:
+      - flag: "-n / --limit"
+        meaning: "Limit output to the last N entries"
+      - flag: "-F / --fulltimes"
+        meaning: "Print full date and time for each entry"
+      - flag: "-a / --hostlast"
+        meaning: "Show the hostname in the last column to prevent truncation"
+      - flag: "-i / --ip"
+        meaning: "Show IP addresses instead of hostnames"
+      - flag: "--since / -s"
+        meaning: "Show entries since a given time"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - lastb
+      - faillog
+      - ausearch
+
+  - name: lastb
+    description: "Show bad (failed) login attempts from /var/log/btmp"
+    common_intents:
+      - intent: "show all failed login attempts"
+        alternate_phrasings:
+          - "sudo lastb"
+          - "who tried to log in and failed"
+          - "show failed SSH login attempts"
+          - "are there brute force attempts on this machine"
+          - "list bad logins"
+        pattern: "sudo lastb"
+        example: "sudo lastb"
+
+      - intent: "show failed logins since a specific date"
+        alternate_phrasings:
+          - "sudo lastb --since 2024-01-01"
+          - "failed login attempts since {date}"
+          - "bad logins this month"
+          - "show recent failed authentication attempts"
+        pattern: "sudo lastb --since {YYYY-MM-DD}"
+        example: "sudo lastb --since 2024-03-01"
+
+      - intent: "show failed logins with DNS hostnames resolved"
+        alternate_phrasings:
+          - "sudo lastb -d"
+          - "resolve IP addresses in lastb output"
+          - "show hostnames for failed login sources"
+          - "who is trying to break in and where are they from"
+        pattern: "sudo lastb -d"
+        example: "sudo lastb -d"
+
+    key_flags:
+      - flag: "--since / -s"
+        meaning: "Show entries since a given date/time"
+      - flag: "--until / -t"
+        meaning: "Show entries up to a given date/time"
+      - flag: "-d / --dns"
+        meaning: "Resolve IP addresses to hostnames"
+      - flag: "--present / -p"
+        meaning: "Show users logged in at a specific time"
+    safety:
+      level: safe
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - last
+      - faillog
+      - ausearch
+
+  - name: faillog
+    description: "Display or manage login failure records from /var/log/faillog"
+    common_intents:
+      - intent: "show all users with recorded login failures"
+        alternate_phrasings:
+          - "faillog"
+          - "which accounts have had failed logins"
+          - "show login failure counts"
+          - "list accounts with failed authentication"
+          - "check who has failed login attempts"
+        pattern: "faillog"
+        example: "faillog"
+
+      - intent: "show login failure record for a specific user"
+        alternate_phrasings:
+          - "faillog -u {username}"
+          - "how many failed logins has {username} had"
+          - "check failed login count for a user"
+          - "login failures for account {username}"
+        pattern: "faillog -u {username}"
+        example: "faillog -u alice"
+
+      - intent: "show all entries including users with no failures"
+        alternate_phrasings:
+          - "faillog -a"
+          - "show all faillog records even if zero failures"
+          - "complete faillog output for every user"
+          - "include users with no failed logins in faillog"
+        pattern: "faillog -a"
+        example: "faillog -a"
+
+      - intent: "reset failed login counter for a user"
+        alternate_phrasings:
+          - "faillog -r -u {username}"
+          - "clear the failed login count for {username}"
+          - "reset login failure counter"
+          - "account is locked out, reset its failure count"
+          - "unlock account by clearing faillog"
+        pattern: "faillog -r -u {username}"
+        example: "faillog -r -u alice"
+
+    key_flags:
+      - flag: "-u / --user"
+        meaning: "Operate on a specific user account"
+      - flag: "-a / --all"
+        meaning: "Display or act on records for all users"
+      - flag: "-r / --reset"
+        meaning: "Reset the failure counter (requires write access to /var/log/faillog)"
+      - flag: "-l / --lock-secs"
+        meaning: "Lock account for N seconds after failed login"
+      - flag: "-m / --maximum"
+        meaning: "Set maximum allowed failures before account is disabled"
+    safety:
+      level: safe
+      requires_sudo: false
+      notes: "-r, -l, and -m modify /var/log/faillog and require write access"
+      confirmation_required_for:
+        - "-r"
+        - "--reset"
+        - "-m"
+        - "--maximum"
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - lastb
+      - last
+      - ausearch
+
+  - name: ausearch
+    description: "Query the Linux audit daemon log for specific events"
+    common_intents:
+      - intent: "search for SELinux AVC denial events"
+        alternate_phrasings:
+          - "sudo ausearch -m avc"
+          - "show SELinux denials in the audit log"
+          - "SELinux is blocking something, find the audit events"
+          - "audit log AVC denials"
+          - "what is SELinux denying"
+        pattern: "sudo ausearch -m avc"
+        example: "sudo ausearch -m avc"
+
+      - intent: "search audit log for failed login attempts"
+        alternate_phrasings:
+          - "sudo ausearch -m user_login -sv no"
+          - "failed logins in the audit log"
+          - "authentication failures from auditd"
+          - "who failed to log in according to the audit trail"
+          - "find login failures in audit log"
+        pattern: "sudo ausearch -m user_login -sv no"
+        example: "sudo ausearch -m user_login -sv no"
+
+      - intent: "search audit events for a specific user"
+        alternate_phrasings:
+          - "sudo ausearch -ui 1000"
+          - "audit log for user ID {uid}"
+          - "what has user {uid} done according to the audit log"
+          - "find audit events for a specific account"
+        pattern: "sudo ausearch -ui {uid}"
+        example: "sudo ausearch -ui 1000"
+
+      - intent: "search audit events for a specific file"
+        alternate_phrasings:
+          - "sudo ausearch -f /etc/passwd"
+          - "audit events touching a specific file"
+          - "who accessed or modified {file}"
+          - "file access audit trail"
+          - "has anyone touched {file} according to auditd"
+        pattern: "sudo ausearch -f {path/to/file}"
+        example: "sudo ausearch -f /etc/sudoers"
+
+      - intent: "search audit events for a specific executable or command"
+        alternate_phrasings:
+          - "sudo ausearch -c httpd"
+          - "audit events from {command}"
+          - "what has {executable} been doing in the audit log"
+          - "find audit records for a specific program"
+        pattern: "sudo ausearch -c {command}"
+        example: "sudo ausearch -c httpd"
+
+      - intent: "show audit events from the last 10 minutes"
+        alternate_phrasings:
+          - "sudo ausearch -ts recent"
+          - "recent audit events"
+          - "audit log from the last few minutes"
+          - "what just happened in the audit trail"
+          - "show me the newest audit events"
+        pattern: "sudo ausearch -ts recent"
+        example: "sudo ausearch -ts recent"
+
+    key_flags:
+      - flag: "-m / --message"
+        meaning: "Filter by message type (e.g., avc, user_login, syscall)"
+      - flag: "-c / --comm"
+        meaning: "Filter by executable/command name"
+      - flag: "-f / --file"
+        meaning: "Filter by filename accessed"
+      - flag: "-ui / --uid"
+        meaning: "Filter by user ID"
+      - flag: "-sv / --success"
+        meaning: "Filter by success (yes) or failure (no)"
+      - flag: "-ts / --start"
+        meaning: "Show events starting from a given time (or keyword like 'recent', 'today')"
+      - flag: "--raw"
+        meaning: "Output in raw format suitable for piping to other tools"
+    safety:
+      level: safe
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - aureport
+      - lastb
+      - journalctl
+
+  - name: aureport
+    description: "Generate summary reports from the Linux audit daemon logs"
+    common_intents:
+      - intent: "show overall audit event summary"
+        alternate_phrasings:
+          - "sudo aureport"
+          - "give me an overview of audit events"
+          - "what does the audit log summary look like"
+          - "high-level audit report"
+          - "summarize auditd activity"
+        pattern: "sudo aureport"
+        example: "sudo aureport"
+
+      - intent: "show a summary of login events"
+        alternate_phrasings:
+          - "sudo aureport -l"
+          - "audit login summary"
+          - "who has been logging in according to auditd"
+          - "login report from audit log"
+          - "summarize authentication events"
+        pattern: "sudo aureport -l"
+        example: "sudo aureport -l"
+
+      - intent: "show a summary of executable events"
+        alternate_phrasings:
+          - "sudo aureport -x"
+          - "what executables have been run according to auditd"
+          - "executable activity report from audit log"
+          - "which programs appeared in the audit trail"
+          - "command execution summary from auditd"
+        pattern: "sudo aureport -x"
+        example: "sudo aureport -x"
+
+      - intent: "show a summary of syscall events"
+        alternate_phrasings:
+          - "sudo aureport -s"
+          - "syscall audit report"
+          - "what system calls are in the audit log"
+          - "audit log syscall summary"
+        pattern: "sudo aureport -s"
+        example: "sudo aureport -s"
+
+      - intent: "show audit report for a specific time range"
+        alternate_phrasings:
+          - "sudo aureport --start today --end now"
+          - "audit summary for a time window"
+          - "audit events between {start} and {end}"
+          - "show today's audit report"
+          - "audit activity for the last hour"
+        pattern: "sudo aureport --start {start_time} --end {end_time}"
+        example: "sudo aureport --start today --end now"
+
+      - intent: "list audit log files and their time ranges"
+        alternate_phrasings:
+          - "sudo aureport -t"
+          - "what audit log files exist"
+          - "show the time coverage of audit logs"
+          - "how far back does the audit log go"
+        pattern: "sudo aureport -t"
+        example: "sudo aureport -t"
+
+    key_flags:
+      - flag: "-l / --login"
+        meaning: "Generate a login report"
+      - flag: "-x / --executable"
+        meaning: "Generate an executable activity report"
+      - flag: "-s / --syscall"
+        meaning: "Generate a syscall report"
+      - flag: "-t / --log-time"
+        meaning: "List audit log files and their time ranges"
+      - flag: "--start / -ts"
+        meaning: "Restrict report to events after this time"
+      - flag: "--end / -te"
+        meaning: "Restrict report to events before this time"
+    safety:
+      level: safe
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - ausearch
+      - journalctl
+      - last

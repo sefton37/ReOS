@@ -1,0 +1,504 @@
+domain: scheduling
+description: "Scheduling one-time and recurring tasks with cron, at, and systemd timers"
+related_domains:
+  - service-management
+  - shell-operations
+
+commands:
+  - name: crontab
+    description: "Schedule recurring jobs to run on a time interval for the current user"
+    common_intents:
+      - intent: "list current user's cron jobs"
+        alternate_phrasings:
+          - "crontab -l"
+          - "show me what cron jobs I have scheduled"
+          - "I want to see every recurring task I have set up in my crontab file"
+          - "what's in my crontab"
+          - "do I have any cron jobs running"
+        pattern: "crontab -l"
+        example: "crontab -l"
+      - intent: "edit the current user's crontab"
+        alternate_phrasings:
+          - "crontab -e"
+          - "open my crontab for editing"
+          - "I need to add a new scheduled job to run every night"
+          - "add a cron job"
+          - "set up a recurring task"
+        pattern: "crontab -e"
+        example: "crontab -e"
+      - intent: "add a job that runs every day at a fixed time"
+        alternate_phrasings:
+          - "run {command} every day at 10am"
+          - "schedule {command} to run daily"
+          - "I want a script to fire every morning at the same time"
+          - "set up a daily cron for {command}"
+          - "make {command} run once a day"
+        pattern: "0 {hour} * * * {command}"
+        example: "0 10 * * * /home/user/backup.sh"
+      - intent: "add a job that runs every hour"
+        alternate_phrasings:
+          - "run {command} hourly"
+          - "schedule {command} to run every 60 minutes"
+          - "I want this script to run at the top of every hour"
+          - "hourly cron for {command}"
+        pattern: "0 * * * * {command}"
+        example: "0 * * * * /home/user/check_disk.sh"
+      - intent: "add a job that runs every N minutes"
+        alternate_phrasings:
+          - "run {command} every {n} minutes"
+          - "schedule {command} every few minutes"
+          - "I need this thing to poll every 5 minutes"
+          - "cron job every {n} min"
+        pattern: "*/{n} * * * * {command}"
+        example: "*/5 * * * * /home/user/poll.sh"
+      - intent: "add a job that runs on a specific day of the week"
+        alternate_phrasings:
+          - "run {command} every Friday"
+          - "schedule {command} on Saturdays"
+          - "I need a weekly job that fires on a specific weekday"
+          - "weekly cron on {day}"
+        pattern: "{minute} {hour} * * {weekday} {command}"
+        example: "30 2 * * Fri /home/user/weekly_report.sh"
+      - intent: "edit crontab for a different user"
+        alternate_phrasings:
+          - "sudo crontab -e -u {user}"
+          - "edit the crontab belonging to another user"
+          - "I'm root and I need to manage cron jobs for user {user}"
+          - "set up a cron job for {user}"
+        pattern: "sudo crontab -e -u {user}"
+        example: "sudo crontab -e -u deploy"
+      - intent: "remove all cron jobs for the current user"
+        alternate_phrasings:
+          - "crontab -r"
+          - "delete all of my cron jobs at once"
+          - "wipe out my entire crontab — I want to start fresh"
+          - "nuke my crontab"
+        pattern: "crontab -r"
+        example: "crontab -r"
+      - intent: "view cron logs"
+        alternate_phrasings:
+          - "journalctl | grep CRON"
+          - "show me the cron log to see what ran and when"
+          - "did my cron job actually run last night"
+          - "check cron history"
+        pattern: "journalctl | grep CRON"
+        example: "journalctl | grep CRON"
+    key_flags:
+      - flag: "-l"
+        meaning: "List the current user's crontab entries"
+      - flag: "-e"
+        meaning: "Edit the current user's crontab in the default editor"
+      - flag: "-r"
+        meaning: "Remove (delete) the current user's entire crontab"
+      - flag: "-u {user}"
+        meaning: "Operate on another user's crontab (requires sudo)"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "crontab -r"
+      blocked_patterns:
+        - "crontab -r"
+    undo:
+      "crontab -r": "restore from backup: crontab {path/to/backup}"
+      "crontab -e (added entry)": "crontab -e and remove or comment out the line"
+    related_commands:
+      - at
+      - anacron
+      - systemctl list-timers
+
+  - name: at
+    description: "Execute a command once at a specified future time"
+    common_intents:
+      - intent: "schedule a command to run at a specific time today"
+        alternate_phrasings:
+          - "at {hh:mm}"
+          - "run {command} at 3pm"
+          - "I want this script to fire at exactly 14:30 today"
+          - "one-time job at a set time"
+          - "execute {command} tonight at midnight"
+        pattern: "echo \"{command}\" | at {hh:mm}"
+        example: "echo \"/home/user/deploy.sh\" | at 14:30"
+      - intent: "schedule a command to run after a delay"
+        alternate_phrasings:
+          - "at now + {n} minutes"
+          - "run {command} in 5 minutes"
+          - "I need to kick something off after a short delay"
+          - "delay this command by {n} hours"
+          - "execute {command} in half an hour"
+        pattern: "echo \"{command}\" | at now + {n} {minutes|hours|days}"
+        example: "echo \"/home/user/notify.sh\" | at now + 30 minutes"
+      - intent: "schedule a command from a script file"
+        alternate_phrasings:
+          - "at -f {script} {time}"
+          - "submit an entire script file to run at a specific time"
+          - "I have a file full of commands I want to run next Tuesday"
+          - "run script file at scheduled time"
+        pattern: "at -f {path/to/script} {time}"
+        example: "at -f /home/user/tasks.sh 9:30 AM Tue"
+      - intent: "run a command at midnight"
+        alternate_phrasings:
+          - "at midnight"
+          - "schedule {command} at midnight"
+          - "run this at midnight tonight"
+          - "midnight one-time job"
+        pattern: "echo \"{command}\" | at midnight"
+        example: "echo \"/home/user/cleanup.sh\" | at midnight"
+      - intent: "view details of a specific queued at job"
+        alternate_phrasings:
+          - "at -c {job_number}"
+          - "show me what commands are inside at job {job_number}"
+          - "I want to inspect the contents of a scheduled at job"
+          - "print the at job script"
+        pattern: "at -c {job_number}"
+        example: "at -c 3"
+    key_flags:
+      - flag: "-f {file}"
+        meaning: "Read commands from the given file instead of stdin"
+      - flag: "-l"
+        meaning: "List pending jobs for the current user (same as atq)"
+      - flag: "-c {job}"
+        meaning: "Print the full environment and commands for a queued job"
+      - flag: "-d {job}"
+        meaning: "Delete a queued job by number (same as atrm)"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "scheduled job": "atrm {job_number}"
+    related_commands:
+      - atq
+      - atrm
+      - batch
+      - crontab
+
+  - name: atq
+    description: "List pending jobs scheduled with at or batch for the current user"
+    common_intents:
+      - intent: "list all pending at jobs for the current user"
+        alternate_phrasings:
+          - "atq"
+          - "what at jobs do I have waiting to run"
+          - "show me my scheduled one-time jobs"
+          - "pending at jobs"
+          - "what's in the at queue"
+        pattern: "atq"
+        example: "atq"
+      - intent: "list at jobs for all users"
+        alternate_phrasings:
+          - "sudo atq"
+          - "show every pending at job on this machine for all users"
+          - "I'm root, show me the full at queue"
+          - "see all users' scheduled jobs"
+        pattern: "sudo atq"
+        example: "sudo atq"
+    key_flags:
+      - flag: "-q {queue}"
+        meaning: "Show jobs only from a named queue (single letter, e.g. 'a')"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - at
+      - atrm
+
+  - name: atrm
+    description: "Remove one or more pending jobs from the at queue"
+    common_intents:
+      - intent: "cancel a specific at job by job number"
+        alternate_phrasings:
+          - "atrm {job_number}"
+          - "delete at job number {job_number}"
+          - "I scheduled something by mistake and I want to cancel it"
+          - "remove pending job {job_number}"
+          - "cancel that at job"
+        pattern: "atrm {job_number}"
+        example: "atrm 5"
+      - intent: "cancel multiple at jobs at once"
+        alternate_phrasings:
+          - "atrm {job1} {job2} {job3}"
+          - "remove several at jobs in one command"
+          - "delete at jobs 3 5 and 7"
+          - "cancel multiple pending jobs"
+        pattern: "atrm {job1} {job2} ..."
+        example: "atrm 3 5 7"
+    key_flags: []
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "removing a job that cannot be recovered"
+      blocked_patterns: []
+    undo:
+      "atrm {job}": "jobs removed with atrm cannot be recovered; recreate with at"
+    related_commands:
+      - atq
+      - at
+
+  - name: batch
+    description: "Execute commands when system load drops to an acceptable level"
+    common_intents:
+      - intent: "run a command when the system load is low"
+        alternate_phrasings:
+          - "batch"
+          - "run {command} whenever the system is not busy"
+          - "queue a heavy job to execute when load is low"
+          - "run this script only when the machine has spare capacity"
+          - "defer {command} until system load permits"
+        pattern: "echo \"{command}\" | batch"
+        example: "echo \"/home/user/heavy_backup.sh\" | batch"
+      - intent: "submit an interactive batch job via stdin"
+        alternate_phrasings:
+          - "open batch and type commands"
+          - "I want to type multiple commands into batch interactively"
+          - "enter batch mode and give it commands"
+          - "batch interactive input"
+        pattern: "batch"
+        example: "batch"
+    key_flags: []
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "queued batch job": "atrm {job_number} (batch jobs appear in the at queue)"
+    related_commands:
+      - at
+      - atq
+      - atrm
+
+  - name: systemctl list-timers
+    description: "List active (or all) systemd timer units and their next trigger times"
+    common_intents:
+      - intent: "list all active systemd timers"
+        alternate_phrasings:
+          - "systemctl list-timers"
+          - "show me what systemd timers are scheduled"
+          - "what automated tasks does systemd have queued up"
+          - "when do systemd timers fire next"
+          - "show system timers"
+        pattern: "systemctl list-timers"
+        example: "systemctl list-timers"
+      - intent: "list all timers including inactive ones"
+        alternate_phrasings:
+          - "systemctl list-timers --all"
+          - "show every systemd timer, even the ones not currently active"
+          - "I want to see disabled timers too"
+          - "list all timers including disabled"
+        pattern: "systemctl list-timers --all"
+        example: "systemctl list-timers --all"
+      - intent: "find timers matching a name pattern"
+        alternate_phrasings:
+          - "systemctl list-timers {pattern}"
+          - "show only backup-related timers"
+          - "filter systemd timers by name"
+          - "list timers matching {pattern}"
+        pattern: "systemctl list-timers {pattern}"
+        example: "systemctl list-timers '*backup*'"
+    key_flags:
+      - flag: "--all"
+        meaning: "Include inactive timers in the listing"
+      - flag: "--state {state}"
+        meaning: "Filter timers by unit state (active, inactive, failed, etc.)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - systemd-run
+      - systemctl
+      - crontab
+
+  - name: systemd-run
+    description: "Run a command as a transient systemd service or timer unit"
+    common_intents:
+      - intent: "run a command once at a specific calendar time using systemd"
+        alternate_phrasings:
+          - "systemd-run --on-calendar={time} {command}"
+          - "use systemd to schedule {command} at a specific date and time"
+          - "I want a systemd one-shot timer instead of using at"
+          - "schedule {command} with systemd calendar syntax"
+          - "fire {command} at midnight via systemd"
+        pattern: "systemd-run --on-calendar={calendar_event} {command}"
+        example: "systemd-run --on-calendar='2026-04-01 09:00:00' /home/user/deploy.sh"
+      - intent: "run a command after a relative delay using systemd"
+        alternate_phrasings:
+          - "systemd-run --on-active={delay} {command}"
+          - "delay {command} by 10 minutes using systemd"
+          - "run {command} in an hour via systemd transient timer"
+          - "transient timer with delay for {command}"
+        pattern: "systemd-run --on-active={delay} {command}"
+        example: "systemd-run --on-active=10min /home/user/alert.sh"
+      - intent: "run a command as an unprivileged user systemd service"
+        alternate_phrasings:
+          - "systemd-run --user {command}"
+          - "start a transient systemd service without sudo"
+          - "run {command} under my own user's service manager"
+          - "user-session systemd-run for {command}"
+        pattern: "systemd-run --user {command}"
+        example: "systemd-run --user /home/alice/sync.sh"
+      - intent: "run a transient systemd service with resource limits"
+        alternate_phrasings:
+          - "systemd-run -p MemoryMax={limit} {command}"
+          - "cap memory usage for {command} and run it via systemd"
+          - "run {command} with a CPU quota using systemd"
+          - "constrain resources for a one-shot job"
+        pattern: "systemd-run -p MemoryMax={bytes} -p CPUQuota={pct}% {command}"
+        example: "systemd-run -p MemoryMax=512M -p CPUQuota=50% /home/user/big_job.sh"
+    key_flags:
+      - flag: "--on-calendar={event}"
+        meaning: "Run at a specified wallclock time (accepts systemd calendar syntax, e.g. 'daily', '*-*-* 02:00:00')"
+      - flag: "--on-active={delay}"
+        meaning: "Run after a relative delay from now (e.g. '10min', '1h')"
+      - flag: "--user"
+        meaning: "Run under the current user's systemd session manager, no root required"
+      - flag: "--unit {name}"
+        meaning: "Assign a custom unit name to the transient service"
+      - flag: "--remain-after-exit"
+        meaning: "Keep the unit visible in systemctl status after the command exits"
+      - flag: "-p {property}={value}"
+        meaning: "Set a systemd unit property such as MemoryMax or CPUQuota"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "transient service/timer": "systemctl stop {unit_name} or wait for it to finish; transient units self-clean"
+    related_commands:
+      - systemctl list-timers
+      - systemctl
+      - at
+
+  - name: anacron
+    description: "Run periodic jobs on machines that are not always on, catching up missed runs"
+    common_intents:
+      - intent: "run all anacron jobs that have been missed"
+        alternate_phrasings:
+          - "anacron -f"
+          - "force anacron to re-run all scheduled jobs regardless of timestamps"
+          - "my laptop was off for a week and I want to catch up on missed cron jobs"
+          - "run all anacron jobs now ignoring last-run timestamps"
+        pattern: "anacron -f"
+        example: "sudo anacron -f"
+      - intent: "run anacron jobs immediately without waiting for their delay"
+        alternate_phrasings:
+          - "anacron -n"
+          - "run anacron now and skip the delay periods"
+          - "skip the minute delays defined in anacrontab"
+          - "fire anacron jobs right now without delay"
+        pattern: "anacron -n"
+        example: "sudo anacron -n"
+      - intent: "run anacron in the foreground for debugging"
+        alternate_phrasings:
+          - "anacron -d"
+          - "run anacron in debug mode so I can see what it is doing"
+          - "watch anacron run jobs and output to stderr"
+          - "test my anacrontab configuration"
+        pattern: "anacron -d"
+        example: "sudo anacron -d"
+      - intent: "update anacron timestamps without running jobs"
+        alternate_phrasings:
+          - "anacron -u"
+          - "mark all anacron jobs as having run today without executing them"
+          - "reset the anacron last-run timestamps"
+          - "tell anacron everything ran successfully today"
+        pattern: "anacron -u"
+        example: "sudo anacron -u"
+      - intent: "add a recurring job to anacrontab"
+        alternate_phrasings:
+          - "edit /etc/anacrontab"
+          - "add a job that runs every {n} days via anacron"
+          - "I want a daily cleanup job that still runs even if the machine was off"
+          - "schedule a weekly task in anacron"
+        pattern: "{period_days}  {delay_minutes}  {job_id}  {command}"
+        example: "7  10  weekly-backup  /home/user/backup.sh"
+    key_flags:
+      - flag: "-f"
+        meaning: "Force execution of all jobs, ignoring their last-run timestamps"
+      - flag: "-n"
+        meaning: "Run jobs now, skipping the per-job delay (implies -s)"
+      - flag: "-s"
+        meaning: "Serialize jobs — do not start a new job until the previous one finishes"
+      - flag: "-d"
+        meaning: "Run in foreground (debug mode), printing messages to stderr"
+      - flag: "-u"
+        meaning: "Update job timestamps to today without running any jobs"
+      - flag: "-t {file}"
+        meaning: "Use an alternate anacrontab file instead of /etc/anacrontab"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "anacron -u (timestamps updated)": "no direct undo; timestamps are in /var/spool/anacron/"
+    related_commands:
+      - crontab
+      - systemctl list-timers
+
+  - name: sleep
+    description: "Pause execution for a specified duration before continuing"
+    common_intents:
+      - intent: "delay execution for a number of seconds"
+        alternate_phrasings:
+          - "sleep {seconds}"
+          - "wait {n} seconds before the next command"
+          - "pause for a bit between two steps in my script"
+          - "add a {n}-second delay"
+        pattern: "sleep {seconds}"
+        example: "sleep 10"
+      - intent: "delay execution for minutes or hours"
+        alternate_phrasings:
+          - "sleep {n}m"
+          - "pause for {n} minutes"
+          - "wait half an hour before the next step"
+          - "sleep for an hour"
+        pattern: "sleep {n}{m|h|d}"
+        example: "sleep 5m"
+      - intent: "delay combined durations (e.g. 1 day and 3 hours)"
+        alternate_phrasings:
+          - "sleep 1d 3h"
+          - "wait one day and three hours"
+          - "I need to pause my script for more than a day"
+          - "compound sleep duration"
+        pattern: "sleep {n}d {n}h"
+        example: "sleep 1d 3h"
+      - intent: "run a command after a delay using sleep in a pipeline"
+        alternate_phrasings:
+          - "sleep {delay} && {command}"
+          - "wait a few minutes then run {command}"
+          - "I want to defer {command} by a short delay in a one-liner"
+          - "delay then execute {command}"
+          - "pause then fire off {command}"
+        pattern: "sleep {delay} && {command}"
+        example: "sleep 20m && /home/user/notify.sh"
+    key_flags:
+      - flag: "{number}s"
+        meaning: "Sleep for the given number of seconds (default unit)"
+      - flag: "{number}m"
+        meaning: "Sleep for the given number of minutes"
+      - flag: "{number}h"
+        meaning: "Sleep for the given number of hours"
+      - flag: "{number}d"
+        meaning: "Sleep for the given number of days"
+      - flag: "infinity"
+        meaning: "Sleep forever (useful for keeping a process alive)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "running sleep": "kill the sleep process with Ctrl-C or kill {pid}"
+    related_commands:
+      - at
+      - watch

@@ -1,0 +1,949 @@
+domain: user-management
+description: "Creating, modifying, and deleting users and groups; authentication and privilege escalation"
+related_domains:
+  - permissions-security
+  - service-management
+
+commands:
+  - name: useradd
+    description: "Create a new user account"
+    common_intents:
+      - intent: "create a new user"
+        alternate_phrasings:
+          - "useradd {username}"
+          - "add a new user account called {username} to this system"
+          - "I need a new user, make one called {username}"
+          - "spin up a user named {username}"
+          - "new user {username}"
+        pattern: "sudo useradd {username}"
+        example: "sudo useradd alice"
+      - intent: "create a new user with a home directory"
+        alternate_phrasings:
+          - "useradd -m {username}"
+          - "add a user named {username} and make sure they have a home folder"
+          - "create user {username} with home dir"
+          - "make a user and create their home directory"
+          - "new user {username} with /home/{username}"
+        pattern: "sudo useradd -m {username}"
+        example: "sudo useradd -m alice"
+      - intent: "create a new user with a specific shell"
+        alternate_phrasings:
+          - "useradd -s {shell} {username}"
+          - "add user {username} and set their login shell to {shell}"
+          - "create {username} with bash as their shell"
+          - "new user, default shell {shell}"
+        pattern: "sudo useradd -m -s {shell} {username}"
+        example: "sudo useradd -m -s /bin/bash alice"
+      - intent: "create a new user and add them to supplementary groups"
+        alternate_phrasings:
+          - "useradd -G {groups} {username}"
+          - "add user {username} and put them in the {groups} groups right away"
+          - "create {username} already in {group}"
+          - "new user {username} member of {group}"
+        pattern: "sudo useradd -m -G {group1,group2} {username}"
+        example: "sudo useradd -m -G docker,sudo alice"
+      - intent: "create a system user without a home directory"
+        alternate_phrasings:
+          - "useradd -r {username}"
+          - "add a system service account named {username}"
+          - "create non-login system user {username}"
+          - "service account for {daemon}"
+        pattern: "sudo useradd -r {username}"
+        example: "sudo useradd -r nginx"
+    key_flags:
+      - flag: "-m / --create-home"
+        meaning: "Create the user's home directory"
+      - flag: "-s / --shell"
+        meaning: "Set the user's login shell"
+      - flag: "-G / --groups"
+        meaning: "Add user to supplementary groups (comma-separated, no spaces)"
+      - flag: "-u / --uid"
+        meaning: "Specify a numeric user ID"
+      - flag: "-r / --system"
+        meaning: "Create a system account (no home dir, lower UID range)"
+      - flag: "-k / --skel"
+        meaning: "Populate home directory from a skeleton directory"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - adding user to sudo/wheel group
+      blocked_patterns: []
+    undo:
+      "create user {username}": "sudo userdel -r {username}"
+    related_commands:
+      - adduser
+      - usermod
+      - userdel
+      - passwd
+
+  - name: adduser
+    description: "Interactive, high-level utility to add a new user (Debian/Ubuntu)"
+    common_intents:
+      - intent: "interactively add a new user with prompts"
+        alternate_phrasings:
+          - "adduser {username}"
+          - "add a new user and walk me through setting up their account"
+          - "easier way to create a user than useradd"
+          - "guided user creation for {username}"
+          - "the friendly way to add a user"
+        pattern: "adduser {username}"
+        example: "adduser alice"
+      - intent: "add a user to an existing group"
+        alternate_phrasings:
+          - "adduser {username} {group}"
+          - "put {username} in the {group} group"
+          - "add {username} to group {group}"
+          - "grant {username} membership in {group}"
+          - "{username} needs to be in {group}"
+        pattern: "adduser {username} {group}"
+        example: "adduser alice sudo"
+      - intent: "create a new user with a specific home directory"
+        alternate_phrasings:
+          - "adduser --home {path} {username}"
+          - "make a user whose home is at {path}"
+          - "home directory somewhere other than /home/{username}"
+          - "custom home path for new user {username}"
+        pattern: "adduser --home {path/to/home} {username}"
+        example: "adduser --home /srv/alice alice"
+    key_flags:
+      - flag: "--no-create-home"
+        meaning: "Do not create a home directory"
+      - flag: "--home"
+        meaning: "Specify a custom home directory path"
+      - flag: "--shell"
+        meaning: "Set the login shell"
+      - flag: "--ingroup"
+        meaning: "Set the user's primary group"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - adding user to sudo/wheel group
+      blocked_patterns: []
+    undo:
+      "create user {username}": "sudo deluser --remove-home {username}"
+    related_commands:
+      - useradd
+      - usermod
+      - deluser
+      - passwd
+
+  - name: usermod
+    description: "Modify an existing user account"
+    common_intents:
+      - intent: "add a user to a supplementary group"
+        alternate_phrasings:
+          - "usermod -aG {group} {username}"
+          - "give {username} access to {group} without removing their existing groups"
+          - "add {username} to the docker group"
+          - "{username} needs sudo, add them to the wheel group"
+          - "grant group membership to {username}"
+        pattern: "sudo usermod -aG {group} {username}"
+        example: "sudo usermod -aG docker alice"
+      - intent: "change a user's login shell"
+        alternate_phrasings:
+          - "usermod -s {shell} {username}"
+          - "set {username}'s shell to {shell}"
+          - "change the default shell for {username}"
+          - "{username} wants zsh instead of bash"
+          - "update login shell for {username}"
+        pattern: "sudo usermod -s {shell} {username}"
+        example: "sudo usermod -s /bin/zsh alice"
+      - intent: "rename a user account"
+        alternate_phrasings:
+          - "usermod -l {new} {old}"
+          - "change the username from {old} to {new}"
+          - "rename user {old} to {new}"
+          - "I need to rename an account"
+        pattern: "sudo usermod -l {new_username} {old_username}"
+        example: "sudo usermod -l bob alice"
+      - intent: "change a user's home directory"
+        alternate_phrasings:
+          - "usermod -md {path} {username}"
+          - "move {username}'s home to {path} and migrate their files"
+          - "relocate home directory for {username}"
+          - "change home dir and move existing files"
+        pattern: "sudo usermod -m -d {path/to/new_home} {username}"
+        example: "sudo usermod -m -d /srv/alice alice"
+      - intent: "lock a user account"
+        alternate_phrasings:
+          - "usermod -L {username}"
+          - "disable login for {username} without deleting the account"
+          - "temporarily block {username} from logging in"
+          - "freeze {username}'s account"
+          - "lock out {username}"
+        pattern: "sudo usermod -L {username}"
+        example: "sudo usermod -L alice"
+      - intent: "unlock a user account"
+        alternate_phrasings:
+          - "usermod -U {username}"
+          - "re-enable {username}'s account after it was locked"
+          - "let {username} log in again"
+          - "unlock {username}"
+        pattern: "sudo usermod -U {username}"
+        example: "sudo usermod -U alice"
+    key_flags:
+      - flag: "-aG / --append --groups"
+        meaning: "Append user to supplementary groups (always combine -a with -G)"
+      - flag: "-s / --shell"
+        meaning: "Change login shell"
+      - flag: "-l / --login"
+        meaning: "Change the username (login name)"
+      - flag: "-d / --home"
+        meaning: "Change the home directory path"
+      - flag: "-m / --move-home"
+        meaning: "Move contents of old home to new home (use with -d)"
+      - flag: "-L / --lock"
+        meaning: "Lock the account by prefixing the password hash"
+      - flag: "-U / --unlock"
+        meaning: "Unlock a previously locked account"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - adding user to sudo or wheel group
+        - changing UID of an account that owns files
+      blocked_patterns: []
+    undo:
+      "add to group {group}": "sudo gpasswd -d {username} {group}"
+      "lock account": "sudo usermod -U {username}"
+      "rename user": "sudo usermod -l {old_username} {new_username}"
+    related_commands:
+      - useradd
+      - userdel
+      - passwd
+      - gpasswd
+
+  - name: userdel
+    description: "Delete a user account from the system"
+    common_intents:
+      - intent: "delete a user account"
+        alternate_phrasings:
+          - "userdel {username}"
+          - "remove the account for {username} but keep their files"
+          - "delete user {username} from the system"
+          - "get rid of the {username} account"
+        pattern: "sudo userdel {username}"
+        example: "sudo userdel alice"
+      - intent: "delete a user account and remove their home directory"
+        alternate_phrasings:
+          - "userdel -r {username}"
+          - "completely remove {username} including their home folder and mail spool"
+          - "delete {username} and wipe all their data"
+          - "purge everything belonging to {username}"
+          - "full removal of user {username}"
+        pattern: "sudo userdel -r {username}"
+        example: "sudo userdel -r alice"
+    key_flags:
+      - flag: "-r / --remove"
+        meaning: "Remove home directory and mail spool along with the account"
+      - flag: "-R / --root"
+        meaning: "Apply changes in a chroot directory"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - deleting any user account
+        - deleting home directory and mail spool (-r flag)
+      blocked_patterns:
+        - "userdel root"
+        - "userdel -r root"
+    undo:
+      "delete user (account only)": "sudo useradd -m {username}  # files are still intact"
+      "delete user with home (-r)": "no undo — home directory and mail spool are permanently deleted"
+    related_commands:
+      - useradd
+      - usermod
+      - groupdel
+
+  - name: passwd
+    description: "Change a user's password or manage password properties"
+    common_intents:
+      - intent: "change the current user's password"
+        alternate_phrasings:
+          - "passwd"
+          - "update my password"
+          - "I want to change my own password"
+          - "reset my login password"
+          - "my password needs updating"
+        pattern: "passwd"
+        example: "passwd"
+      - intent: "change another user's password"
+        alternate_phrasings:
+          - "passwd {username}"
+          - "reset the password for {username}"
+          - "set a new password for user {username}"
+          - "{username} forgot their password, reset it"
+          - "change {username}'s password as admin"
+        pattern: "sudo passwd {username}"
+        example: "sudo passwd alice"
+      - intent: "check password status for a user"
+        alternate_phrasings:
+          - "passwd -S"
+          - "is my password locked or expired"
+          - "show password info for current user"
+          - "check password status"
+        pattern: "passwd -S"
+        example: "passwd -S"
+      - intent: "expire a user's password to force reset at next login"
+        alternate_phrasings:
+          - "passwd -e {username}"
+          - "force {username} to change their password when they next log in"
+          - "make {username}'s password expire immediately"
+          - "require password reset for {username}"
+          - "{username} needs to set a new password next login"
+        pattern: "sudo passwd -e {username}"
+        example: "sudo passwd -e alice"
+    key_flags:
+      - flag: "-S / --status"
+        meaning: "Display password status information for the account"
+      - flag: "-e / --expire"
+        meaning: "Immediately expire the password, forcing change at next login"
+      - flag: "-l / --lock"
+        meaning: "Lock the password (prepends '!') disabling login"
+      - flag: "-u / --unlock"
+        meaning: "Unlock a previously locked password"
+      - flag: "-d / --delete"
+        meaning: "Delete the password, leaving account passwordless"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - changing another user's password
+        - deleting a password (-d)
+      blocked_patterns:
+        - "passwd root  # use 'sudo passwd root' with explicit intent"
+    undo:
+      "change password": "sudo passwd {username}  # set a new known password"
+      "lock password": "sudo passwd -u {username}"
+    related_commands:
+      - chage
+      - usermod
+      - chpasswd
+
+  - name: groupadd
+    description: "Add a new group to the system"
+    common_intents:
+      - intent: "create a new group"
+        alternate_phrasings:
+          - "groupadd {group_name}"
+          - "add a new group called {group_name}"
+          - "create the {group_name} group"
+          - "I need a group named {group_name}"
+          - "make group {group_name}"
+        pattern: "sudo groupadd {group_name}"
+        example: "sudo groupadd developers"
+      - intent: "create a new group with a specific GID"
+        alternate_phrasings:
+          - "groupadd -g {gid} {group_name}"
+          - "create group {group_name} with GID {gid}"
+          - "add group with specific numeric ID"
+          - "group {group_name} must have GID {gid}"
+        pattern: "sudo groupadd -g {gid} {group_name}"
+        example: "sudo groupadd -g 1050 developers"
+      - intent: "create a system group"
+        alternate_phrasings:
+          - "groupadd -r {group_name}"
+          - "add a system-level group for a service"
+          - "create service group {group_name}"
+          - "system group for daemon {group_name}"
+        pattern: "sudo groupadd -r {group_name}"
+        example: "sudo groupadd -r www-data"
+    key_flags:
+      - flag: "-g / --gid"
+        meaning: "Set a specific numeric group ID"
+      - flag: "-r / --system"
+        meaning: "Create a system group (GID below SYS_GID_MAX)"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "create group {group_name}": "sudo groupdel {group_name}"
+    related_commands:
+      - groupdel
+      - usermod
+      - gpasswd
+      - groups
+
+  - name: groupdel
+    description: "Delete an existing group from the system"
+    common_intents:
+      - intent: "delete a group"
+        alternate_phrasings:
+          - "groupdel {group_name}"
+          - "remove the {group_name} group"
+          - "delete group {group_name} from the system"
+          - "get rid of the {group_name} group"
+          - "that group is no longer needed, remove it"
+        pattern: "sudo groupdel {group_name}"
+        example: "sudo groupdel developers"
+    key_flags: []
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - deleting a group that is the primary group of an existing user
+      blocked_patterns: []
+    undo:
+      "delete group {group_name}": "sudo groupadd {group_name}  # members must be re-added manually"
+    related_commands:
+      - groupadd
+      - gpasswd
+      - usermod
+
+  - name: groups
+    description: "Print group memberships for one or more users"
+    common_intents:
+      - intent: "show which groups the current user belongs to"
+        alternate_phrasings:
+          - "groups"
+          - "what groups am I in"
+          - "list my group memberships"
+          - "show my groups"
+          - "which groups do I belong to"
+        pattern: "groups"
+        example: "groups"
+      - intent: "show which groups a specific user belongs to"
+        alternate_phrasings:
+          - "groups {username}"
+          - "what groups is {username} a member of"
+          - "show groups for {username}"
+          - "list {username}'s group memberships"
+          - "is {username} in the docker group"
+        pattern: "groups {username}"
+        example: "groups alice"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - id
+      - gpasswd
+      - usermod
+
+  - name: gpasswd
+    description: "Administer /etc/group and /etc/gshadow — manage group passwords and membership"
+    common_intents:
+      - intent: "add a user to a group"
+        alternate_phrasings:
+          - "gpasswd -a {user} {group}"
+          - "add {user} to the {group} group using gpasswd"
+          - "grant {user} membership in {group}"
+          - "put {user} in {group}"
+          - "{user} needs to be part of {group}"
+        pattern: "gpasswd -a {user} {group}"
+        example: "gpasswd -a alice developers"
+      - intent: "remove a user from a group"
+        alternate_phrasings:
+          - "gpasswd -d {user} {group}"
+          - "remove {user} from the {group} group"
+          - "revoke {user}'s membership in {group}"
+          - "kick {user} out of {group}"
+          - "take {user} off the {group} group"
+        pattern: "sudo gpasswd -d {user} {group}"
+        example: "sudo gpasswd -d alice developers"
+      - intent: "set the list of group members explicitly"
+        alternate_phrasings:
+          - "gpasswd -M {users} {group}"
+          - "replace the member list of {group} with exactly {users}"
+          - "set {group} members to {user1} and {user2}"
+          - "define group membership precisely"
+        pattern: "sudo gpasswd -M {user1,user2} {group}"
+        example: "sudo gpasswd -M alice,bob developers"
+      - intent: "assign group administrators"
+        alternate_phrasings:
+          - "gpasswd -A {users} {group}"
+          - "make {user} an admin of the {group} group"
+          - "grant {user} ability to manage {group} membership"
+          - "delegate group admin for {group} to {user}"
+        pattern: "sudo gpasswd -A {user1,user2} {group}"
+        example: "sudo gpasswd -A alice developers"
+    key_flags:
+      - flag: "-a / --add"
+        meaning: "Add a user to the group"
+      - flag: "-d / --delete"
+        meaning: "Remove a user from the group"
+      - flag: "-M / --members"
+        meaning: "Set the full list of group members (replaces existing list)"
+      - flag: "-A / --administrators"
+        meaning: "Set the list of group administrators"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - replacing the entire member list with -M
+      blocked_patterns: []
+    undo:
+      "add user to group": "sudo gpasswd -d {user} {group}"
+      "remove user from group": "sudo gpasswd -a {user} {group}"
+    related_commands:
+      - groupadd
+      - groupdel
+      - usermod
+      - groups
+
+  - name: su
+    description: "Switch to another user account or the superuser within the current shell"
+    common_intents:
+      - intent: "switch to the root user"
+        alternate_phrasings:
+          - "su"
+          - "become root"
+          - "I need a root shell"
+          - "get me a superuser shell"
+          - "escalate to root"
+        pattern: "su"
+        example: "su"
+      - intent: "switch to another user account"
+        alternate_phrasings:
+          - "su {username}"
+          - "become {username}"
+          - "switch to user {username}"
+          - "log in as {username}"
+          - "open a shell as {username}"
+        pattern: "su {username}"
+        example: "su alice"
+      - intent: "switch to a user and simulate a full login shell"
+        alternate_phrasings:
+          - "su - {username}"
+          - "switch to {username} and load their full environment"
+          - "become {username} with their complete login environment"
+          - "full login as {username}"
+          - "su with environment for {username}"
+        pattern: "su - {username}"
+        example: "su - alice"
+      - intent: "run a single command as another user"
+        alternate_phrasings:
+          - "su - {username} -c '{command}'"
+          - "run {command} as {username}"
+          - "execute one command as {username} without opening a full shell"
+          - "as {username}, run {command}"
+        pattern: "su - {username} -c \"{command}\""
+        example: "su - alice -c \"ls /home/alice\""
+    key_flags:
+      - flag: "-  (dash)"
+        meaning: "Simulate a full login shell, loading the target user's environment"
+      - flag: "-c / --command"
+        meaning: "Execute a single command instead of opening an interactive shell"
+      - flag: "-s / --shell"
+        meaning: "Use a specific shell instead of the target user's default"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - switching to root
+      blocked_patterns: []
+    undo:
+      "switch user": "exit  # returns to previous user session"
+    related_commands:
+      - sudo
+      - id
+      - whoami
+
+  - name: sudo
+    description: "Execute a command as the superuser or another user"
+    common_intents:
+      - intent: "run a command as root"
+        alternate_phrasings:
+          - "sudo {command}"
+          - "run {command} with superuser privileges"
+          - "I need root to run {command}"
+          - "elevate and run {command}"
+          - "permission denied, retry with sudo"
+        pattern: "sudo {command}"
+        example: "sudo apt update"
+      - intent: "run a command as a specific user"
+        alternate_phrasings:
+          - "sudo -u {user} {command}"
+          - "execute {command} as {user} not root"
+          - "run {command} under {user}'s identity"
+          - "impersonate {user} to run {command}"
+        pattern: "sudo -u {user} {command}"
+        example: "sudo -u www-data ls /var/www"
+      - intent: "open an interactive root shell"
+        alternate_phrasings:
+          - "sudo -i"
+          - "get a root shell with sudo"
+          - "sudo login shell"
+          - "I need a persistent root session"
+          - "root shell without knowing root password"
+        pattern: "sudo -i"
+        example: "sudo -i"
+      - intent: "list allowed sudo commands for current user"
+        alternate_phrasings:
+          - "sudo -l"
+          - "what can I run with sudo"
+          - "show my sudo permissions"
+          - "which commands am I allowed to sudo"
+          - "check what sudo privileges I have"
+        pattern: "sudo -l"
+        example: "sudo -l"
+      - intent: "repeat the previous command with sudo"
+        alternate_phrasings:
+          - "sudo !!"
+          - "run that last command again with sudo"
+          - "I forgot sudo, rerun the last command"
+          - "oops, add sudo to what I just typed"
+        pattern: "sudo !!"
+        example: "sudo !!"
+      - intent: "run a command preserving the current user's environment"
+        alternate_phrasings:
+          - "sudo -E {command}"
+          - "sudo but keep my environment variables"
+          - "elevate without losing my env vars"
+          - "preserve environment when running as root"
+        pattern: "sudo -E {command}"
+        example: "sudo -E env"
+    key_flags:
+      - flag: "-u / --user"
+        meaning: "Run as a specified user instead of root"
+      - flag: "-i / --login"
+        meaning: "Run a login shell as the target user"
+      - flag: "-s / --shell"
+        meaning: "Run a shell without loading login-specific files"
+      - flag: "-l / --list"
+        meaning: "List allowed and forbidden commands for current user"
+      - flag: "-E / --preserve-env"
+        meaning: "Preserve the caller's environment variables"
+      - flag: "-e / --edit"
+        meaning: "Edit a file safely using the user's EDITOR"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - running a root shell (sudo -i or sudo -s)
+        - commands that modify system state
+      blocked_patterns: []
+    undo:
+      "command run as root": "depends on the command executed"
+    related_commands:
+      - su
+      - visudo
+      - id
+
+  - name: visudo
+    description: "Safely edit the sudoers file with syntax validation"
+    common_intents:
+      - intent: "edit the sudoers file"
+        alternate_phrasings:
+          - "sudo visudo"
+          - "open the sudoers file for editing"
+          - "modify sudo permissions"
+          - "I need to add someone to the sudoers file"
+          - "configure who can use sudo"
+        pattern: "sudo visudo"
+        example: "sudo visudo"
+      - intent: "check the sudoers file for syntax errors"
+        alternate_phrasings:
+          - "visudo -c"
+          - "validate the sudoers file without editing"
+          - "is the sudoers file valid"
+          - "check sudoers for errors"
+          - "lint the sudoers config"
+        pattern: "sudo visudo -c"
+        example: "sudo visudo -c"
+      - intent: "edit the sudoers file with a specific editor"
+        alternate_phrasings:
+          - "EDITOR=nano sudo visudo"
+          - "open sudoers in nano instead of vi"
+          - "use a different editor for visudo"
+          - "visudo with vim"
+        pattern: "sudo EDITOR={editor} visudo"
+        example: "sudo EDITOR=nano visudo"
+    key_flags:
+      - flag: "-c / --check"
+        meaning: "Check the sudoers file for syntax errors without editing"
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - any edit to the sudoers file
+      blocked_patterns:
+        - "nano /etc/sudoers  # edit directly without visudo — no syntax check"
+        - "vim /etc/sudoers   # edit directly without visudo — no syntax check"
+        - "echo ... >> /etc/sudoers  # appending without visudo"
+    undo:
+      "edited sudoers incorrectly": "boot to recovery mode or use pkexec visudo to restore"
+    related_commands:
+      - sudo
+      - su
+
+  - name: chage
+    description: "Change user account and password expiry information"
+    common_intents:
+      - intent: "show password and account expiry information for a user"
+        alternate_phrasings:
+          - "chage -l {username}"
+          - "when does {username}'s password expire"
+          - "show account aging info for {username}"
+          - "check if {username}'s account is about to expire"
+          - "list password expiry details for {username}"
+        pattern: "chage -l {username}"
+        example: "chage -l alice"
+      - intent: "set a maximum password age to force regular password changes"
+        alternate_phrasings:
+          - "chage -M {days} {username}"
+          - "require {username} to change their password every {days} days"
+          - "set password max age for {username}"
+          - "force periodic password rotation for {username}"
+          - "password expires after {days} days for {username}"
+        pattern: "sudo chage -M {days} {username}"
+        example: "sudo chage -M 90 alice"
+      - intent: "force a user to change their password at next login"
+        alternate_phrasings:
+          - "chage -d 0 {username}"
+          - "expire {username}'s password immediately"
+          - "make {username} reset their password next time they log in"
+          - "require immediate password change for {username}"
+          - "{username} must change their password on next login"
+        pattern: "sudo chage -d 0 {username}"
+        example: "sudo chage -d 0 alice"
+      - intent: "set an account expiration date"
+        alternate_phrasings:
+          - "chage -E {date} {username}"
+          - "make {username}'s account expire on {date}"
+          - "disable {username}'s account automatically on {date}"
+          - "set account expiry for {username}"
+          - "temporary account for {username} until {date}"
+        pattern: "sudo chage -E {YYYY-MM-DD} {username}"
+        example: "sudo chage -E 2025-12-31 alice"
+      - intent: "disable password expiration for a user"
+        alternate_phrasings:
+          - "chage -M -1 {username}"
+          - "make {username}'s password never expire"
+          - "disable password aging for {username}"
+          - "remove password expiry for {username}"
+          - "turn off forced password rotation for {username}"
+        pattern: "sudo chage -M -1 {username}"
+        example: "sudo chage -M -1 alice"
+    key_flags:
+      - flag: "-l / --list"
+        meaning: "List account aging information"
+      - flag: "-M / --maxdays"
+        meaning: "Maximum number of days a password is valid (-1 disables)"
+      - flag: "-m / --mindays"
+        meaning: "Minimum days between password changes"
+      - flag: "-d / --lastday"
+        meaning: "Set the last password change date (0 forces change at next login)"
+      - flag: "-E / --expiredate"
+        meaning: "Account expiration date in YYYY-MM-DD format (-1 removes expiry)"
+      - flag: "-W / --warndays"
+        meaning: "Days of warning before password expiration"
+    safety:
+      level: moderate
+      requires_sudo: true
+      confirmation_required_for:
+        - setting account expiration date
+        - forcing immediate password expiry
+      blocked_patterns: []
+    undo:
+      "set account expiry": "sudo chage -E -1 {username}  # removes expiry"
+      "set max password age": "sudo chage -M -1 {username}  # disables aging"
+    related_commands:
+      - passwd
+      - usermod
+      - lastlog
+
+  - name: id
+    description: "Display UID, GID, and group memberships for a user"
+    common_intents:
+      - intent: "show current user's UID, GID, and all group memberships"
+        alternate_phrasings:
+          - "id"
+          - "who am I and what groups am I in"
+          - "show my user and group IDs"
+          - "what is my UID"
+          - "full identity info for current user"
+        pattern: "id"
+        example: "id"
+      - intent: "show identity information for a specific user"
+        alternate_phrasings:
+          - "id {username}"
+          - "what UID and groups does {username} have"
+          - "show {username}'s user and group info"
+          - "get UID for {username}"
+          - "check group membership for {username}"
+        pattern: "id {username}"
+        example: "id alice"
+      - intent: "show only the current username"
+        alternate_phrasings:
+          - "id -un"
+          - "just show my username, not all the IDs"
+          - "print only the username"
+          - "whoami alternative with id"
+        pattern: "id -un"
+        example: "id -un"
+      - intent: "show only the numeric UID"
+        alternate_phrasings:
+          - "id -u"
+          - "what is my numeric user ID"
+          - "get my UID as a number"
+          - "just the UID number"
+        pattern: "id -u"
+        example: "id -u"
+    key_flags:
+      - flag: "-u / --user"
+        meaning: "Print only the effective UID"
+      - flag: "-g / --group"
+        meaning: "Print only the effective GID"
+      - flag: "-G / --groups"
+        meaning: "Print all group IDs"
+      - flag: "-n / --name"
+        meaning: "Print name instead of numeric ID (combine with -u, -g, or -G)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - whoami
+      - groups
+      - su
+
+  - name: whoami
+    description: "Print the effective username of the current user"
+    common_intents:
+      - intent: "print the current effective username"
+        alternate_phrasings:
+          - "whoami"
+          - "who am I logged in as"
+          - "what user is this shell running as"
+          - "am I root right now"
+          - "show current username"
+        pattern: "whoami"
+        example: "whoami"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - id
+      - su
+      - sudo
+
+  - name: last
+    description: "Show the history of user logins and system reboots"
+    common_intents:
+      - intent: "show recent login history for all users"
+        alternate_phrasings:
+          - "last"
+          - "who has logged in recently"
+          - "show login history"
+          - "recent logins on this system"
+          - "who has been on this machine"
+        pattern: "last"
+        example: "last"
+      - intent: "show login history for a specific user"
+        alternate_phrasings:
+          - "last {username}"
+          - "when has {username} last logged in"
+          - "show all logins for {username}"
+          - "login history for {username}"
+          - "has {username} been on recently"
+        pattern: "last {username}"
+        example: "last alice"
+      - intent: "show recent reboots"
+        alternate_phrasings:
+          - "last reboot"
+          - "when was this system last rebooted"
+          - "show reboot history"
+          - "how many times has this machine restarted"
+          - "list all system reboots"
+        pattern: "last reboot"
+        example: "last reboot"
+      - intent: "limit output to the N most recent logins"
+        alternate_phrasings:
+          - "last -n {count}"
+          - "show only the last {count} logins"
+          - "most recent {count} login entries"
+          - "last 10 logins"
+        pattern: "last -n {count}"
+        example: "last -n 10"
+      - intent: "show logins since a specific time"
+        alternate_phrasings:
+          - "last -s {time}"
+          - "show logins in the last week"
+          - "who logged in during the past 7 days"
+          - "login history since {time}"
+          - "recent logins from last 24 hours"
+        pattern: "last -s {time}"
+        example: "last -s -7days"
+    key_flags:
+      - flag: "-n / --limit"
+        meaning: "Limit output to N entries"
+      - flag: "-s / --since"
+        meaning: "Display records since specified time (e.g., -7days, yesterday)"
+      - flag: "-F / --fulltimes"
+        meaning: "Print full date and time for all entries"
+      - flag: "-a / --hostlast"
+        meaning: "Display hostname in last column to prevent truncation"
+      - flag: "-i / --ip"
+        meaning: "Display IP address instead of hostname"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - lastlog
+      - who
+      - w
+
+  - name: lastlog
+    description: "Show the most recent login of all users or a specific user"
+    common_intents:
+      - intent: "show the most recent login for every user"
+        alternate_phrasings:
+          - "lastlog"
+          - "when did each user last log in"
+          - "show last login time for all users"
+          - "which accounts have never logged in"
+          - "full last-login report for all accounts"
+        pattern: "lastlog"
+        example: "lastlog"
+      - intent: "show the most recent login for a specific user"
+        alternate_phrasings:
+          - "lastlog --user {username}"
+          - "when did {username} last log in"
+          - "last login time for {username}"
+          - "check if {username} has logged in recently"
+          - "lastlog for {username}"
+        pattern: "lastlog --user {username}"
+        example: "lastlog --user alice"
+      - intent: "show users who have not logged in recently"
+        alternate_phrasings:
+          - "lastlog --before {days}"
+          - "accounts that haven't logged in for more than {days} days"
+          - "find stale user accounts"
+          - "who hasn't logged in for a while"
+          - "dormant accounts older than {days} days"
+        pattern: "lastlog --before {days}"
+        example: "lastlog --before 90"
+    key_flags:
+      - flag: "--user / -u"
+        meaning: "Show lastlog record for a specific user"
+      - flag: "--before / -b"
+        meaning: "Show records for logins older than N days"
+      - flag: "--time / -t"
+        meaning: "Show records for logins more recent than N days"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: {}
+    related_commands:
+      - last
+      - who
+      - chage

@@ -1,0 +1,864 @@
+domain: ssh-remote
+description: "Secure shell connections, key management, file transfer, and tunneling"
+related_domains:
+  - networking
+  - permissions-security
+  - file-operations
+
+commands:
+
+  - name: ssh
+    description: "Open an encrypted shell session or execute commands on a remote host"
+    common_intents:
+      - intent: "connect to a remote host as a specific user"
+        alternate_phrasings:
+          - "ssh user@host"
+          - "I need to open a terminal session on a remote machine using my SSH credentials"
+          - "ugh I keep getting connection refused, just log me into the server"
+          - "log into a box"
+          - "remote into the server as deploy user"
+        pattern: "ssh {user}@{host}"
+        example: "ssh deploy@192.168.1.10"
+
+      - intent: "connect to a remote host on a non-standard port"
+        alternate_phrasings:
+          - "ssh -p port user@host"
+          - "the server listens on a custom port, not 22, I need to connect there"
+          - "ssh on port 2222"
+          - "connect to host using alternate SSH port"
+        pattern: "ssh -p {port} {user}@{host}"
+        example: "ssh -p 2222 admin@myserver.example.com"
+
+      - intent: "connect using a specific private key file"
+        alternate_phrasings:
+          - "ssh -i keyfile user@host"
+          - "I have a PEM or identity file and need to authenticate with it instead of my default key"
+          - "auth keeps failing, let me specify the exact key to use"
+          - "ssh with a pem file"
+          - "log in using ~/.ssh/id_deploy"
+        pattern: "ssh -i {path/to/key} {user}@{host}"
+        example: "ssh -i ~/.ssh/id_ed25519 ubuntu@ec2-host.example.com"
+
+      - intent: "run a single command on the remote host without opening an interactive shell"
+        alternate_phrasings:
+          - "ssh user@host 'command'"
+          - "I want to execute one command over SSH and get the output back locally"
+          - "run a script remotely without logging in interactively"
+          - "ssh and run df -h then exit"
+        pattern: "ssh {user}@{host} '{command}'"
+        example: "ssh ops@web01 'df -h /var/log'"
+
+      - intent: "connect through a jump host to reach an internal server"
+        alternate_phrasings:
+          - "ssh -J jumphost user@target"
+          - "the target machine is behind a bastion and not directly reachable from my laptop"
+          - "hop through a bastion to get to the internal box"
+          - "proxy jump to internal host"
+          - "use a jump server to reach a private network host"
+        pattern: "ssh -J {user}@{jump_host} {user}@{target_host}"
+        example: "ssh -J ec2-user@bastion.example.com ubuntu@10.0.1.50"
+
+      - intent: "set up a local port forward (forward localhost port to remote service)"
+        alternate_phrasings:
+          - "ssh -L localport:remotehost:remoteport user@host -N"
+          - "I need to access a remote service on its private port as if it were running on my machine"
+          - "tunnel a database port to localhost so I can connect with a local GUI client"
+          - "forward port 5432 from the server to my laptop"
+          - "local port forwarding over SSH"
+        pattern: "ssh -L {local_port}:{remote_host}:{remote_port} -N -T {user}@{ssh_host}"
+        example: "ssh -L 5432:localhost:5432 -N -T admin@db-server.example.com"
+
+      - intent: "set up a remote port forward (expose local port on the remote side)"
+        alternate_phrasings:
+          - "ssh -R remoteport:localhost:localport user@host -N"
+          - "I want the remote server to be able to reach a service running on my local machine"
+          - "reverse tunnel so the server can reach my local dev service"
+          - "open a reverse SSH tunnel"
+          - "expose my local port 8080 on the remote machine"
+        pattern: "ssh -R {remote_port}:localhost:{local_port} -N -T {user}@{ssh_host}"
+        example: "ssh -R 9000:localhost:8080 -N -T user@jump.example.com"
+
+      - intent: "create a SOCKS proxy for routing traffic through the remote host"
+        alternate_phrasings:
+          - "ssh -D port user@host -N"
+          - "I need a dynamic SOCKS5 proxy tunneled through the server so my browser traffic goes through it"
+          - "set up a SOCKS proxy on port 1080 through my server"
+          - "route browser traffic through the server"
+          - "dynamic port forwarding / SOCKS5 via SSH"
+        pattern: "ssh -D {local_port} -N -q {user}@{host}"
+        example: "ssh -D 1080 -N -q user@proxy.example.com"
+
+      - intent: "forward X11 display to run a graphical application remotely"
+        alternate_phrasings:
+          - "ssh -X user@host"
+          - "I want to run a GUI application on the server but see it on my local screen"
+          - "X forwarding over SSH"
+          - "open a remote graphical program locally"
+        pattern: "ssh -X {user}@{host}"
+        example: "ssh -X user@workstation.example.com"
+
+      - intent: "forward the local SSH agent to the remote host"
+        alternate_phrasings:
+          - "ssh -A user@host"
+          - "I need to be able to SSH from the remote server to a third server using my local keys"
+          - "agent forwarding so I can hop from server to server"
+          - "pass my keys along to the remote machine"
+        pattern: "ssh -A {user}@{host}"
+        example: "ssh -A deploy@build-server.example.com"
+
+    key_flags:
+      - flag: "-i {keyfile}"
+        meaning: "Use a specific private key (identity file) for authentication"
+      - flag: "-p {port}"
+        meaning: "Connect to the specified port instead of 22"
+      - flag: "-L {local}:{rhost}:{rport}"
+        meaning: "Local port forward: bind local port, tunnel to rhost:rport via the SSH server"
+      - flag: "-R {rport}:localhost:{lport}"
+        meaning: "Remote port forward: expose a local port on the remote machine"
+      - flag: "-D {port}"
+        meaning: "Dynamic SOCKS proxy on the given local port"
+      - flag: "-J {jump_host}"
+        meaning: "Connect via a jump/bastion host"
+      - flag: "-A"
+        meaning: "Forward the local SSH agent to the remote host"
+      - flag: "-X"
+        meaning: "Enable X11 forwarding"
+      - flag: "-N"
+        meaning: "Do not execute a remote command (used for tunnels)"
+      - flag: "-T"
+        meaning: "Disable pseudo-TTY allocation (used with -N for pure tunnels)"
+      - flag: "-t"
+        meaning: "Force pseudo-TTY allocation (needed for interactive remote commands)"
+      - flag: "-v / -vv / -vvv"
+        meaning: "Verbose output for debugging connection issues"
+
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "Connecting to a new host not in known_hosts (fingerprint prompt)"
+        - "Commands that modify remote system state"
+      blocked_patterns:
+        - "ssh -o StrictHostKeyChecking=no"
+        - "ssh -o StrictHostKeyChecking=accept-new in production automation"
+        - "Batch scripts that pipe passwords via stdin without key-based auth"
+
+    undo:
+      "terminate a hanging session": "Press Enter, then type ~."
+      "kill a local port-forward tunnel": "Kill the ssh process holding the tunnel (kill {pid} or Ctrl-C)"
+
+    related_commands:
+      - scp
+      - rsync
+      - sftp
+      - ssh-keygen
+      - ssh-agent
+      - ssh-add
+      - ssh-copy-id
+      - ssh-keyscan
+      - sshd
+
+  - name: scp
+    description: "Copy files between local and remote hosts over SSH"
+    common_intents:
+      - intent: "copy a local file to a remote host"
+        alternate_phrasings:
+          - "scp localfile user@host:/remote/path"
+          - "I need to upload a file to the server over SSH"
+          - "push a file to the remote machine"
+          - "send a file to the server"
+          - "copy config.yml up to the deployment server"
+        pattern: "scp {path/to/local_file} {user}@{host}:{path/to/remote_dest}"
+        example: "scp ./deploy.tar.gz ec2-user@10.0.0.5:/tmp/deploy.tar.gz"
+
+      - intent: "download a file from a remote host to the local machine"
+        alternate_phrasings:
+          - "scp user@host:/remote/file /local/path"
+          - "I need to pull a file off the server"
+          - "grab a log file from the remote machine"
+          - "fetch a remote file over SSH"
+          - "download /var/log/app.log from the server"
+        pattern: "scp {user}@{host}:{path/to/remote_file} {path/to/local_dest}"
+        example: "scp ops@web01:/var/log/nginx/error.log ./error.log"
+
+      - intent: "recursively copy a directory from remote to local"
+        alternate_phrasings:
+          - "scp -r user@host:/remote/dir /local/dir"
+          - "download an entire directory from the server"
+          - "pull down the whole folder recursively"
+          - "copy a remote folder and all its contents locally"
+        pattern: "scp -r {user}@{host}:{path/to/remote_dir} {path/to/local_dir}"
+        example: "scp -r ubuntu@build-server:/opt/artifacts ./artifacts"
+
+      - intent: "copy a file to a remote host on a non-standard SSH port"
+        alternate_phrasings:
+          - "scp -P port file user@host:/path"
+          - "the server uses a custom SSH port, how do I scp to it"
+          - "upload file but SSH is on port 2222"
+        pattern: "scp -P {port} {path/to/local_file} {user}@{host}:{path/to/remote_dest}"
+        example: "scp -P 2222 backup.sql admin@myhost.example.com:/backups/"
+
+      - intent: "copy a file using a specific SSH identity key"
+        alternate_phrasings:
+          - "scp -i keyfile file user@host:/path"
+          - "I need to authenticate with a specific private key when copying"
+          - "use a pem file with scp"
+        pattern: "scp -i {path/to/key} {path/to/local_file} {user}@{host}:{path/to/remote_dest}"
+        example: "scp -i ~/.ssh/prod_key deploy.zip ubuntu@prod.example.com:/var/app/"
+
+      - intent: "copy a file between two remote hosts from the local machine"
+        alternate_phrasings:
+          - "scp -3 host1:/path host2:/path"
+          - "transfer a file from one remote server to another via my local machine"
+          - "copy between two servers without sshing into either"
+        pattern: "scp -3 {user}@{host1}:{path} {user}@{host2}:{path}"
+        example: "scp -3 alice@server1.example.com:/tmp/data.tgz bob@server2.example.com:/tmp/"
+
+    key_flags:
+      - flag: "-r"
+        meaning: "Recursively copy a directory and its contents"
+      - flag: "-P {port}"
+        meaning: "Connect on the specified port (note: uppercase P, unlike ssh's lowercase -p)"
+      - flag: "-i {keyfile}"
+        meaning: "Use a specific SSH private key for authentication"
+      - flag: "-3"
+        meaning: "Route transfer between two remote hosts through the local machine"
+      - flag: "-J {jump_host}"
+        meaning: "Copy via a jump/proxy host"
+      - flag: "-v"
+        meaning: "Verbose mode for debugging"
+
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "Overwriting existing remote files (no prompt by default — verify destination path)"
+      blocked_patterns:
+        - "scp with -o StrictHostKeyChecking=no in scripts"
+
+    undo:
+      "accidentally overwritten remote file": "Restore from backup; scp has no built-in undo"
+
+    related_commands:
+      - rsync
+      - sftp
+      - ssh
+
+  - name: rsync
+    description: "Efficiently sync files locally or over SSH, transferring only changed data"
+    common_intents:
+      - intent: "sync a local directory to a remote host over SSH"
+        alternate_phrasings:
+          - "rsync -avz /local/dir user@host:/remote/dir"
+          - "I want to push a folder to the server and only transfer files that changed"
+          - "deploy my files to the server using rsync"
+          - "upload directory with progress and compression"
+          - "mirror local folder to remote"
+        pattern: "rsync -avz {path/to/source/} {user}@{host}:{path/to/dest}"
+        example: "rsync -avz ./dist/ deploy@web01.example.com:/var/www/html/"
+
+      - intent: "sync a remote directory to local (download from server)"
+        alternate_phrasings:
+          - "rsync -avz user@host:/remote/dir /local/dir"
+          - "pull files down from the server using rsync"
+          - "download a remote folder and preserve timestamps"
+          - "fetch the server's directory to my machine"
+        pattern: "rsync -avz {user}@{host}:{path/to/source} {path/to/local_dest}"
+        example: "rsync -avz ops@backup-server.example.com:/backups/db/ ./local-backups/"
+
+      - intent: "sync with archive mode preserving all file metadata"
+        alternate_phrasings:
+          - "rsync -a source dest"
+          - "copy files while keeping permissions, ownership, timestamps, and symlinks intact"
+          - "backup a directory preserving all attributes"
+          - "rsync archive mode"
+        pattern: "rsync -a {path/to/source} {path/to/dest}"
+        example: "rsync -a /home/alice/ /mnt/backup/alice/"
+
+      - intent: "delete files from destination that no longer exist at the source"
+        alternate_phrasings:
+          - "rsync -av --delete source dest"
+          - "I want the destination to be an exact mirror — remove anything not in the source"
+          - "sync and clean up stale files at the destination"
+          - "rsync with delete to mirror exactly"
+        pattern: "rsync -av --delete {path/to/source/} {user}@{host}:{path/to/dest}"
+        example: "rsync -av --delete ./public/ user@webhost.example.com:/var/www/public/"
+
+      - intent: "do a dry run to preview what rsync would transfer"
+        alternate_phrasings:
+          - "rsync -avn source dest"
+          - "I want to see what would be copied without actually copying anything"
+          - "test rsync without making changes"
+          - "preview rsync transfer"
+          - "what would rsync do if I ran it for real"
+        pattern: "rsync -avn {path/to/source} {path/to/dest}"
+        example: "rsync -avn ./dist/ deploy@web01.example.com:/var/www/"
+
+      - intent: "rsync over SSH using a non-standard port"
+        alternate_phrasings:
+          - "rsync -avz -e 'ssh -p port' source user@host:/dest"
+          - "the server's SSH daemon is on a custom port, how do I rsync to it"
+          - "rsync with a specific SSH port"
+        pattern: "rsync -avz -e 'ssh -p {port}' {path/to/source} {user}@{host}:{path/to/dest}"
+        example: "rsync -avz -e 'ssh -p 2222' ./data/ admin@myhost.example.com:/data/"
+
+      - intent: "sync and show transfer progress"
+        alternate_phrasings:
+          - "rsync -avhP source dest"
+          - "I want to see a progress bar while rsync is running"
+          - "show me how far along the transfer is"
+          - "rsync with progress indicator"
+        pattern: "rsync -avhP {path/to/source} {path/to/dest}"
+        example: "rsync -avhP /var/data/ user@archive.example.com:/archive/data/"
+
+    key_flags:
+      - flag: "-a / --archive"
+        meaning: "Archive mode: recursive, preserves symlinks, permissions, timestamps, owner, group"
+      - flag: "-v / --verbose"
+        meaning: "Verbose output showing files as they are transferred"
+      - flag: "-z / --compress"
+        meaning: "Compress data during transfer (useful over slow links)"
+      - flag: "-h / --human-readable"
+        meaning: "Print sizes in human-readable format"
+      - flag: "-P"
+        meaning: "Shorthand for --partial --progress: keep partial files and show progress"
+      - flag: "-n / --dry-run"
+        meaning: "Simulate the transfer without making any changes"
+      - flag: "--delete"
+        meaning: "Delete files at the destination that are absent from the source"
+      - flag: "-e 'ssh -p {port}'"
+        meaning: "Use a custom SSH command (e.g. to specify a non-standard port)"
+      - flag: "--exclude {pattern}"
+        meaning: "Skip files matching the given pattern"
+      - flag: "-u / --update"
+        meaning: "Skip files that are newer on the destination"
+      - flag: "-c / --checksum"
+        meaning: "Use checksums instead of timestamps to detect changed files"
+
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "--delete flag (irreversibly removes destination files not in source)"
+        - "Syncing to root-owned directories"
+      blocked_patterns:
+        - "rsync --delete without --dry-run first on production data"
+
+    undo:
+      "accidentally deleted files via --delete": "Restore from backup; --delete has no undo"
+
+    related_commands:
+      - scp
+      - sftp
+      - ssh
+
+  - name: ssh-keygen
+    description: "Generate, convert, inspect, and manage SSH key pairs"
+    common_intents:
+      - intent: "generate a new SSH key pair interactively"
+        alternate_phrasings:
+          - "ssh-keygen"
+          - "I need to create an SSH key from scratch so I can authenticate without a password"
+          - "make me a new SSH keypair"
+          - "how do I generate an SSH key"
+          - "create SSH keys for this machine"
+        pattern: "ssh-keygen -t ed25519 -C \"{comment}\""
+        example: "ssh-keygen -t ed25519 -C \"alice@laptop\""
+
+      - intent: "generate an ed25519 key with a custom output file"
+        alternate_phrasings:
+          - "ssh-keygen -t ed25519 -f ~/.ssh/keyname"
+          - "I need a named key for a specific server or service, not the default id_ed25519"
+          - "generate a separate key just for GitHub"
+          - "create a dedicated deploy key"
+        pattern: "ssh-keygen -t ed25519 -f {~/.ssh/keyname} -C \"{comment}\""
+        example: "ssh-keygen -t ed25519 -f ~/.ssh/id_github -C \"github-deploy\""
+
+      - intent: "generate a 4096-bit RSA key"
+        alternate_phrasings:
+          - "ssh-keygen -t rsa -b 4096"
+          - "the server only accepts RSA keys, generate a strong one"
+          - "create an RSA 4096 SSH key"
+          - "make an RSA key with 4096 bits"
+        pattern: "ssh-keygen -t rsa -b 4096 -C \"{comment}\""
+        example: "ssh-keygen -t rsa -b 4096 -C \"user@host\""
+
+      - intent: "change or remove the passphrase on an existing private key"
+        alternate_phrasings:
+          - "ssh-keygen -p -f ~/.ssh/keyfile"
+          - "I want to update my key's passphrase without regenerating the key"
+          - "remove the passphrase from my SSH key so it loads without a prompt"
+          - "change the password protecting my private key"
+        pattern: "ssh-keygen -p -f {~/.ssh/keyfile}"
+        example: "ssh-keygen -p -f ~/.ssh/id_ed25519"
+
+      - intent: "show the fingerprint of a key"
+        alternate_phrasings:
+          - "ssh-keygen -l -f ~/.ssh/keyfile"
+          - "I need to verify which key this is by checking its fingerprint"
+          - "what is the fingerprint of my public key"
+          - "print key fingerprint for verification"
+          - "check the fingerprint of a known_hosts key"
+        pattern: "ssh-keygen -l -f {~/.ssh/keyfile}"
+        example: "ssh-keygen -l -f ~/.ssh/id_ed25519.pub"
+
+      - intent: "extract the public key from a private key file"
+        alternate_phrasings:
+          - "ssh-keygen -y -f ~/.ssh/private_key"
+          - "I lost the .pub file but still have the private key, recover the public key"
+          - "regenerate the public key from a private key"
+          - "print the public key for a given private key"
+        pattern: "ssh-keygen -y -f {~/.ssh/private_key}"
+        example: "ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub"
+
+      - intent: "remove a host from known_hosts (after host key change)"
+        alternate_phrasings:
+          - "ssh-keygen -R hostname"
+          - "I'm getting a host key mismatch warning, remove the old entry for that host"
+          - "clear the known_hosts entry for a server after it was rebuilt"
+          - "delete a stale known_hosts record"
+          - "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED — fix it"
+        pattern: "ssh-keygen -R {hostname}"
+        example: "ssh-keygen -R server.example.com"
+
+    key_flags:
+      - flag: "-t {type}"
+        meaning: "Key type: ed25519 (recommended), rsa, ecdsa, dsa"
+      - flag: "-b {bits}"
+        meaning: "Key size in bits (meaningful for RSA/DSA; ed25519 ignores this)"
+      - flag: "-f {file}"
+        meaning: "Output filename for the key pair"
+      - flag: "-C {comment}"
+        meaning: "Comment embedded in the public key (conventionally user@host)"
+      - flag: "-p"
+        meaning: "Change the passphrase of an existing private key"
+      - flag: "-l"
+        meaning: "Print the fingerprint of a key"
+      - flag: "-E {md5|sha256}"
+        meaning: "Hash algorithm used when printing fingerprints"
+      - flag: "-y"
+        meaning: "Read a private key and output the corresponding public key"
+      - flag: "-R {hostname}"
+        meaning: "Remove all keys for the specified hostname from known_hosts"
+      - flag: "-a {rounds}"
+        meaning: "Number of KDF rounds; higher is slower but more brute-force resistant"
+
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for:
+        - "Overwriting an existing key file (ssh-keygen prompts interactively)"
+      blocked_patterns: []
+
+    undo:
+      "generated key with wrong parameters": "Delete the files and regenerate; private key is not recoverable if lost"
+      "removed a host from known_hosts": "Re-add it automatically on next ssh connection (or manually with ssh-keyscan)"
+
+    related_commands:
+      - ssh-copy-id
+      - ssh-add
+      - ssh-agent
+      - ssh-keyscan
+
+  - name: ssh-agent
+    description: "Start an in-memory SSH key agent that holds decrypted private keys for the session"
+    common_intents:
+      - intent: "start the SSH agent in the current shell"
+        alternate_phrasings:
+          - "eval $(ssh-agent)"
+          - "I need to start the SSH agent so I can add my keys and avoid re-entering my passphrase"
+          - "ssh-agent is not running, start it and wire it to my shell"
+          - "spin up ssh-agent"
+          - "how do I start the SSH agent"
+        pattern: "eval $(ssh-agent)"
+        example: "eval $(ssh-agent)"
+
+      - intent: "kill the currently running SSH agent"
+        alternate_phrasings:
+          - "ssh-agent -k"
+          - "I want to terminate the SSH agent and flush all loaded keys from memory"
+          - "stop the SSH agent"
+          - "kill ssh-agent and clear keys"
+        pattern: "ssh-agent -k"
+        example: "ssh-agent -k"
+
+    key_flags:
+      - flag: "-k"
+        meaning: "Kill the current agent (uses SSH_AGENT_PID from environment)"
+      - flag: "-s"
+        meaning: "Output Bourne shell commands (default on most systems)"
+      - flag: "-c"
+        meaning: "Output C-shell commands"
+      - flag: "-t {seconds}"
+        meaning: "Set a maximum lifetime for keys added to the agent"
+
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+
+    undo:
+      "started agent and want to stop it": "ssh-agent -k"
+
+    related_commands:
+      - ssh-add
+      - ssh
+      - ssh-keygen
+
+  - name: ssh-add
+    description: "Add private keys to (or manage keys in) a running SSH agent"
+    common_intents:
+      - intent: "add the default SSH keys to the agent"
+        alternate_phrasings:
+          - "ssh-add"
+          - "load my default private keys into the SSH agent so I stop getting passphrase prompts"
+          - "add my keys to the agent"
+          - "cache my SSH credentials in the agent"
+          - "I just started ssh-agent, now load my keys"
+        pattern: "ssh-add"
+        example: "ssh-add"
+
+      - intent: "add a specific private key to the agent"
+        alternate_phrasings:
+          - "ssh-add ~/.ssh/keyfile"
+          - "I have a named key that isn't the default, add it to the agent"
+          - "load a specific key into ssh-agent"
+          - "add the deploy key to the agent"
+        pattern: "ssh-add {path/to/private_key}"
+        example: "ssh-add ~/.ssh/id_github"
+
+      - intent: "list keys currently loaded in the agent"
+        alternate_phrasings:
+          - "ssh-add -l"
+          - "which keys are currently loaded in the SSH agent"
+          - "show me what keys the agent is holding"
+          - "check if my key is in the agent"
+          - "list agent keys"
+        pattern: "ssh-add -l"
+        example: "ssh-add -l"
+
+      - intent: "remove a specific key from the agent"
+        alternate_phrasings:
+          - "ssh-add -d ~/.ssh/keyfile"
+          - "I want to remove one particular key from the agent without stopping it"
+          - "unload a specific key from ssh-agent"
+          - "delete a key from the agent"
+        pattern: "ssh-add -d {path/to/private_key}"
+        example: "ssh-add -d ~/.ssh/id_old_server"
+
+      - intent: "remove all keys from the agent"
+        alternate_phrasings:
+          - "ssh-add -D"
+          - "flush all loaded keys out of the SSH agent"
+          - "clear the agent's keychain"
+          - "remove every key from ssh-agent"
+          - "wipe the agent without killing it"
+        pattern: "ssh-add -D"
+        example: "ssh-add -D"
+
+    key_flags:
+      - flag: "-l"
+        meaning: "List fingerprints of all keys currently held by the agent"
+      - flag: "-L"
+        meaning: "List full public keys of all keys currently held by the agent"
+      - flag: "-d {keyfile}"
+        meaning: "Remove the specified key from the agent"
+      - flag: "-D"
+        meaning: "Remove all keys from the agent"
+      - flag: "-K"
+        meaning: "Add key to the agent and store passphrase in the system keychain (macOS)"
+      - flag: "-t {seconds}"
+        meaning: "Set a lifetime for the key in the agent"
+
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+
+    undo:
+      "added wrong key": "ssh-add -d {path/to/key}"
+      "added all keys and want to clear": "ssh-add -D"
+
+    related_commands:
+      - ssh-agent
+      - ssh
+      - ssh-keygen
+
+  - name: ssh-copy-id
+    description: "Install a local public key into a remote user's authorized_keys file"
+    common_intents:
+      - intent: "copy the default public key to a remote host to enable passwordless SSH"
+        alternate_phrasings:
+          - "ssh-copy-id user@host"
+          - "I want to set up passwordless SSH login to a server by copying my public key"
+          - "I'm tired of typing my password every time, push my key to the server"
+          - "authorize my key on the remote machine"
+          - "set up key-based SSH auth to a server"
+        pattern: "ssh-copy-id {user}@{host}"
+        example: "ssh-copy-id alice@server.example.com"
+
+      - intent: "copy a specific public key to a remote host"
+        alternate_phrasings:
+          - "ssh-copy-id -i ~/.ssh/keyfile.pub user@host"
+          - "I want to install a named key, not the default one, on the server"
+          - "copy a specific pub key to authorized_keys"
+          - "push a non-default key to the remote"
+        pattern: "ssh-copy-id -i {path/to/key.pub} {user}@{host}"
+        example: "ssh-copy-id -i ~/.ssh/id_github.pub deploy@ci.example.com"
+
+      - intent: "copy a public key to a remote host on a non-standard port"
+        alternate_phrasings:
+          - "ssh-copy-id -p port user@host"
+          - "the server uses a custom SSH port, how do I copy my key there"
+          - "install my key on a host that's not on port 22"
+          - "ssh-copy-id on port 2222"
+        pattern: "ssh-copy-id -p {port} {user}@{host}"
+        example: "ssh-copy-id -p 2222 -i ~/.ssh/id_ed25519.pub admin@myhost.example.com"
+
+    key_flags:
+      - flag: "-i {keyfile.pub}"
+        meaning: "Specify which public key to install (defaults to keys from ssh-add -L)"
+      - flag: "-p {port}"
+        meaning: "Connect on the specified port"
+      - flag: "-n"
+        meaning: "Dry run: print what would be done without modifying authorized_keys"
+
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for:
+        - "Appending to authorized_keys on sensitive accounts (root, service users)"
+      blocked_patterns:
+        - "Replacing (not appending to) authorized_keys manually — use ssh-copy-id to append safely"
+
+    undo:
+      "accidentally authorized a key": "Manually edit ~/.ssh/authorized_keys on the remote host and remove the offending line"
+
+    related_commands:
+      - ssh-keygen
+      - ssh
+      - ssh-add
+
+  - name: sftp
+    description: "Interactive encrypted file transfer client over SSH"
+    common_intents:
+      - intent: "open an interactive SFTP session to a remote host"
+        alternate_phrasings:
+          - "sftp user@host"
+          - "I need an interactive file-transfer session where I can browse and upload/download"
+          - "connect to a server with SFTP"
+          - "open sftp to the remote box"
+          - "start an sftp session"
+        pattern: "sftp {user}@{host}"
+        example: "sftp alice@files.example.com"
+
+      - intent: "connect via SFTP on a non-standard port"
+        alternate_phrasings:
+          - "sftp -P port user@host"
+          - "the SFTP server is on a custom port, connect there"
+          - "sftp on port 2222"
+        pattern: "sftp -P {port} {user}@{host}"
+        example: "sftp -P 2222 alice@files.example.com"
+
+      - intent: "download a file from the remote host inside an SFTP session"
+        alternate_phrasings:
+          - "get /remote/file"
+          - "download a file while inside the sftp interactive shell"
+          - "pull a file from the server via sftp"
+          - "get the remote file and save it locally"
+        pattern: "get {path/to/remote_file} {path/to/local_dest}"
+        example: "get /var/exports/report.csv ./report.csv"
+
+      - intent: "upload a file to the remote host inside an SFTP session"
+        alternate_phrasings:
+          - "put /local/file"
+          - "upload a file while inside the sftp shell"
+          - "push a file to the server via sftp"
+          - "send a local file to the remote"
+        pattern: "put {path/to/local_file} {path/to/remote_dest}"
+        example: "put ./config.tar.gz /opt/app/config.tar.gz"
+
+      - intent: "recursively download a directory inside an SFTP session"
+        alternate_phrasings:
+          - "get -R /remote/dir"
+          - "download a whole folder from the server over sftp"
+          - "recursive sftp download"
+          - "pull an entire remote directory"
+        pattern: "get -R {path/to/remote_dir}"
+        example: "get -R /var/www/media ./media"
+
+    key_flags:
+      - flag: "-P {port}"
+        meaning: "Connect on the specified port (uppercase P)"
+      - flag: "-i {keyfile}"
+        meaning: "Use a specific private key for authentication"
+      - flag: "-b {batchfile}"
+        meaning: "Read commands from a batch file (non-interactive mode)"
+      - flag: "-r"
+        meaning: "Recursively copy directories (when used with get/put)"
+
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "Overwriting remote files via put (sftp will overwrite without prompting by default)"
+      blocked_patterns: []
+
+    undo:
+      "uploaded wrong file": "Reconnect and use put to upload the correct version"
+
+    related_commands:
+      - scp
+      - rsync
+      - ssh
+
+  - name: sshd
+    description: "SSH daemon — the server-side process that accepts incoming SSH connections"
+    common_intents:
+      - intent: "start the SSH daemon"
+        alternate_phrasings:
+          - "sshd"
+          - "start the SSH server so remote clients can connect"
+          - "launch sshd in the background"
+          - "enable the SSH daemon"
+        pattern: "sudo sshd"
+        example: "sudo sshd"
+
+      - intent: "start the daemon in the foreground for debugging"
+        alternate_phrasings:
+          - "sshd -D -d"
+          - "I need to debug why SSH connections are failing, run sshd in foreground with verbose output"
+          - "run sshd interactively with debug logging"
+          - "troubleshoot sshd by watching it handle a connection"
+        pattern: "sudo sshd -D -d"
+        example: "sudo sshd -D -d"
+
+      - intent: "test the sshd configuration file for syntax errors"
+        alternate_phrasings:
+          - "sshd -t"
+          - "validate the sshd_config before restarting the daemon"
+          - "check if sshd_config has any errors without restarting"
+          - "dry-run the SSH server config"
+          - "lint sshd configuration"
+        pattern: "sudo sshd -t"
+        example: "sudo sshd -t"
+
+      - intent: "restart the SSH service using systemctl"
+        alternate_phrasings:
+          - "systemctl restart sshd"
+          - "I changed sshd_config and need to reload the daemon for changes to take effect"
+          - "restart SSH service after editing config"
+          - "apply sshd_config changes"
+          - "reload the SSH server"
+        pattern: "sudo systemctl restart sshd"
+        example: "sudo systemctl restart sshd"
+
+      - intent: "run the daemon on a non-standard port"
+        alternate_phrasings:
+          - "sshd -p port"
+          - "start a second SSH listener on a custom port for testing"
+          - "launch sshd on port 2222"
+        pattern: "sudo sshd -p {port}"
+        example: "sudo sshd -p 2222"
+
+    key_flags:
+      - flag: "-D"
+        meaning: "Run in foreground (do not detach as a daemon)"
+      - flag: "-d"
+        meaning: "Debug mode: verbose logging of each connection (implies -D)"
+      - flag: "-p {port}"
+        meaning: "Listen on the specified port"
+      - flag: "-t"
+        meaning: "Test the configuration file and exit (does not start the daemon)"
+      - flag: "-f {config}"
+        meaning: "Use a specific configuration file instead of /etc/ssh/sshd_config"
+
+    safety:
+      level: dangerous
+      requires_sudo: true
+      confirmation_required_for:
+        - "Editing /etc/ssh/sshd_config (misconfiguration can lock you out)"
+        - "Restarting sshd over an active remote session"
+        - "Disabling password authentication"
+        - "Enabling root login"
+      blocked_patterns:
+        - "PermitRootLogin yes in sshd_config on internet-facing hosts"
+        - "PasswordAuthentication yes without fail2ban or rate limiting"
+        - "Restarting sshd without first running sshd -t to verify config"
+
+    undo:
+      "locked out after bad sshd_config": "Access via out-of-band console (VNC, IPMI, cloud serial console) and fix /etc/ssh/sshd_config"
+      "accidentally disabled password auth with no key loaded": "Restore config from backup via console access"
+
+    related_commands:
+      - ssh
+      - ssh-keygen
+      - ssh-copy-id
+
+  - name: ssh-keyscan
+    description: "Fetch public host keys from remote SSH servers (for populating known_hosts)"
+    common_intents:
+      - intent: "fetch all public keys from a remote host"
+        alternate_phrasings:
+          - "ssh-keyscan hostname"
+          - "I need to get the SSH host key for a server to verify or add to known_hosts"
+          - "retrieve the host keys of a server"
+          - "scan SSH host keys from a remote machine"
+          - "what are the host keys for this server"
+        pattern: "ssh-keyscan {hostname}"
+        example: "ssh-keyscan server.example.com"
+
+      - intent: "add a host's key to known_hosts to avoid the first-connection fingerprint prompt"
+        alternate_phrasings:
+          - "ssh-keyscan -H hostname >> ~/.ssh/known_hosts"
+          - "pre-authorize a host so SSH doesn't ask me to verify it the first time"
+          - "add the server's fingerprint to known_hosts without SSHing to it manually"
+          - "seed known_hosts with a host's key for scripted automation"
+          - "suppress the unknown host warning in scripts"
+        pattern: "ssh-keyscan -H {hostname} >> ~/.ssh/known_hosts"
+        example: "ssh-keyscan -H deploy.example.com >> ~/.ssh/known_hosts"
+
+      - intent: "fetch a specific key type from a remote host"
+        alternate_phrasings:
+          - "ssh-keyscan -t ed25519 hostname"
+          - "I only want the ed25519 host key, not all key types"
+          - "retrieve just the RSA host key"
+          - "scan for a specific key algorithm"
+        pattern: "ssh-keyscan -t {rsa|ecdsa|ed25519} {hostname}"
+        example: "ssh-keyscan -t ed25519 server.example.com"
+
+      - intent: "scan a host listening on a non-standard SSH port"
+        alternate_phrasings:
+          - "ssh-keyscan -p port hostname"
+          - "the SSH server is not on port 22, scan the host keys from its actual port"
+          - "get host keys from a custom SSH port"
+        pattern: "ssh-keyscan -p {port} {hostname}"
+        example: "ssh-keyscan -p 2222 server.example.com"
+
+    key_flags:
+      - flag: "-H"
+        meaning: "Hash hostnames in the output (recommended when appending to known_hosts)"
+      - flag: "-t {type}"
+        meaning: "Key type to fetch: rsa, ecdsa, ed25519 (comma-separate for multiple)"
+      - flag: "-p {port}"
+        meaning: "Connect on the specified port"
+      - flag: "-T {timeout}"
+        meaning: "Connection timeout in seconds"
+
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for:
+        - "Appending to known_hosts in CI/CD pipelines (verify the key out-of-band when possible)"
+      blocked_patterns:
+        - "Blindly appending ssh-keyscan output to known_hosts without verifying the fingerprint out-of-band in security-sensitive environments"
+
+    undo:
+      "added wrong host key to known_hosts": "ssh-keygen -R {hostname} to remove it, then re-verify"
+
+    related_commands:
+      - ssh-keygen
+      - ssh
+      - ssh-copy-id

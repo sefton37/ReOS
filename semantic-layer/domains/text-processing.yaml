@@ -1,0 +1,1180 @@
+domain: text-processing
+description: "Searching, transforming, filtering, and analyzing text in files and streams"
+related_domains:
+  - file-operations
+  - shell-operations
+
+commands:
+  - name: grep
+    description: "Search for lines matching a pattern in files or stdin"
+    common_intents:
+      - intent: "search for a pattern in a file"
+        alternate_phrasings:
+          - "grep {pattern} {file}"
+          - "find lines containing {pattern} in {file}"
+          - "I need to find every line in {file} that mentions {pattern}"
+          - "look for {pattern} in {file}"
+          - "which lines in {file} have {pattern}"
+        pattern: "grep '{pattern}' {file}"
+        example: "grep 'error' /var/log/syslog"
+      - intent: "search recursively in a directory"
+        alternate_phrasings:
+          - "grep -r"
+          - "search all files under {directory} for {pattern}"
+          - "find {pattern} anywhere inside {directory}"
+          - "recursive grep"
+          - "scan every file in {directory} for {pattern}"
+        pattern: "grep -r '{pattern}' {directory}"
+        example: "grep -r 'TODO' ~/dev/myproject"
+      - intent: "case-insensitive search"
+        alternate_phrasings:
+          - "grep -i"
+          - "find {pattern} regardless of uppercase or lowercase"
+          - "search for {pattern} ignoring case"
+          - "case insensitive grep"
+          - "match {pattern} whether it's capitalized or not"
+        pattern: "grep -i '{pattern}' {file}"
+        example: "grep -i 'error' app.log"
+      - intent: "show line numbers alongside matches"
+        alternate_phrasings:
+          - "grep -n"
+          - "search for {pattern} and tell me which line numbers match"
+          - "grep with line numbers"
+          - "I need to know where in {file} the matches are"
+          - "find {pattern} and show me the line number"
+        pattern: "grep -n '{pattern}' {file}"
+        example: "grep -n 'def main' script.py"
+      - intent: "show lines that do NOT match a pattern"
+        alternate_phrasings:
+          - "grep -v"
+          - "filter out lines containing {pattern}"
+          - "exclude lines matching {pattern}"
+          - "show me everything in {file} except {pattern}"
+          - "invert grep, remove lines with {pattern}"
+        pattern: "grep -v '{pattern}' {file}"
+        example: "grep -v '^#' config.ini"
+      - intent: "show context lines around each match"
+        alternate_phrasings:
+          - "grep -C {n}"
+          - "search for {pattern} and show {n} lines before and after"
+          - "find {pattern} with surrounding context"
+          - "I want to see what's around the matching lines"
+          - "grep with {n} lines of context"
+        pattern: "grep -C {n} '{pattern}' {file}"
+        example: "grep -C 3 'exception' app.log"
+      - intent: "count the number of matching lines"
+        alternate_phrasings:
+          - "grep -c"
+          - "how many lines in {file} match {pattern}"
+          - "count occurrences of {pattern} in {file}"
+          - "just give me the number of matches"
+          - "I don't need the lines, just the count"
+        pattern: "grep -c '{pattern}' {file}"
+        example: "grep -c 'ERROR' server.log"
+      - intent: "list only filenames that contain a match"
+        alternate_phrasings:
+          - "grep -l"
+          - "which files contain {pattern}"
+          - "find files that have {pattern} somewhere in them"
+          - "just give me the filenames, not the matching lines"
+          - "show me which files match, I don't need the content"
+        pattern: "grep -rl '{pattern}' {directory}"
+        example: "grep -rl 'import os' ~/dev"
+      - intent: "search using extended regex"
+        alternate_phrasings:
+          - "grep -E"
+          - "use extended regular expressions with grep"
+          - "grep with egrep syntax"
+          - "search for {pattern} using | or + or ? in the regex"
+          - "grep with full regex support"
+        pattern: "grep -E '{extended_pattern}' {file}"
+        example: "grep -E 'error|warning|fatal' app.log"
+      - intent: "print only the matching portion of each line"
+        alternate_phrasings:
+          - "grep -o"
+          - "extract just the part that matches {pattern}"
+          - "show only the matched text, not the whole line"
+          - "I want the matched strings only"
+          - "pull out matching substrings from {file}"
+        pattern: "grep -o '{pattern}' {file}"
+        example: 'grep -oE ''[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'' access.log'
+    key_flags:
+      - flag: "-r / --recursive"
+        meaning: "Search all files under the given directory recursively"
+      - flag: "-i / --ignore-case"
+        meaning: "Case-insensitive matching"
+      - flag: "-n / --line-number"
+        meaning: "Print line number before each match"
+      - flag: "-v / --invert-match"
+        meaning: "Select lines that do NOT match"
+      - flag: "-l / --files-with-matches"
+        meaning: "Print only names of files that contain at least one match"
+      - flag: "-c / --count"
+        meaning: "Print count of matching lines per file"
+      - flag: "-o / --only-matching"
+        meaning: "Print only the matched part of each line"
+      - flag: "-E / --extended-regexp"
+        meaning: "Use extended regex (enables +, ?, |, {}, ())"
+      - flag: "-F / --fixed-strings"
+        meaning: "Treat pattern as a literal string, not a regex"
+      - flag: "-A {n} / --after-context"
+        meaning: "Show n lines after each match"
+      - flag: "-B {n} / --before-context"
+        meaning: "Show n lines before each match"
+      - flag: "-C {n} / --context"
+        meaning: "Show n lines before and after each match"
+      - flag: "-H / --with-filename"
+        meaning: "Always print the filename before each match"
+      - flag: "-I"
+        meaning: "Ignore binary files"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - awk
+      - sed
+      - ripgrep
+
+  - name: sed
+    description: "Stream editor — search and replace, delete lines, and transform text"
+    common_intents:
+      - intent: "replace text in a stream or file (print to stdout)"
+        alternate_phrasings:
+          - "sed s//"
+          - "substitute {old} with {new} in {file}"
+          - "do a find and replace on {file} but just show the output"
+          - "replace all occurrences of {old} with {new}"
+          - "swap {old} for {new} in the output"
+        pattern: "sed 's/{old}/{new}/g' {file}"
+        example: "sed 's/foo/bar/g' config.txt"
+      - intent: "replace text in a file in-place"
+        alternate_phrasings:
+          - "sed -i"
+          - "find and replace {old} with {new} directly in {file}"
+          - "edit {file} in place, replacing {old} with {new}"
+          - "permanently replace {old} with {new} in {file}"
+          - "rewrite {file} with {old} changed to {new}"
+        pattern: "sed -i 's/{old}/{new}/g' {file}"
+        example: "sed -i 's/localhost/production.host/g' settings.conf"
+      - intent: "delete lines matching a pattern"
+        alternate_phrasings:
+          - "sed /pattern/d"
+          - "remove all lines containing {pattern} from {file}"
+          - "strip out lines matching {pattern}"
+          - "delete blank lines from {file}"
+          - "filter out {pattern} lines"
+        pattern: "sed '/{pattern}/d' {file}"
+        example: "sed '/^#/d' config.ini"
+      - intent: "print a specific line or range of lines"
+        alternate_phrasings:
+          - "sed -n '{n}p'"
+          - "show only line {n} of {file}"
+          - "print lines {start} through {end} of {file}"
+          - "extract a range of lines with sed"
+          - "get just line {n} from {file}"
+        pattern: "sed -n '{start},{end}p' {file}"
+        example: "sed -n '10,20p' large_file.txt"
+    key_flags:
+      - flag: "-i / --in-place"
+        meaning: "Edit the file in place instead of printing to stdout"
+      - flag: "-n / --quiet"
+        meaning: "Suppress default output; use with p to print specific lines"
+      - flag: "-e {script}"
+        meaning: "Add a script/expression to run"
+      - flag: "-f {script_file}"
+        meaning: "Read sed commands from a file"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "sed -i (modifies file in place)"
+      blocked_patterns: []
+    undo: "No automatic undo; back up file before using sed -i (use sed -i.bak to keep a backup)"
+    related_commands:
+      - awk
+      - grep
+      - tr
+
+  - name: awk
+    description: "Pattern-scanning and text-processing language for columnar and structured text"
+    common_intents:
+      - intent: "print a specific column from whitespace-delimited text"
+        alternate_phrasings:
+          - "awk '{print $N}'"
+          - "extract the {n}th field from each line of {file}"
+          - "show column {n} of {file}"
+          - "get the second word on every line"
+          - "pull out field {n} from the output"
+        pattern: "awk '{print ${column}}' {file}"
+        example: "awk '{print $2}' /etc/passwd"
+      - intent: "use a custom field separator"
+        alternate_phrasings:
+          - "awk -F"
+          - "split on {delimiter} and print column {n}"
+          - "parse {file} using {delimiter} as the separator"
+          - "the fields are separated by {delimiter}, give me column {n}"
+          - "awk with comma delimiter"
+        pattern: "awk -F '{delimiter}' '{print ${column}}' {file}"
+        example: "awk -F ':' '{print $1}' /etc/passwd"
+      - intent: "print lines that match a pattern"
+        alternate_phrasings:
+          - "awk '/pattern/'"
+          - "filter lines matching {pattern} using awk"
+          - "print only rows where the line contains {pattern}"
+          - "awk grep equivalent"
+          - "show lines that match {pattern} with awk"
+        pattern: "awk '/{pattern}/' {file}"
+        example: "awk '/ERROR/' app.log"
+      - intent: "sum values in a column"
+        alternate_phrasings:
+          - "awk sum"
+          - "add up all the numbers in column {n} of {file}"
+          - "total the values in field {n}"
+          - "calculate the sum of column {n}"
+          - "aggregate column {n} in {file}"
+        pattern: "awk '{sum += ${column}} END {print sum}' {file}"
+        example: "awk '{sum += $3} END {print sum}' sales.txt"
+      - intent: "print last column of each line"
+        alternate_phrasings:
+          - "awk '{print $NF}'"
+          - "get the last field of every line"
+          - "show the final column regardless of how many columns there are"
+          - "print the last word on each line"
+          - "extract the rightmost field from {file}"
+        pattern: "awk '{print $NF}' {file}"
+        example: "awk '{print $NF}' paths.txt"
+    key_flags:
+      - flag: "-F {delimiter}"
+        meaning: "Set the input field separator character"
+      - flag: "-v {var}={value}"
+        meaning: "Assign a variable before execution begins"
+      - flag: "-f {script_file}"
+        meaning: "Read awk program from a file"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - sed
+      - grep
+      - cut
+
+  - name: cut
+    description: "Extract specific byte ranges, character positions, or delimited fields from each line"
+    common_intents:
+      - intent: "extract a specific field by delimiter"
+        alternate_phrasings:
+          - "cut -d -f"
+          - "split on {delimiter} and get field {n} from each line"
+          - "parse {file} and extract column {n} using {delimiter}"
+          - "get field {n} from a {delimiter}-separated file"
+          - "pull the {n}th column from a delimited file"
+        pattern: "cut -d '{delimiter}' -f {n} {file}"
+        example: "cut -d ':' -f 1 /etc/passwd"
+      - intent: "extract a range of fields"
+        alternate_phrasings:
+          - "cut -f {start}-{end}"
+          - "get fields {start} through {end} from {file}"
+          - "extract columns {start} to {end} using cut"
+          - "give me fields {start}-{end} of each line"
+          - "slice fields {start} to {end} from the output"
+        pattern: "cut -d '{delimiter}' -f {start}-{end} {file}"
+        example: "cut -d ',' -f 2-4 data.csv"
+      - intent: "extract specific character positions"
+        alternate_phrasings:
+          - "cut -c"
+          - "get characters {n} through {m} of each line"
+          - "extract a fixed-width column by character position"
+          - "slice characters {start} to {end} from each line"
+          - "cut by character position not delimiter"
+        pattern: "cut -c {start}-{end} {file}"
+        example: "cut -c 1-8 fixed_width.txt"
+    key_flags:
+      - flag: "-d {delimiter}"
+        meaning: "Use this character as the field delimiter (default is TAB)"
+      - flag: "-f {fields}"
+        meaning: "Select only these fields; ranges like 2-5 and lists like 1,3 are supported"
+      - flag: "-c {characters}"
+        meaning: "Select only these character positions"
+      - flag: "-s / --only-delimited"
+        meaning: "Skip lines that do not contain the delimiter"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - awk
+      - paste
+      - tr
+
+  - name: sort
+    description: "Sort lines of text files alphabetically, numerically, or by field"
+    common_intents:
+      - intent: "sort a file alphabetically"
+        alternate_phrasings:
+          - "sort {file}"
+          - "alphabetize the lines in {file}"
+          - "put {file} in order"
+          - "sort the contents of {file}"
+          - "order lines in {file} from A to Z"
+        pattern: "sort {file}"
+        example: "sort names.txt"
+      - intent: "sort in reverse order"
+        alternate_phrasings:
+          - "sort -r"
+          - "sort {file} from Z to A"
+          - "reverse sort {file}"
+          - "sort descending"
+          - "sort {file} backwards"
+        pattern: "sort -r {file}"
+        example: "sort -r names.txt"
+      - intent: "sort numerically"
+        alternate_phrasings:
+          - "sort -n"
+          - "sort {file} by number not alphabetically"
+          - "numeric sort"
+          - "sort these numbers properly, not lexicographically"
+          - "sort {file} treating values as integers"
+        pattern: "sort -n {file}"
+        example: "sort -n scores.txt"
+      - intent: "sort by a specific field"
+        alternate_phrasings:
+          - "sort -k"
+          - "sort {file} by column {n}"
+          - "sort on the {n}th field using {delimiter} as separator"
+          - "order {file} by a specific column"
+          - "sort using field {n} as the key"
+        pattern: "sort -t '{delimiter}' -k {n} {file}"
+        example: "sort -t ':' -k 3n /etc/passwd"
+      - intent: "remove duplicate lines while sorting"
+        alternate_phrasings:
+          - "sort -u"
+          - "sort and deduplicate {file}"
+          - "sort {file} keeping only unique lines"
+          - "sort unique"
+          - "combine sort and uniq in one step"
+        pattern: "sort -u {file}"
+        example: "sort -u words.txt"
+    key_flags:
+      - flag: "-r / --reverse"
+        meaning: "Sort in descending order"
+      - flag: "-n / --numeric-sort"
+        meaning: "Compare according to numerical value"
+      - flag: "-k {pos} / --key"
+        meaning: "Sort on the field starting at position pos"
+      - flag: "-t {char} / --field-separator"
+        meaning: "Use char as the field delimiter"
+      - flag: "-u / --unique"
+        meaning: "Output only unique lines"
+      - flag: "-f / --ignore-case"
+        meaning: "Case-insensitive sort"
+      - flag: "-R / --random-sort"
+        meaning: "Shuffle lines in random order"
+      - flag: "-o {file}"
+        meaning: "Write output to file instead of stdout (can sort in-place)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - uniq
+      - comm
+
+  - name: uniq
+    description: "Report or filter out adjacent repeated lines in sorted input"
+    common_intents:
+      - intent: "remove duplicate lines from sorted input"
+        alternate_phrasings:
+          - "sort | uniq"
+          - "deduplicate lines in {file}"
+          - "get unique lines from {file}"
+          - "remove duplicate lines"
+          - "I want each unique line only once"
+        pattern: "sort {file} | uniq"
+        example: "sort words.txt | uniq"
+      - intent: "count occurrences of each line"
+        alternate_phrasings:
+          - "uniq -c"
+          - "count how many times each line appears in {file}"
+          - "show frequency of each unique line"
+          - "get a count for each duplicate"
+          - "how often does each value appear"
+        pattern: "sort {file} | uniq -c"
+        example: "sort access.log | uniq -c"
+      - intent: "show only lines that appear more than once"
+        alternate_phrasings:
+          - "uniq -d"
+          - "show only duplicated lines in {file}"
+          - "which lines appear more than once"
+          - "find duplicate lines"
+          - "show me the repeated lines"
+        pattern: "sort {file} | uniq -d"
+        example: "sort emails.txt | uniq -d"
+      - intent: "show lines appearing exactly once"
+        alternate_phrasings:
+          - "uniq -u"
+          - "show lines that are not duplicated in {file}"
+          - "find lines unique to this file"
+          - "which lines appear only once"
+          - "filter out any line that has a duplicate"
+        pattern: "sort {file} | uniq -u"
+        example: "sort items.txt | uniq -u"
+      - intent: "count and sort by most frequent"
+        alternate_phrasings:
+          - "sort | uniq -c | sort -rn"
+          - "rank lines in {file} by frequency"
+          - "what are the most common values in {file}"
+          - "frequency count sorted by most common first"
+          - "top N most frequent lines"
+        pattern: "sort {file} | uniq -c | sort -rn"
+        example: "sort access.log | uniq -c | sort -rn | head -20"
+    key_flags:
+      - flag: "-c / --count"
+        meaning: "Prefix each output line with its occurrence count"
+      - flag: "-d / --repeated"
+        meaning: "Only print lines that appear more than once"
+      - flag: "-u / --unique"
+        meaning: "Only print lines that appear exactly once"
+      - flag: "-i / --ignore-case"
+        meaning: "Case-insensitive comparison"
+      - flag: "-w {n} / --check-chars"
+        meaning: "Compare only the first n characters"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - sort
+      - comm
+
+  - name: wc
+    description: "Count lines, words, characters, or bytes in files or stdin"
+    common_intents:
+      - intent: "count lines in a file"
+        alternate_phrasings:
+          - "wc -l"
+          - "how many lines does {file} have"
+          - "line count of {file}"
+          - "tell me the number of lines in {file}"
+          - "how long is {file}"
+        pattern: "wc -l {file}"
+        example: "wc -l /var/log/syslog"
+      - intent: "count words in a file"
+        alternate_phrasings:
+          - "wc -w"
+          - "how many words are in {file}"
+          - "word count of {file}"
+          - "count the words in {file}"
+          - "how many words did I write"
+        pattern: "wc -w {file}"
+        example: "wc -w essay.txt"
+      - intent: "count bytes in a file"
+        alternate_phrasings:
+          - "wc -c"
+          - "what is the byte size of {file}"
+          - "how many bytes in {file}"
+          - "get file size in bytes using wc"
+          - "byte count of {file}"
+        pattern: "wc -c {file}"
+        example: "wc -c archive.tar"
+      - intent: "count matching lines from grep output"
+        alternate_phrasings:
+          - "grep | wc -l"
+          - "how many lines match {pattern} in {file}"
+          - "count the results of a grep"
+          - "how many matches does grep return"
+          - "number of times {pattern} appears in {file}"
+        pattern: "grep '{pattern}' {file} | wc -l"
+        example: "grep 'ERROR' app.log | wc -l"
+    key_flags:
+      - flag: "-l / --lines"
+        meaning: "Count lines"
+      - flag: "-w / --words"
+        meaning: "Count words"
+      - flag: "-c / --bytes"
+        meaning: "Count bytes"
+      - flag: "-m / --chars"
+        meaning: "Count characters (respects multi-byte encodings)"
+      - flag: "-L / --max-line-length"
+        meaning: "Print length of the longest line"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - grep
+      - awk
+
+  - name: tr
+    description: "Translate, delete, or squeeze characters in a stream"
+    common_intents:
+      - intent: "convert lowercase to uppercase"
+        alternate_phrasings:
+          - "tr '[:lower:]' '[:upper:]'"
+          - "uppercase the text in {file}"
+          - "convert {file} to all caps"
+          - "make everything uppercase"
+          - "upcase the output"
+        pattern: "tr '[:lower:]' '[:upper:]' < {file}"
+        example: "tr '[:lower:]' '[:upper:]' < names.txt"
+      - intent: "replace a character with another"
+        alternate_phrasings:
+          - "tr old_char new_char"
+          - "replace every {char} with {replacement} in the stream"
+          - "swap character {char} for {replacement}"
+          - "translate {char} to {replacement}"
+          - "change all {char} characters to {replacement}"
+        pattern: "tr '{find_char}' '{replace_char}' < {file}"
+        example: "echo $PATH | tr ':' '\\n'"
+      - intent: "delete specific characters"
+        alternate_phrasings:
+          - "tr -d"
+          - "remove all {char} characters from the input"
+          - "strip out {chars} from the stream"
+          - "delete every occurrence of {chars}"
+          - "get rid of all {char} in the output"
+        pattern: "tr -d '{chars}' < {file}"
+        example: "tr -d '\\r' < windows_file.txt"
+      - intent: "squeeze repeated characters to one"
+        alternate_phrasings:
+          - "tr -s"
+          - "collapse multiple consecutive spaces into one"
+          - "squeeze repeated {char} down to a single {char}"
+          - "remove runs of duplicate characters"
+          - "compress repeated whitespace"
+        pattern: "tr -s '{char}' < {file}"
+        example: "tr -s ' ' < padded.txt"
+    key_flags:
+      - flag: "-d / --delete"
+        meaning: "Delete characters in the first set, do not translate"
+      - flag: "-s / --squeeze-repeats"
+        meaning: "Replace sequences of a repeated character with a single instance"
+      - flag: "-c / --complement"
+        meaning: "Use the complement of the first set"
+      - flag: "[:lower:] / [:upper:] / [:digit:] / [:space:]"
+        meaning: "POSIX character classes for use in sets"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - sed
+      - cut
+
+  - name: head
+    description: "Print the first N lines or bytes of a file or stream"
+    common_intents:
+      - intent: "show the first N lines of a file"
+        alternate_phrasings:
+          - "head -n {n}"
+          - "print the first {n} lines of {file}"
+          - "show me the top {n} lines of {file}"
+          - "peek at the beginning of {file}"
+          - "what does the start of {file} look like"
+        pattern: "head -n {n} {file}"
+        example: "head -n 20 /var/log/auth.log"
+      - intent: "show the first 10 lines (default)"
+        alternate_phrasings:
+          - "head {file}"
+          - "show the beginning of {file}"
+          - "quick look at {file}"
+          - "preview {file}"
+          - "first few lines of {file}"
+        pattern: "head {file}"
+        example: "head config.yaml"
+      - intent: "show first N bytes of a file"
+        alternate_phrasings:
+          - "head -c"
+          - "print the first {n} bytes of {file}"
+          - "show {n} bytes from the start of {file}"
+          - "peek at first {n} bytes"
+          - "read {n} bytes from the beginning of {file}"
+        pattern: "head -c {n} {file}"
+        example: "head -c 512 binary_file.bin"
+    key_flags:
+      - flag: "-n {n} / --lines"
+        meaning: "Print the first n lines (default 10)"
+      - flag: "-c {n} / --bytes"
+        meaning: "Print the first n bytes"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - tail
+      - less
+      - cat
+
+  - name: tail
+    description: "Print the last N lines or bytes of a file, or follow a file as it grows"
+    common_intents:
+      - intent: "show the last N lines of a file"
+        alternate_phrasings:
+          - "tail -n {n}"
+          - "print the last {n} lines of {file}"
+          - "show me the end of {file}"
+          - "get the bottom {n} lines of {file}"
+          - "what does the end of {file} look like"
+        pattern: "tail -n {n} {file}"
+        example: "tail -n 50 /var/log/nginx/error.log"
+      - intent: "follow a file in real time (tail -f)"
+        alternate_phrasings:
+          - "tail -f"
+          - "watch {file} as it updates"
+          - "stream new lines from {file} live"
+          - "follow {file} — keep showing new output"
+          - "live tail {file}"
+        pattern: "tail -f {file}"
+        example: "tail -f /var/log/syslog"
+      - intent: "follow a file and survive log rotation"
+        alternate_phrasings:
+          - "tail -F"
+          - "tail {file} even if it gets rotated"
+          - "follow {file} and reopen if it disappears and comes back"
+          - "persistent tail that handles log rotation"
+          - "tail -F for log rotation"
+        pattern: "tail -F {file}"
+        example: "tail -F /var/log/app/app.log"
+      - intent: "print all lines starting from line N"
+        alternate_phrasings:
+          - "tail -n +{n}"
+          - "skip the first {n} lines of {file} and show the rest"
+          - "print {file} starting at line {n}"
+          - "output {file} from line {n} onward"
+          - "drop the first {n} lines"
+        pattern: "tail -n +{n} {file}"
+        example: "tail -n +2 data.csv"
+    key_flags:
+      - flag: "-n {n} / --lines"
+        meaning: "Print the last n lines (default 10)"
+      - flag: "-f / --follow"
+        meaning: "Keep the file open and print new lines as they are written"
+      - flag: "-F / --retry --follow"
+        meaning: "Like -f, but reopen the file if it is renamed or removed (handles log rotation)"
+      - flag: "-c {n} / --bytes"
+        meaning: "Print the last n bytes"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - head
+      - less
+      - grep
+
+  - name: diff
+    description: "Compare two files or directories and show the differences"
+    common_intents:
+      - intent: "compare two files"
+        alternate_phrasings:
+          - "diff {file1} {file2}"
+          - "what's different between {file1} and {file2}"
+          - "show changes between {file1} and {file2}"
+          - "find differences in two files"
+          - "compare {file1} to {file2}"
+        pattern: "diff {file1} {file2}"
+        example: "diff old_config.conf new_config.conf"
+      - intent: "compare files in unified diff format"
+        alternate_phrasings:
+          - "diff -u"
+          - "show a unified diff of {file1} and {file2}"
+          - "git-style diff between {file1} and {file2}"
+          - "diff with context in unified format"
+          - "diff output I can read like a patch"
+        pattern: "diff -u {file1} {file2}"
+        example: "diff -u original.py modified.py"
+      - intent: "compare two directories recursively"
+        alternate_phrasings:
+          - "diff -r"
+          - "what files differ between {dir1} and {dir2}"
+          - "compare directories {dir1} and {dir2}"
+          - "show differences between two directory trees"
+          - "recursive diff on two folders"
+        pattern: "diff -r {dir1} {dir2}"
+        example: "diff -r /etc/nginx /etc/nginx.bak"
+      - intent: "check if two files are identical"
+        alternate_phrasings:
+          - "diff -q"
+          - "are {file1} and {file2} the same"
+          - "just tell me if {file1} and {file2} differ, no details"
+          - "quickly check if two files match"
+          - "do these two files have the same content"
+        pattern: "diff -q {file1} {file2}"
+        example: "diff -q checksum.txt checksum_verify.txt"
+      - intent: "ignore whitespace differences"
+        alternate_phrasings:
+          - "diff -w"
+          - "compare {file1} and {file2} ignoring whitespace"
+          - "diff but ignore spaces and tabs"
+          - "compare without caring about indentation"
+          - "diff that doesn't flag whitespace-only changes"
+        pattern: "diff -w {file1} {file2}"
+        example: "diff -w formatted.py unformatted.py"
+    key_flags:
+      - flag: "-u / --unified"
+        meaning: "Output in unified format (shows context lines, readable by patch)"
+      - flag: "-r / --recursive"
+        meaning: "Recursively compare subdirectories"
+      - flag: "-q / --brief"
+        meaning: "Report only whether files differ, not the details"
+      - flag: "-w / --ignore-all-space"
+        meaning: "Ignore all white space when comparing"
+      - flag: "-i / --ignore-case"
+        meaning: "Ignore case differences in file contents"
+      - flag: "-y / --side-by-side"
+        meaning: "Output in two columns"
+      - flag: "-N / --new-file"
+        meaning: "Treat absent files as empty (useful for patch generation)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - comm
+      - patch
+      - vimdiff
+
+  - name: tee
+    description: "Read from stdin and write to both stdout and one or more files simultaneously"
+    common_intents:
+      - intent: "capture output to a file while still seeing it on screen"
+        alternate_phrasings:
+          - "tee {file}"
+          - "save the output of {command} to {file} and also print it"
+          - "log output to {file} while watching it in the terminal"
+          - "I want to pipe output to the next command AND save it"
+          - "split the output — screen and file at the same time"
+        pattern: "{command} | tee {file}"
+        example: "make 2>&1 | tee build.log"
+      - intent: "append output to a file rather than overwriting"
+        alternate_phrasings:
+          - "tee -a"
+          - "add to {file} instead of replacing it"
+          - "append output to {file} while still printing to screen"
+          - "tee but don't overwrite the existing file"
+          - "accumulate output in {file}"
+        pattern: "{command} | tee -a {file}"
+        example: "echo 'new entry' | tee -a log.txt"
+    key_flags:
+      - flag: "-a / --append"
+        meaning: "Append to the given files rather than overwriting"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "tee without -a overwrites the destination file"
+      blocked_patterns: []
+    undo: "No undo for file overwrite; use tee -a to preserve existing content"
+    related_commands:
+      - cat
+      - grep
+      - tail
+
+  - name: cat
+    description: "Print and concatenate files to stdout"
+    common_intents:
+      - intent: "print the contents of a file"
+        alternate_phrasings:
+          - "cat {file}"
+          - "show me what's in {file}"
+          - "display {file}"
+          - "read {file} to the screen"
+          - "output {file} to stdout"
+        pattern: "cat {file}"
+        example: "cat /etc/hosts"
+      - intent: "print file contents with line numbers"
+        alternate_phrasings:
+          - "cat -n"
+          - "show {file} with line numbers"
+          - "number the lines of {file}"
+          - "display {file} with numbered lines"
+          - "cat but show line numbers"
+        pattern: "cat -n {file}"
+        example: "cat -n script.sh"
+      - intent: "concatenate multiple files"
+        alternate_phrasings:
+          - "cat {file1} {file2}"
+          - "join {file1} and {file2} together"
+          - "combine these files into one stream"
+          - "merge the contents of {file1} and {file2}"
+          - "print {file1} followed by {file2}"
+        pattern: "cat {file1} {file2}"
+        example: "cat header.txt body.txt footer.txt"
+      - intent: "pipe a file into another command"
+        alternate_phrasings:
+          - "cat {file} | {command}"
+          - "feed {file} into {command}"
+          - "use {file} as input to {command}"
+          - "read from {file} and pipe to {command}"
+          - "stream {file} through {command}"
+        pattern: "cat {file} | {command}"
+        example: "cat access.log | grep '404'"
+    key_flags:
+      - flag: "-n / --number"
+        meaning: "Number all output lines"
+      - flag: "-b / --number-nonblank"
+        meaning: "Number non-empty output lines"
+      - flag: "-A / --show-all"
+        meaning: "Show non-printing characters (helpful for diagnosing invisible whitespace)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - less
+      - head
+      - tail
+      - tee
+
+  - name: less
+    description: "Interactively page through file contents with search and navigation"
+    common_intents:
+      - intent: "open a file for interactive reading"
+        alternate_phrasings:
+          - "less {file}"
+          - "open {file} so I can scroll through it"
+          - "page through {file}"
+          - "read {file} interactively"
+          - "browse {file} without loading all of it"
+        pattern: "less {file}"
+        example: "less /var/log/syslog"
+      - intent: "open a file and search for a pattern immediately"
+        alternate_phrasings:
+          - "less +/{pattern}"
+          - "open {file} in less and jump to the first occurrence of {pattern}"
+          - "view {file} and start at the first match for {pattern}"
+          - "open {file} with less and search for {pattern} right away"
+          - "less and immediately find {pattern}"
+        pattern: "less +/{pattern} {file}"
+        example: "less +/error /var/log/auth.log"
+      - intent: "follow a file in less (like tail -f)"
+        alternate_phrasings:
+          - "less +F"
+          - "open {file} in less and watch for new output"
+          - "follow {file} like tail -f but in less"
+          - "live stream {file} in less"
+          - "use less instead of tail -f"
+        pattern: "less +F {file}"
+        example: "less +F /var/log/nginx/access.log"
+      - intent: "disable line wrapping in less"
+        alternate_phrasings:
+          - "less -S"
+          - "open {file} without wrapping long lines"
+          - "view {file} with horizontal scrolling"
+          - "stop less from wrapping wide lines"
+          - "keep long lines intact in less"
+        pattern: "less -S {file}"
+        example: "less -S wide_output.tsv"
+    key_flags:
+      - flag: "-S / --chop-long-lines"
+        meaning: "Do not wrap long lines; scroll horizontally instead"
+      - flag: "-N / --LINE-NUMBERS"
+        meaning: "Show line numbers"
+      - flag: "-R / --RAW-CONTROL-CHARS"
+        meaning: "Allow ANSI color codes to render (useful for colored output)"
+      - flag: "+F"
+        meaning: "Start in follow mode, like tail -f"
+      - flag: "+/{pattern}"
+        meaning: "Start at the first match for pattern"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - more
+      - tail
+      - cat
+
+  - name: more
+    description: "Page through file contents one screenful at a time (simpler than less)"
+    common_intents:
+      - intent: "page through a file"
+        alternate_phrasings:
+          - "more {file}"
+          - "open {file} page by page"
+          - "read {file} a screen at a time"
+          - "browse {file} slowly"
+          - "view {file} without dumping it all to the terminal"
+        pattern: "more {file}"
+        example: "more README.txt"
+      - intent: "start viewing a file at a specific line"
+        alternate_phrasings:
+          - "more +{n}"
+          - "open {file} starting at line {n}"
+          - "skip to line {n} in {file}"
+          - "view {file} from line {n}"
+          - "begin reading {file} at line {n}"
+        pattern: "more +{n} {file}"
+        example: "more +100 large_log.txt"
+    key_flags:
+      - flag: "+{n}"
+        meaning: "Start display at line n"
+      - flag: "-d"
+        meaning: "Display help message instead of ringing bell on error"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - less
+      - head
+      - cat
+
+  - name: column
+    description: "Format input into a readable table with aligned columns"
+    common_intents:
+      - intent: "auto-align output into a table"
+        alternate_phrasings:
+          - "column -t"
+          - "format the output as a table"
+          - "make this output line up in columns"
+          - "align the fields in a readable table"
+          - "pretty-print this whitespace-separated data as a table"
+        pattern: "{command} | column -t"
+        example: "cat /etc/fstab | column -t"
+      - intent: "format a delimited file as a table"
+        alternate_phrasings:
+          - "column -t -s {delimiter}"
+          - "display {file} as an aligned table using {delimiter} as separator"
+          - "tabulate a CSV or TSV file"
+          - "make {file} readable as a table, it's {delimiter}-separated"
+          - "pretty print a {delimiter}-delimited file"
+        pattern: "column -t -s '{delimiter}' {file}"
+        example: "column -t -s ',' data.csv"
+    key_flags:
+      - flag: "-t / --table"
+        meaning: "Automatically determine the number of columns and create a table"
+      - flag: "-s {char} / --separator"
+        meaning: "Specify input field separator (used with --table)"
+      - flag: "-c {width} / --output-width"
+        meaning: "Format output to fit within width columns"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - awk
+      - cut
+      - paste
+
+  - name: paste
+    description: "Merge lines from multiple files side by side, or join all lines of a file"
+    common_intents:
+      - intent: "merge two files side by side"
+        alternate_phrasings:
+          - "paste {file1} {file2}"
+          - "combine {file1} and {file2} column by column"
+          - "put {file1} and {file2} next to each other"
+          - "zip lines from {file1} and {file2} into one file"
+          - "side-by-side merge of {file1} and {file2}"
+        pattern: "paste {file1} {file2}"
+        example: "paste names.txt scores.txt"
+      - intent: "merge all lines of a file into a single line"
+        alternate_phrasings:
+          - "paste -s"
+          - "join all lines of {file} into one line"
+          - "collapse {file} into a single row"
+          - "turn a vertical list into a horizontal one"
+          - "serialize the lines of {file} onto one line"
+        pattern: "paste -s {file}"
+        example: "paste -s -d ',' items.txt"
+      - intent: "merge files with a custom delimiter"
+        alternate_phrasings:
+          - "paste -d {delimiter}"
+          - "combine {file1} and {file2} using {delimiter} between columns"
+          - "paste files side by side with {delimiter} as separator"
+          - "merge files with a comma separator"
+          - "paste with a specific delimiter"
+        pattern: "paste -d '{delimiter}' {file1} {file2}"
+        example: "paste -d ',' first_names.txt last_names.txt"
+    key_flags:
+      - flag: "-d {delimiter}"
+        meaning: "Use this delimiter between merged columns (default is TAB)"
+      - flag: "-s / --serial"
+        meaning: "Paste one file at a time, merging lines serially rather than in parallel"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - cut
+      - join
+      - column
+
+  - name: comm
+    description: "Compare two sorted files and show lines unique to each or common to both"
+    common_intents:
+      - intent: "find lines common to two files"
+        alternate_phrasings:
+          - "comm -12"
+          - "what lines appear in both {file1} and {file2}"
+          - "find the intersection of {file1} and {file2}"
+          - "show lines present in both files"
+          - "lines that {file1} and {file2} share"
+        pattern: "comm -12 <(sort {file1}) <(sort {file2})"
+        example: "comm -12 <(sort list_a.txt) <(sort list_b.txt)"
+      - intent: "find lines only in the first file"
+        alternate_phrasings:
+          - "comm -23"
+          - "what lines are in {file1} but not {file2}"
+          - "lines unique to {file1}"
+          - "show lines that {file1} has but {file2} doesn't"
+          - "subtract {file2} from {file1}"
+        pattern: "comm -23 <(sort {file1}) <(sort {file2})"
+        example: "comm -23 <(sort all_users.txt) <(sort active_users.txt)"
+      - intent: "find lines only in the second file"
+        alternate_phrasings:
+          - "comm -13"
+          - "what lines are in {file2} but not {file1}"
+          - "lines unique to {file2}"
+          - "show lines added in {file2} that aren't in {file1}"
+          - "find new entries in {file2}"
+        pattern: "comm -13 <(sort {file1}) <(sort {file2})"
+        example: "comm -13 <(sort old_list.txt) <(sort new_list.txt)"
+    key_flags:
+      - flag: "-1"
+        meaning: "Suppress the column of lines unique to the first file"
+      - flag: "-2"
+        meaning: "Suppress the column of lines unique to the second file"
+      - flag: "-3"
+        meaning: "Suppress the column of lines common to both files"
+      - flag: "-12 (combined)"
+        meaning: "Show only lines common to both files"
+      - flag: "-23 (combined)"
+        meaning: "Show only lines unique to the first file"
+      - flag: "-13 (combined)"
+        meaning: "Show only lines unique to the second file"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - diff
+      - sort
+      - uniq
+
+  - name: jq
+    description: "Query, filter, and transform JSON data using a lightweight DSL"
+    common_intents:
+      - intent: "pretty-print JSON"
+        alternate_phrasings:
+          - "jq ."
+          - "format {file} as readable JSON"
+          - "pretty print the JSON in {file}"
+          - "make this JSON output human-readable"
+          - "indent and colorize the JSON"
+        pattern: "jq '.' {file}"
+        example: "jq '.' response.json"
+      - intent: "extract a specific field from JSON"
+        alternate_phrasings:
+          - "jq '.field'"
+          - "get the value of {key} from the JSON"
+          - "extract field {key} from {file}"
+          - "I just want the {key} field out of this JSON"
+          - "pull {key} from the JSON object"
+        pattern: "jq '.{key}' {file}"
+        example: "jq '.name' user.json"
+      - intent: "extract a field from every object in a JSON array"
+        alternate_phrasings:
+          - "jq '.[].field'"
+          - "get {key} from each item in the array"
+          - "list the {key} of every element"
+          - "pull {key} out of all the objects in the array"
+          - "iterate over the JSON array and print {key} for each"
+        pattern: "jq '.[].{key}' {file}"
+        example: "jq '.[].name' users.json"
+      - intent: "filter array items by a field value"
+        alternate_phrasings:
+          - "jq 'select'"
+          - "show only objects where {key} equals {value}"
+          - "filter the JSON array where {key} is {value}"
+          - "find records in the JSON where {key} = {value}"
+          - "query JSON for objects with {key} matching {value}"
+        pattern: "jq '.[] | select(.{key} == \"{value}\")' {file}"
+        example: "jq '.[] | select(.status == \"active\")' users.json"
+
+      - intent: "extract a nested field"
+        alternate_phrasings:
+          - "jq '.parent.child'"
+          - "get the nested value at {parent}.{child}"
+          - "access {child} inside {parent} in the JSON"
+          - "drill into the JSON to get {path}"
+          - "navigate the JSON path {parent}.{child}"
+        pattern: "jq '.{parent}.{child}' {file}"
+        example: "jq '.user.address.city' profile.json"
+      - intent: "pipe jq output from curl or another command"
+        alternate_phrasings:
+          - "curl | jq"
+          - "format the JSON response from {command} with jq"
+          - "pipe API output through jq"
+          - "pretty print the API response"
+          - "curl something and extract {field} with jq"
+        pattern: "{command} | jq '.{field}'"
+        example: "curl -s https://api.example.com/status | jq '.version'"
+      - intent: "compact JSON output (no whitespace)"
+        alternate_phrasings:
+          - "jq -c"
+          - "output JSON on a single line"
+          - "compact JSON for passing to another tool"
+          - "minify the JSON"
+          - "remove whitespace from JSON output"
+        pattern: "jq -c '.' {file}"
+        example: "jq -c '.[]' records.json"
+    key_flags:
+      - flag: "-r / --raw-output"
+        meaning: "Output strings without JSON quotes (useful for piping to shell commands)"
+      - flag: "-c / --compact-output"
+        meaning: "Output each result on one line with no extra whitespace"
+      - flag: "-e / --exit-status"
+        meaning: "Set exit status based on the last output value (false/null = exit 1)"
+      - flag: "-s / --slurp"
+        meaning: "Read all inputs into an array before applying filter"
+      - flag: "-n / --null-input"
+        meaning: "Use null as input; useful for constructing JSON from scratch"
+      - flag: "--arg {name} {value}"
+        meaning: "Pass a shell string value as a named jq variable"
+      - flag: "-f {file}"
+        meaning: "Read filter from a file instead of command line"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands:
+      - grep
+      - awk
+      - python3

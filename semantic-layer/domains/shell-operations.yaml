@@ -1,0 +1,1199 @@
+domain: shell-operations
+description: "Bash builtins, pipes, redirection, job control, history, aliases, and environment variables"
+related_domains:
+  - text-processing
+  - process-management
+
+commands:
+
+  # ─── OUTPUT ───────────────────────────────────────────────────────────────
+
+  - name: echo
+    description: "Print text or variable values to stdout"
+    common_intents:
+      - intent: "print a message to the terminal"
+        alternate_phrasings:
+          - "echo hello"
+          - "display the text {message} on screen"
+          - "I just want to print something to the console, how do I do that"
+          - "spit out some text"
+          - "output a string from a script"
+        pattern: "echo '{message}'"
+        example: "echo 'build complete'"
+      - intent: "print the value of a variable or environment variable"
+        alternate_phrasings:
+          - "echo $VAR"
+          - "show me what {VARIABLE} is set to"
+          - "how do I see the current value of an env var"
+          - "check what $PATH contains"
+          - "print out a shell variable"
+        pattern: "echo ${VARIABLE}"
+        example: "echo $HOME"
+      - intent: "print the exit status of the last command"
+        alternate_phrasings:
+          - "echo $?"
+          - "did the last command succeed"
+          - "check if the previous command failed"
+          - "show me the return code"
+          - "what was the exit code"
+        pattern: "echo $?"
+        example: "echo $?"
+      - intent: "print text without a trailing newline"
+        alternate_phrasings:
+          - "echo -n"
+          - "print without adding a newline at the end"
+          - "suppress the newline after echo"
+          - "output text and stay on the same line"
+          - "I don't want echo to add a newline"
+        pattern: "echo -n '{message}'"
+        example: "echo -n 'loading... '"
+      - intent: "print text with escape sequences interpreted"
+        alternate_phrasings:
+          - "echo -e"
+          - "print a tab or newline character inside echo"
+          - "use \\t and \\n inside echo"
+          - "make echo understand backslash escapes"
+          - "print text with embedded special characters"
+        pattern: "echo -e '{text_with_escapes}'"
+        example: "echo -e 'col1\\tcol2\\ncol3\\tcol4'"
+    key_flags:
+      - "-n: suppress trailing newline"
+      - "-e: enable backslash escape interpretation"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: [printf]
+
+  - name: printf
+    description: "Format and print text with C-style format strings"
+    common_intents:
+      - intent: "print formatted text with precise control over spacing and type"
+        alternate_phrasings:
+          - "printf '%s\\n' value"
+          - "format output with printf instead of echo"
+          - "I need printf-style formatting in the shell"
+          - "print a string with a newline using printf"
+          - "use a format string to control output"
+        pattern: "printf '{format}' {arguments}"
+        example: "printf '%s\\n' 'build finished'"
+      - intent: "print a table of values with aligned columns"
+        alternate_phrasings:
+          - "printf '%-20s %5d\\n'"
+          - "align columns of output in the terminal"
+          - "print left-aligned and right-aligned columns"
+          - "make output line up in fixed-width columns"
+          - "format numbers and strings in a table"
+        pattern: "printf '%-{width}s %{width}s\\n' {col1} {col2}"
+        example: "printf '%-20s %5d\\n' 'items' 42"
+      - intent: "store a formatted string in a variable"
+        alternate_phrasings:
+          - "printf -v myvar"
+          - "assign formatted output to a variable without a subshell"
+          - "build a string with printf and save it"
+          - "capture printf output into a variable"
+          - "format a value and store it in a bash variable"
+        pattern: "printf -v {varname} '{format}' {arguments}"
+        example: "printf -v label 'run_%d' 7"
+    key_flags:
+      - "-v varname: store result in variable instead of printing"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: [echo]
+
+  # ─── INPUT ────────────────────────────────────────────────────────────────
+
+  - name: read
+    description: "Read a line from stdin and assign it to shell variables"
+    common_intents:
+      - intent: "prompt the user for input and store it in a variable"
+        alternate_phrasings:
+          - "read -p 'Enter name: ' name"
+          - "ask the user to type something and capture it"
+          - "how do I get user input in a bash script"
+          - "accept keyboard input in a script"
+          - "wait for the user to type and save what they type"
+        pattern: "read -p '{prompt}' {variable}"
+        example: "read -p 'Enter app name: ' appname"
+      - intent: "read input without echoing it to the terminal"
+        alternate_phrasings:
+          - "read -s variable"
+          - "accept input silently so it is not displayed"
+          - "read user input without showing it on screen"
+          - "hide what the user types while reading"
+          - "read a confirmation without showing it"
+        pattern: "read -s {variable}"
+        example: "read -s -p 'Confirm (y/n): ' choice"
+      - intent: "read a single character without waiting for Enter"
+        alternate_phrasings:
+          - "read -n 1 key"
+          - "capture one keypress immediately"
+          - "read a single character from stdin"
+          - "get one character of input without pressing enter"
+          - "detect a single keypress in a script"
+        pattern: "read -n 1 {variable}"
+        example: "read -n 1 -p 'Press any key...' key"
+      - intent: "read each line of a file or command output in a loop"
+        alternate_phrasings:
+          - "while read line; do"
+          - "iterate over lines with read"
+          - "process each line of a file one by one"
+          - "loop over every line from a command"
+          - "read file line by line in bash"
+        pattern: "while IFS= read -r {line}; do {command}; done < {file}"
+        example: "while IFS= read -r line; do echo \"$line\"; done < items.txt"
+    key_flags:
+      - "-p prompt: display prompt before reading"
+      - "-s: silent mode, do not echo input"
+      - "-n count: read at most count characters"
+      - "-r: do not interpret backslash as escape"
+      - "-a array: read words into an array"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: [echo, printf]
+
+  # ─── ENVIRONMENT ──────────────────────────────────────────────────────────
+
+  - name: export
+    description: "Set shell variables and export them to child processes"
+    common_intents:
+      - intent: "set an environment variable for the current session"
+        alternate_phrasings:
+          - "export MYVAR=value"
+          - "define an env var that child processes can see"
+          - "how do I set an environment variable in bash"
+          - "make a variable available to programs I run"
+          - "add a new variable to the environment"
+        pattern: "export {VARIABLE}={value}"
+        example: "export APP_NAME=myapp"
+      - intent: "add a directory to PATH"
+        alternate_phrasings:
+          - "export PATH=$PATH:/new/dir"
+          - "put a directory on my PATH"
+          - "add something to $PATH so I can run it"
+          - "extend PATH with an extra directory"
+          - "I want to run binaries from {dir} without a full path"
+        pattern: "export PATH=$PATH:{/path/to/add}"
+        example: "export PATH=$PATH:$HOME/.local/bin"
+      - intent: "list all currently exported variables"
+        alternate_phrasings:
+          - "export -p"
+          - "show all exported environment variables"
+          - "what variables are exported right now"
+          - "display the current environment as export statements"
+          - "list everything that will be passed to child processes"
+        pattern: "export -p"
+        example: "export -p"
+      - intent: "unexport a variable (remove from environment without unsetting)"
+        alternate_phrasings:
+          - "export -n VARNAME"
+          - "stop exporting a variable to children"
+          - "remove a variable from the exported environment"
+          - "keep the variable locally but don't pass it to child processes"
+          - "undo an export without deleting the variable"
+        pattern: "export -n {VARIABLE}"
+        example: "export -n APP_NAME"
+    key_flags:
+      - "-p: print all exported variables as shell commands"
+      - "-n: remove variable from export list without unsetting it"
+      - "-f: export a shell function"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "unset VARIABLE or export -n VARIABLE"
+    related_commands: [env, set, unset]
+
+  - name: env
+    description: "Display environment variables or run a command in a modified environment"
+    common_intents:
+      - intent: "list all current environment variables"
+        alternate_phrasings:
+          - "env"
+          - "show me everything in the environment"
+          - "what environment variables are set right now"
+          - "dump the full environment"
+          - "I want to see all env vars"
+        pattern: "env"
+        example: "env"
+      - intent: "run a command with an extra or overridden environment variable"
+        alternate_phrasings:
+          - "env VAR=val command"
+          - "set an env var only for one command"
+          - "run {command} with {VAR} set to {value} without changing my shell"
+          - "temporarily override an env var for a single invocation"
+          - "pass an environment variable to a command inline"
+        pattern: "env {VARIABLE}={value} {command}"
+        example: "env DEBUG=1 ./run.sh"
+      - intent: "run a command with a completely clean environment"
+        alternate_phrasings:
+          - "env -i command"
+          - "clear all env vars before running {command}"
+          - "run with an empty environment"
+          - "strip the environment and execute {command}"
+          - "launch a program without inheriting any environment variables"
+        pattern: "env -i {command}"
+        example: "env -i APP_NAME=myapp bash"
+    key_flags:
+      - "-i: start with an empty environment"
+      - "-u VAR: remove variable before running command"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: [export, set, printenv]
+
+  - name: set
+    description: "Display or configure shell variables and options"
+    common_intents:
+      - intent: "display all shell variables and their values"
+        alternate_phrasings:
+          - "set"
+          - "list every variable defined in the shell"
+          - "show all shell variables including local ones"
+          - "dump all variables and functions in the current shell"
+          - "see every variable that's set right now"
+        pattern: "set"
+        example: "set"
+      - intent: "enable strict error handling in a script"
+        alternate_phrasings:
+          - "set -e"
+          - "exit immediately if any command fails"
+          - "make my script stop on the first error"
+          - "turn on errexit"
+          - "fail fast on errors in a bash script"
+        pattern: "set -e"
+        example: "set -e"
+      - intent: "enable exit on unset variables"
+        alternate_phrasings:
+          - "set -u"
+          - "treat unset variables as errors"
+          - "fail if I reference a variable that hasn't been set"
+          - "turn on nounset"
+          - "make bash complain about undefined variables"
+        pattern: "set -u"
+        example: "set -u"
+      - intent: "enable xtrace to debug a script by printing each command"
+        alternate_phrasings:
+          - "set -x"
+          - "trace all commands as they execute"
+          - "turn on debug mode in bash"
+          - "print each command before it runs"
+          - "see exactly what bash is executing"
+        pattern: "set -x"
+        example: "set -x"
+      - intent: "use vi key bindings at the command line"
+        alternate_phrasings:
+          - "set -o vi"
+          - "enable vi mode in bash"
+          - "switch command line editing to vi"
+          - "I want to use vim keybindings in my shell"
+          - "turn on vi-style line editing"
+        pattern: "set -o vi"
+        example: "set -o vi"
+    key_flags:
+      - "-e: exit immediately if a command exits with non-zero status"
+      - "-u: treat unset variables as errors"
+      - "-x: print each command before executing (xtrace)"
+      - "-o option: set a named option (vi, emacs, pipefail, noclobber, etc.)"
+      - "+x / +e: disable a previously set option"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "set +e / set +x etc. to disable individual options"
+    related_commands: [export, unset, env]
+
+  - name: source
+    description: "Execute commands from a file in the current shell session"
+    common_intents:
+      - intent: "load a shell configuration or script file into the current session"
+        alternate_phrasings:
+          - "source ~/.bashrc"
+          - "reload my bashrc without opening a new terminal"
+          - ". ~/.bashrc"
+          - "apply changes I made to my shell config"
+          - "how do I reload my shell config file"
+        pattern: "source {path/to/file}"
+        example: "source ~/.bashrc"
+      - intent: "load environment variables from a dotenv-style file"
+        alternate_phrasings:
+          - "source .env"
+          - "import variables from a .env file into my shell"
+          - "load env vars from a file into the current shell"
+          - "pull in all the vars from my .env without running a subshell"
+          - "set variables from a file in the current shell context"
+        pattern: "source {.env_file}"
+        example: "source .env"
+      - intent: "load shared functions or utilities from a helper script"
+        alternate_phrasings:
+          - "source lib/helpers.sh"
+          - "include a library of shell functions"
+          - "import shared utilities from another script"
+          - "how do I use functions defined in another file"
+          - "load helper functions into the current shell"
+        pattern: "source {path/to/library.sh}"
+        example: "source lib/helpers.sh"
+    key_flags: []
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "sourcing files from untrusted or external sources"
+      blocked_patterns: []
+    undo: "Variables and functions loaded into the current shell cannot be automatically unloaded; open a new shell session"
+    related_commands: [export, exec, bash]
+
+  # ─── ALIASES ──────────────────────────────────────────────────────────────
+
+  - name: alias
+    description: "Create short names that expand to longer commands"
+    common_intents:
+      - intent: "create a shortcut alias for a command"
+        alternate_phrasings:
+          - "alias ll='ls -la'"
+          - "make {word} run {command} instead"
+          - "create a short name for a long command I use all the time"
+          - "I'm tired of typing {long command}, how do I shorten it"
+          - "define a command abbreviation in bash"
+        pattern: "alias {name}='{command}'"
+        example: "alias ll='ls -lah'"
+      - intent: "list all currently defined aliases"
+        alternate_phrasings:
+          - "alias"
+          - "show all my aliases"
+          - "what aliases do I have"
+          - "list every alias in the current shell"
+          - "see all active command shortcuts"
+        pattern: "alias"
+        example: "alias"
+      - intent: "look up what a specific alias expands to"
+        alternate_phrasings:
+          - "alias ll"
+          - "what does the alias {name} do"
+          - "show me the definition of alias {name}"
+          - "what command does {name} run"
+          - "check the expansion of a named alias"
+        pattern: "alias {name}"
+        example: "alias ll"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "unalias {name}"
+    related_commands: [unalias, type]
+
+  - name: unalias
+    description: "Remove one or all aliases from the current shell session"
+    common_intents:
+      - intent: "remove a specific alias"
+        alternate_phrasings:
+          - "unalias ll"
+          - "delete the alias {name}"
+          - "get rid of alias {name}"
+          - "undo an alias I defined"
+          - "remove a command shortcut"
+        pattern: "unalias {name}"
+        example: "unalias ll"
+      - intent: "remove all defined aliases at once"
+        alternate_phrasings:
+          - "unalias -a"
+          - "clear all aliases"
+          - "delete every alias in the current shell"
+          - "wipe out all my shortcuts"
+          - "start fresh with no aliases"
+        pattern: "unalias -a"
+        example: "unalias -a"
+    key_flags:
+      - "-a: remove all aliases"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "Redefine the alias with alias {name}='{command}'"
+    related_commands: [alias]
+
+  # ─── COMMAND LOOKUP ────────────────────────────────────────────────────────
+
+  - name: type
+    description: "Show whether a command is a builtin, alias, function, or external program"
+    common_intents:
+      - intent: "find out what kind of thing a command is"
+        alternate_phrasings:
+          - "type ls"
+          - "is {command} a builtin or an external program"
+          - "tell me how the shell resolves {command}"
+          - "check if {command} is an alias, function, or binary"
+          - "what is {command} exactly"
+        pattern: "type {command}"
+        example: "type cd"
+      - intent: "find the path of the binary that would be executed"
+        alternate_phrasings:
+          - "type -p python"
+          - "which file would run when I type {command}"
+          - "locate the executable file for {command}"
+          - "show the disk path of {command}"
+          - "find the binary path without which"
+        pattern: "type -p {command}"
+        example: "type -p python3"
+      - intent: "show all locations where a command is found"
+        alternate_phrasings:
+          - "type -a python"
+          - "list every version of {command} on my PATH"
+          - "find all instances of {command}"
+          - "are there multiple {command} binaries available"
+          - "show every place {command} exists on my system"
+        pattern: "type -a {command}"
+        example: "type -a python3"
+    key_flags:
+      - "-p: print path of the executable only"
+      - "-a: show all locations in PATH"
+      - "-t: print type word (alias, builtin, file, function, keyword)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: [which, whereis]
+
+  - name: which
+    description: "Locate the path of an executable in the PATH"
+    common_intents:
+      - intent: "find where an executable lives on the filesystem"
+        alternate_phrasings:
+          - "which python"
+          - "what is the full path to {command}"
+          - "locate the {command} binary"
+          - "where is {command} installed"
+          - "find the path of {command}"
+        pattern: "which {command}"
+        example: "which python3"
+      - intent: "find all matching executables across PATH"
+        alternate_phrasings:
+          - "which -a python"
+          - "show every copy of {command} that exists on my PATH"
+          - "list all versions of {command} available"
+          - "are there multiple {command} binaries on my system"
+          - "find all occurrences of {command} in PATH"
+        pattern: "which -a {command}"
+        example: "which -a python3"
+    key_flags:
+      - "-a: show all matching paths, not just the first"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: [type, whereis]
+
+  # ─── HISTORY ──────────────────────────────────────────────────────────────
+
+  - name: history
+    description: "View, search, and manage command history"
+    common_intents:
+      - intent: "show recent command history"
+        alternate_phrasings:
+          - "history"
+          - "what commands did I run recently"
+          - "show me my command history"
+          - "see the last commands I typed"
+          - "pull up recent history"
+        pattern: "history"
+        example: "history"
+      - intent: "show the last N commands"
+        alternate_phrasings:
+          - "history 20"
+          - "show me the last {n} commands"
+          - "display the {n} most recent history entries"
+          - "just the last {n} items from history"
+          - "tail the command history"
+        pattern: "history {n}"
+        example: "history 20"
+      - intent: "search command history interactively"
+        alternate_phrasings:
+          - "Ctrl+R"
+          - "reverse search history"
+          - "find a previous command I ran"
+          - "search backwards through history"
+          - "I remember part of a command I ran, how do I find it"
+        pattern: "Ctrl+R {search_term}"
+        example: "Ctrl+R docker"
+      - intent: "clear all command history"
+        alternate_phrasings:
+          - "history -c"
+          - "wipe the command history"
+          - "delete all my history entries"
+          - "clear bash history"
+          - "I want to start fresh with no history"
+        pattern: "history -c"
+        example: "history -c"
+      - intent: "delete a specific history entry by line number"
+        alternate_phrasings:
+          - "history -d 42"
+          - "remove entry number {n} from history"
+          - "delete one specific line from command history"
+          - "erase a particular history entry"
+          - "how do I remove a single entry from bash history"
+        pattern: "history -d {offset}"
+        example: "history -d 42"
+      - intent: "run a command without recording it in history"
+        alternate_phrasings:
+          - "leading space before command"
+          - "type a command that won't be saved to history"
+          - "run something without it appearing in my history"
+          - "execute a command off the record"
+          - "prevent a command from being logged in history"
+        pattern: " {command}"
+        example: " echo $MY_VAR"
+    key_flags:
+      - "-c: clear the history list"
+      - "-d offset: delete history entry at offset"
+      - "-w: write current history to the history file"
+      - "-s: add a command to history without running it"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: [fc]
+
+  # ─── SHELL CONTROL ────────────────────────────────────────────────────────
+
+  - name: exec
+    description: "Replace the current shell process with a new command"
+    common_intents:
+      - intent: "replace the current shell with a new program"
+        alternate_phrasings:
+          - "exec bash"
+          - "swap the running shell for {command}"
+          - "run {command} in place of the current process"
+          - "launch {command} without keeping the shell alive"
+          - "replace this shell process with {command}"
+        pattern: "exec {command}"
+        example: "exec bash"
+      - intent: "redirect all output of the current shell to a file using exec"
+        alternate_phrasings:
+          - "exec >output.log 2>&1"
+          - "redirect all stdout and stderr to a file for the rest of the script"
+          - "capture all output from this point forward to a log file"
+          - "use exec to set up a global redirect in a script"
+          - "log everything from here on to a file"
+        pattern: "exec >{logfile} 2>&1"
+        example: "exec >run.log 2>&1"
+    key_flags:
+      - "-c: execute with an empty environment"
+      - "-l: mark command as a login shell"
+      - "-a name: pass a custom argv[0] name"
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "replacing an interactive shell (current terminal session ends)"
+      blocked_patterns:
+        - "exec with an untrusted or user-supplied command string"
+    undo: "Cannot undo — the original shell process is gone once exec runs"
+    related_commands: [source, bash, sh]
+
+  - name: eval
+    description: "Evaluate a string as a shell command in the current shell"
+    common_intents:
+      - intent: "execute a dynamically constructed command string"
+        alternate_phrasings:
+          - "eval \"$cmd\""
+          - "run a command that was built as a string"
+          - "execute the contents of a variable as a command"
+          - "build a command at runtime and run it"
+          - "how do I run a string as shell code"
+        pattern: "eval \"{command_string}\""
+        example: "eval \"APP_NAME=myapp; echo \\$APP_NAME\""
+      - intent: "set up shell initialization from a tool's output"
+        alternate_phrasings:
+          - "eval $(tool init)"
+          - "initialize a tool by running its setup output through eval"
+          - "configure the shell using the output of a command"
+          - "bootstrap a tool that prints shell setup code"
+          - "run the setup snippet printed by {tool}"
+        pattern: "eval $({tool} init -)"
+        example: "eval $(direnv hook bash)"
+    key_flags: []
+    safety:
+      level: moderate
+      requires_sudo: false
+      confirmation_required_for:
+        - "eval with any string derived from user input or external data"
+      blocked_patterns:
+        - "eval with unvalidated user input"
+        - "eval on data fetched from the network without verification"
+    undo: null
+    related_commands: [source, exec, bash]
+
+  - name: trap
+    description: "Execute a command when the shell receives a signal or exits"
+    common_intents:
+      - intent: "run a cleanup command when the script exits"
+        alternate_phrasings:
+          - "trap 'rm tmpfile' EXIT"
+          - "clean up temporary files when the script finishes"
+          - "make sure cleanup runs even if the script fails"
+          - "register a cleanup handler for EXIT"
+          - "how do I always run cleanup in a bash script"
+        pattern: "trap '{cleanup_command}' EXIT"
+        example: "trap 'rm -f /tmp/workfile' EXIT"
+      - intent: "catch Ctrl+C and handle it gracefully"
+        alternate_phrasings:
+          - "trap 'echo interrupted' INT"
+          - "intercept Ctrl+C in a bash script"
+          - "handle SIGINT in my script"
+          - "do something when the user presses Ctrl+C"
+          - "prevent my script from dying silently on interrupt"
+        pattern: "trap '{handler}' INT"
+        example: "trap 'echo \"Interrupted, cleaning up\"; exit 1' INT"
+      - intent: "remove a previously set trap"
+        alternate_phrasings:
+          - "trap - INT"
+          - "clear the trap for a signal"
+          - "remove the handler for {SIGNAL}"
+          - "stop trapping {SIGNAL}"
+          - "reset a signal handler to default"
+        pattern: "trap - {SIGNAL}"
+        example: "trap - INT EXIT"
+      - intent: "ignore a signal"
+        alternate_phrasings:
+          - "trap '' INT"
+          - "make the script ignore SIGINT"
+          - "suppress Ctrl+C so it does nothing"
+          - "block a signal from reaching the script"
+          - "tell bash to ignore {SIGNAL}"
+        pattern: "trap '' {SIGNAL}"
+        example: "trap '' INT"
+      - intent: "list all currently set traps"
+        alternate_phrasings:
+          - "trap"
+          - "show what traps are configured"
+          - "list every signal handler I've set"
+          - "what traps are active in this shell"
+          - "see all registered trap handlers"
+        pattern: "trap"
+        example: "trap"
+    key_flags:
+      - "-l: list all available signal names"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "trap - {SIGNAL} to restore default behavior"
+    related_commands: [kill, exit]
+
+  - name: exit
+    description: "Exit the current shell or script with an optional status code"
+    common_intents:
+      - intent: "exit the current shell or script"
+        alternate_phrasings:
+          - "exit"
+          - "close the terminal session"
+          - "quit the current shell"
+          - "end this shell"
+          - "log out of the terminal"
+        pattern: "exit"
+        example: "exit"
+      - intent: "exit with a specific status code"
+        alternate_phrasings:
+          - "exit 0"
+          - "exit with success status"
+          - "return a specific exit code from a script"
+          - "exit the script and signal failure to the caller"
+          - "set the exit code when a script finishes"
+        pattern: "exit {code}"
+        example: "exit 1"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: [trap, exec]
+
+  - name: clear
+    description: "Clear the terminal screen"
+    common_intents:
+      - intent: "clear all output from the terminal screen"
+        alternate_phrasings:
+          - "clear"
+          - "clean up the terminal"
+          - "wipe the screen"
+          - "get rid of all the output cluttering my terminal"
+          - "blank the terminal display"
+        pattern: "clear"
+        example: "clear"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "Scroll up to see previous output; or use reset for a hard reset"
+    related_commands: [reset]
+
+  - name: reset
+    description: "Reinitialize the terminal, fixing garbled or broken display state"
+    common_intents:
+      - intent: "fix a broken or garbled terminal display"
+        alternate_phrasings:
+          - "reset"
+          - "my terminal is messed up after a crashed program"
+          - "the terminal is showing garbage characters"
+          - "restore the terminal to a normal state"
+          - "a program corrupted my terminal, how do I fix it"
+        pattern: "reset"
+        example: "reset"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: [clear, stty]
+
+  - name: xdg-open
+    description: "Open a file, directory, or URL with the system's default application"
+    common_intents:
+      - intent: "open a file with its default application"
+        alternate_phrasings:
+          - "xdg-open file.pdf"
+          - "open {file} in whatever the default app is"
+          - "launch the default viewer for {file}"
+          - "open this file like double-clicking it"
+          - "how do I open a file from the terminal"
+        pattern: "xdg-open {path/to/file}"
+        example: "xdg-open report.pdf"
+      - intent: "open a URL in the default browser"
+        alternate_phrasings:
+          - "xdg-open https://example.com"
+          - "open a website from the terminal"
+          - "launch the browser with a specific URL"
+          - "open a link in my browser from a script"
+          - "browse to a URL from the command line"
+        pattern: "xdg-open {url}"
+        example: "xdg-open https://example.com"
+      - intent: "open the current directory in the file manager"
+        alternate_phrasings:
+          - "xdg-open ."
+          - "open a file browser here"
+          - "launch the file manager in the current directory"
+          - "explore this directory graphically"
+          - "open the folder in the GUI"
+        pattern: "xdg-open {directory}"
+        example: "xdg-open ."
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: [open]
+
+  # ─── REDIRECTION ──────────────────────────────────────────────────────────
+
+  - name: ">"
+    description: "Redirect stdout to a file, overwriting its contents"
+    common_intents:
+      - intent: "save command output to a file"
+        alternate_phrasings:
+          - "command > file"
+          - "write the output of {command} into {file}"
+          - "redirect stdout to a file"
+          - "capture what a command prints into a file"
+          - "send command output to a file instead of the screen"
+        pattern: "{command} > {file}"
+        example: "ls -la > listing.txt"
+      - intent: "create or overwrite a file with specific content"
+        alternate_phrasings:
+          - "echo 'text' > file"
+          - "write a line of text into a file"
+          - "create a file with this content"
+          - "overwrite {file} with new content"
+          - "put some text into a file, replacing whatever was there"
+        pattern: "echo '{content}' > {file}"
+        example: "echo 'APP_NAME=myapp' > config.env"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for:
+        - "overwriting an existing file"
+      blocked_patterns: []
+    undo: "The original file content is gone; restore from a backup if needed"
+    related_commands: [">>", tee]
+
+  - name: ">>"
+    description: "Append stdout to a file without overwriting existing contents"
+    common_intents:
+      - intent: "append output to a file"
+        alternate_phrasings:
+          - "command >> file"
+          - "add the output of {command} to the end of {file}"
+          - "append to a log file without erasing it"
+          - "write to a file without clobbering what's already there"
+          - "keep adding output to {file}"
+        pattern: "{command} >> {file}"
+        example: "echo 'done' >> build.log"
+      - intent: "add a line to a config or list file"
+        alternate_phrasings:
+          - "echo 'line' >> file"
+          - "append a new entry to {file}"
+          - "add something to the end of {file}"
+          - "write one more line into {file}"
+          - "I want to add to the file without opening an editor"
+        pattern: "echo '{line}' >> {file}"
+        example: "echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.bashrc"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "Remove the appended lines with a text editor or tail/truncate"
+    related_commands: [">", tee]
+
+  - name: "2>"
+    description: "Redirect stderr to a file"
+    common_intents:
+      - intent: "capture error output from a command to a file"
+        alternate_phrasings:
+          - "command 2> errors.txt"
+          - "save stderr to a file"
+          - "redirect error messages to {file}"
+          - "capture the error output of {command}"
+          - "log only the errors from {command}"
+        pattern: "{command} 2> {file}"
+        example: "make 2> build-errors.txt"
+      - intent: "suppress error output completely"
+        alternate_phrasings:
+          - "command 2>/dev/null"
+          - "hide all error messages from {command}"
+          - "discard stderr so it doesn't clutter the screen"
+          - "silence error output"
+          - "throw away any error messages"
+        pattern: "{command} 2>/dev/null"
+        example: "find / -name '*.conf' 2>/dev/null"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: ["2>&1", "&>"]
+
+  - name: "2>&1"
+    description: "Redirect stderr to the same destination as stdout"
+    common_intents:
+      - intent: "merge stderr into stdout so both go to the same place"
+        alternate_phrasings:
+          - "command > file 2>&1"
+          - "combine stdout and stderr into one stream"
+          - "redirect both regular output and errors to the same file"
+          - "capture everything a command prints including errors"
+          - "I want stdout and stderr together in one place"
+        pattern: "{command} > {file} 2>&1"
+        example: "make > build.log 2>&1"
+      - intent: "pipe both stdout and stderr through another command"
+        alternate_phrasings:
+          - "command 2>&1 | grep"
+          - "pipe stderr and stdout together through {filter}"
+          - "send all output including errors into a pipe"
+          - "filter both regular and error output with {command}"
+          - "search through all output including errors"
+        pattern: "{command} 2>&1 | {filter}"
+        example: "make 2>&1 | grep error"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: ["&>", "2>"]
+
+  - name: "&>"
+    description: "Redirect both stdout and stderr to a file (bash shorthand)"
+    common_intents:
+      - intent: "redirect all output (stdout and stderr) to a file"
+        alternate_phrasings:
+          - "command &> output.log"
+          - "save everything a command outputs to a file"
+          - "capture all output and errors together in one file"
+          - "log the complete output of {command}"
+          - "redirect both streams to one file with the short syntax"
+        pattern: "{command} &> {file}"
+        example: "build.sh &> build.log"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: ["2>&1", ">"]
+
+  - name: "<"
+    description: "Redirect a file to a command's stdin"
+    common_intents:
+      - intent: "feed a file as input to a command"
+        alternate_phrasings:
+          - "command < file"
+          - "pass {file} as stdin to {command}"
+          - "give {command} input from {file} instead of the keyboard"
+          - "read from a file instead of stdin"
+          - "use {file} as the input for {command}"
+        pattern: "{command} < {file}"
+        example: "sort < names.txt"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: ["<<", "<<<"]
+
+  - name: "<<"
+    description: "Here-document: provide multi-line input inline to a command"
+    common_intents:
+      - intent: "pass a multi-line block of text as stdin to a command"
+        alternate_phrasings:
+          - "command << 'EOF'"
+          - "provide inline heredoc input to {command}"
+          - "write multiple lines directly into {command} in a script"
+          - "embed a block of text as input without a separate file"
+          - "use a heredoc to supply input to {command}"
+        pattern: "{command} << '{EOF_MARKER}'\n{content}\n{EOF_MARKER}"
+        example: "cat << 'EOF'\nline one\nline two\nEOF"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: ["<<<", "<"]
+
+  - name: "<<<"
+    description: "Here-string: pass a single string as stdin to a command"
+    common_intents:
+      - intent: "pass a single string as stdin to a command without echo"
+        alternate_phrasings:
+          - "command <<< 'string'"
+          - "feed a string directly to {command} as input"
+          - "pass a literal string to stdin without echo or a pipe"
+          - "use a herestring to give {command} a value"
+          - "give {command} a one-liner string as its stdin"
+        pattern: "{command} <<< '{string}'"
+        example: "base64 -d <<< 'aGVsbG8='"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: ["<<", "echo"]
+
+  - name: "|"
+    description: "Pipe stdout of one command to stdin of another"
+    common_intents:
+      - intent: "pipe the output of one command into another"
+        alternate_phrasings:
+          - "cmd1 | cmd2"
+          - "send the output of {cmd1} into {cmd2}"
+          - "chain two commands together"
+          - "pass what {cmd1} prints to {cmd2}"
+          - "filter the output of {cmd1} with {cmd2}"
+        pattern: "{command1} | {command2}"
+        example: "ls -la | grep '.txt'"
+      - intent: "build a multi-stage pipeline"
+        alternate_phrasings:
+          - "cmd1 | cmd2 | cmd3"
+          - "chain several commands in sequence"
+          - "filter and transform output through multiple stages"
+          - "run output through a series of transformations"
+          - "compose several commands into a pipeline"
+        pattern: "{cmd1} | {cmd2} | {cmd3}"
+        example: "cat access.log | grep 'ERROR' | sort | uniq -c"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: ["|&", tee, xargs]
+
+  - name: "|&"
+    description: "Pipe both stdout and stderr of one command to stdin of another"
+    common_intents:
+      - intent: "pipe both stdout and stderr into another command"
+        alternate_phrasings:
+          - "cmd1 |& cmd2"
+          - "pipe all output including errors through {cmd2}"
+          - "send stdout and stderr together into a pipe"
+          - "filter errors and normal output with {cmd2}"
+          - "combine both streams into a pipe"
+        pattern: "{command1} |& {command2}"
+        example: "make |& grep 'error'"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: null
+    related_commands: ["|", "2>&1"]
+
+  # ─── JOB CONTROL ──────────────────────────────────────────────────────────
+
+  - name: "&"
+    description: "Run a command in the background"
+    common_intents:
+      - intent: "run a command in the background"
+        alternate_phrasings:
+          - "command &"
+          - "start {command} without blocking the terminal"
+          - "launch {command} in the background"
+          - "run {command} so I can keep using the shell"
+          - "background a long-running command"
+        pattern: "{command} &"
+        example: "python3 server.py &"
+      - intent: "run multiple commands in parallel"
+        alternate_phrasings:
+          - "cmd1 & cmd2 &"
+          - "start several commands at the same time"
+          - "launch {cmd1} and {cmd2} simultaneously"
+          - "run jobs in parallel"
+          - "background all the commands and run them concurrently"
+        pattern: "{cmd1} & {cmd2} &"
+        example: "build-frontend.sh & build-backend.sh &"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "Use 'kill %{job_number}' or 'fg' to bring it back and stop it"
+    related_commands: [disown, fg, bg, jobs]
+
+  - name: disown
+    description: "Remove a background job from the shell's job table so it outlives the session"
+    common_intents:
+      - intent: "keep a background job running after the terminal closes"
+        alternate_phrasings:
+          - "disown %1"
+          - "detach a background process from the shell"
+          - "make a job survive when I log out"
+          - "let {command} keep running after I close the terminal"
+          - "how do I run a process so it doesn't die when I exit"
+        pattern: "disown %{job_number}"
+        example: "python3 server.py & disown"
+      - intent: "disown all background jobs at once"
+        alternate_phrasings:
+          - "disown -a"
+          - "release all background jobs from this shell"
+          - "detach every job before closing the terminal"
+          - "let all background processes keep running after logout"
+          - "remove all jobs from the job table"
+        pattern: "disown -a"
+        example: "disown -a"
+    key_flags:
+      - "-a: disown all jobs"
+      - "-h: mark jobs to not receive SIGHUP (without removing from job table)"
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "Cannot re-own a disowned process; use 'kill {pid}' to stop it"
+    related_commands: ["&", nohup, jobs, kill]
+
+  - name: "Ctrl+C"
+    description: "Send SIGINT to the foreground process to interrupt it"
+    common_intents:
+      - intent: "stop a running command"
+        alternate_phrasings:
+          - "Ctrl+C"
+          - "interrupt the current command"
+          - "kill what's running in the foreground"
+          - "abort the command that's running"
+          - "how do I stop a command that won't finish"
+        pattern: "Ctrl+C"
+        example: "Ctrl+C"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "Re-run the command if it was interrupted unintentionally"
+    related_commands: ["Ctrl+Z", kill, trap]
+
+  - name: "Ctrl+Z"
+    description: "Suspend the foreground process and return to the shell prompt"
+    common_intents:
+      - intent: "suspend a running command and return to the shell"
+        alternate_phrasings:
+          - "Ctrl+Z"
+          - "pause the current foreground process"
+          - "suspend what's running so I can do something else"
+          - "how do I temporarily pause a command"
+          - "put the current job in the background paused"
+        pattern: "Ctrl+Z"
+        example: "Ctrl+Z"
+      - intent: "resume a suspended job in the background"
+        alternate_phrasings:
+          - "bg %1"
+          - "resume the suspended job in the background"
+          - "continue a paused process without bringing it to the foreground"
+          - "let the suspended job keep running in the background"
+          - "restart a stopped job backgrounded"
+        pattern: "bg %{job_number}"
+        example: "bg %1"
+      - intent: "resume a suspended job in the foreground"
+        alternate_phrasings:
+          - "fg %1"
+          - "bring a background job back to the foreground"
+          - "resume the paused job so I can interact with it"
+          - "bring the suspended process back"
+          - "return to a job I backgrounded"
+        pattern: "fg %{job_number}"
+        example: "fg %1"
+    key_flags: []
+    safety:
+      level: safe
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo: "fg %{job_number} to resume the process"
+    related_commands: ["Ctrl+C", bg, fg, jobs, "&"]

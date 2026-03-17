@@ -1,0 +1,1172 @@
+domain: system-info
+description: "CPU, memory, disk, uptime, kernel info, hardware, and system identity"
+related_domains:
+  - process-management
+  - storage
+  - logging
+
+commands:
+  - name: uname
+    description: "Print system information including kernel name, release, version, and hardware architecture"
+    common_intents:
+      - intent: "show all system information at once"
+        alternate_phrasings:
+          - "uname -a"
+          - "what kernel and architecture is this machine running"
+          - "I need every piece of system info in one shot — kernel, hostname, arch, all of it"
+          - "dump the uname stuff"
+          - "what OS is this"
+        pattern: "uname -a"
+        example: "uname -a"
+      - intent: "show the kernel version"
+        alternate_phrasings:
+          - "uname -r"
+          - "what kernel version is installed"
+          - "I need to check if the kernel is new enough to support a feature"
+          - "kernel release"
+        pattern: "uname -r"
+        example: "uname -r"
+      - intent: "show the machine hardware architecture"
+        alternate_phrasings:
+          - "uname -m"
+          - "is this system 64-bit or 32-bit"
+          - "what CPU architecture am I on, x86_64 or arm or something else"
+          - "check arch"
+        pattern: "uname -m"
+        example: "uname -m"
+      - intent: "show the operating system name"
+        alternate_phrasings:
+          - "uname -o"
+          - "what operating system is this, technically"
+          - "print the OS"
+        pattern: "uname -o"
+        example: "uname -o"
+    key_flags:
+      - flag: "-a"
+        meaning: "Print all available information (kernel name, nodename, release, version, machine, OS)"
+      - flag: "-r"
+        meaning: "Print the kernel release (e.g. 6.1.0-21-amd64)"
+      - flag: "-s"
+        meaning: "Print the kernel name (e.g. Linux); default with no options"
+      - flag: "-n"
+        meaning: "Print the network node hostname"
+      - flag: "-v"
+        meaning: "Print the kernel version string (build date and extra info)"
+      - flag: "-m"
+        meaning: "Print the machine hardware name (e.g. x86_64)"
+      - flag: "-p"
+        meaning: "Print the processor type (non-portable; may print 'unknown')"
+      - flag: "-o"
+        meaning: "Print the operating system (e.g. GNU/Linux)"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "uname is read-only; no undo required"
+    related_commands:
+      - hostnamectl
+      - lscpu
+      - hostname
+
+  - name: hostname
+    description: "Show or set the system's hostname and related network identity"
+    common_intents:
+      - intent: "show the current hostname"
+        alternate_phrasings:
+          - "hostname"
+          - "what is this machine called"
+          - "what is the name of this server"
+          - "what is my hostname"
+        pattern: "hostname"
+        example: "hostname"
+      - intent: "show the fully qualified domain name"
+        alternate_phrasings:
+          - "hostname -f"
+          - "what is the FQDN of this host"
+          - "show the full domain name including subdomain"
+          - "get fqdn"
+        pattern: "hostname -f"
+        example: "hostname -f"
+      - intent: "show the IP address of this host"
+        alternate_phrasings:
+          - "hostname -I"
+          - "what IP addresses does this machine have"
+          - "show all IPs on this machine"
+          - "what is my ip"
+        pattern: "hostname -I"
+        example: "hostname -I"
+      - intent: "set the hostname temporarily"
+        alternate_phrasings:
+          - "change the hostname"
+          - "rename this machine right now (until reboot)"
+          - "set hostname to {new_hostname}"
+        pattern: "sudo hostname {new_hostname}"
+        example: "sudo hostname webserver01"
+    key_flags:
+      - flag: "-f / --fqdn"
+        meaning: "Display the Fully Qualified Domain Name"
+      - flag: "-i / --ip-address"
+        meaning: "Display the IP address of the hostname (requires name resolution)"
+      - flag: "-I / --all-ip-addresses"
+        meaning: "Display all IP addresses of the host without name resolution"
+      - flag: "-s / --short"
+        meaning: "Display the short hostname (cut at first dot)"
+      - flag: "-d / --domain"
+        meaning: "Display the DNS domain name portion"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for:
+        - "setting a new hostname (sudo hostname {name})"
+      blocked_patterns: []
+    undo:
+      "set hostname": "sudo hostname {old_hostname} — or reboot to restore /etc/hostname"
+      "read current hostname": "read-only"
+    related_commands:
+      - hostnamectl
+      - uname
+      - timedatectl
+
+  - name: uptime
+    description: "Show how long the system has been running, current time, logged-in user count, and load averages"
+    common_intents:
+      - intent: "show system uptime and load averages"
+        alternate_phrasings:
+          - "uptime"
+          - "how long has this server been running"
+          - "when was the last reboot"
+          - "check load average"
+          - "is the system under heavy load"
+        pattern: "uptime"
+        example: "uptime"
+        followup: "w to see per-user activity and load detail"
+      - intent: "show uptime in a human-readable pretty format"
+        alternate_phrasings:
+          - "uptime -p"
+          - "just tell me the uptime in plain English"
+          - "show how long it has been up without all the extra info"
+          - "pretty uptime"
+        pattern: "uptime -p"
+        example: "uptime -p"
+      - intent: "show the date and time the system was last booted"
+        alternate_phrasings:
+          - "uptime -s"
+          - "when exactly did this machine boot"
+          - "what was the boot time"
+          - "last boot timestamp"
+        pattern: "uptime -s"
+        example: "uptime -s"
+    key_flags:
+      - flag: "-p / --pretty"
+        meaning: "Show uptime in human-readable format (e.g. 'up 2 hours, 30 minutes')"
+      - flag: "-s / --since"
+        meaning: "Print the date and time since the system has been up (yyyy-mm-dd HH:MM:SS)"
+      - flag: "-r / --raw"
+        meaning: "Display time data in seconds"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "uptime is read-only; no undo required"
+    related_commands:
+      - w
+      - who
+      - top
+
+  - name: date
+    description: "Print or set the system date and time with flexible format control"
+    common_intents:
+      - intent: "show the current date and time"
+        alternate_phrasings:
+          - "date"
+          - "what time is it"
+          - "what is today's date"
+          - "show the current timestamp"
+          - "what day is it"
+        pattern: "date"
+        example: "date"
+      - intent: "show the current date in ISO 8601 format"
+        alternate_phrasings:
+          - "date --iso-8601"
+          - "print today's date in YYYY-MM-DD format"
+          - "I need the date formatted for a log file or filename"
+          - "iso date"
+        pattern: "date +%F"
+        example: "date +%F"
+      - intent: "show current date and time as a Unix timestamp"
+        alternate_phrasings:
+          - "date +%s"
+          - "what is the current Unix epoch time"
+          - "get the timestamp in seconds since 1970"
+          - "epoch now"
+        pattern: "date +%s"
+        example: "date +%s"
+      - intent: "convert a Unix timestamp to a human-readable date"
+        alternate_phrasings:
+          - "date -d @{timestamp}"
+          - "what date is Unix timestamp {timestamp}"
+          - "convert epoch {timestamp} to a date"
+          - "decode unix timestamp"
+        pattern: "date -d @{timestamp}"
+        example: "date -d @1700000000"
+      - intent: "show the current time in UTC"
+        alternate_phrasings:
+          - "date -u"
+          - "what time is it in UTC right now"
+          - "show the date in GMT"
+          - "utc time now"
+        pattern: "date -u"
+        example: "date -u"
+      - intent: "format date for use in a filename"
+        alternate_phrasings:
+          - "date +%Y%m%d_%H%M%S"
+          - "give me a timestamp string safe for file names"
+          - "sortable datetime without spaces or colons"
+        pattern: "date +%Y%m%d_%H%M%S"
+        example: "date +%Y%m%d_%H%M%S"
+    key_flags:
+      - flag: "+{FORMAT}"
+        meaning: "Output format string (e.g. +%Y-%m-%d for ISO date)"
+      - flag: "-u / --utc"
+        meaning: "Print or set time in Coordinated Universal Time (UTC/GMT)"
+      - flag: "-d / --date=STRING"
+        meaning: "Display time described by STRING instead of 'now' (e.g. 'yesterday', '@1700000000')"
+      - flag: "-R / --rfc-email"
+        meaning: "Output date in RFC 5322 email format (Mon, 14 Aug 2006 02:34:56 -0600)"
+      - flag: "--iso-8601[=FMT]"
+        meaning: "Output in ISO 8601 format; FMT can be date, hours, minutes, seconds"
+      - flag: "--rfc-3339=FMT"
+        meaning: "Output in RFC 3339 format (space-separated: 2006-08-14 02:34:56-06:00)"
+      - flag: "-s / --set=STRING"
+        meaning: "Set the system clock to the time described by STRING (requires root)"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for:
+        - "setting the system clock (date -s or date MMDDhhmm)"
+      blocked_patterns:
+        - "date -s *"
+        - "date [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*"
+    undo:
+      "set system clock": "sudo timedatectl set-ntp true to resync from NTP"
+      "display date": "read-only"
+    related_commands:
+      - timedatectl
+      - cal
+      - hwclock
+
+  - name: cal
+    description: "Display a calendar for the current month, a specific month, or an entire year"
+    common_intents:
+      - intent: "show this month's calendar"
+        alternate_phrasings:
+          - "cal"
+          - "show me a calendar for this month"
+          - "what does the calendar look like this month"
+          - "calendar"
+        pattern: "cal"
+        example: "cal"
+      - intent: "show the calendar for a specific month and year"
+        alternate_phrasings:
+          - "cal {month} {year}"
+          - "show me what March 2024 looked like"
+          - "what day of the week did January 1st fall on in {year}"
+          - "calendar for {month} {year}"
+        pattern: "cal {month} {year}"
+        example: "cal 3 2024"
+      - intent: "show the full calendar for a year"
+        alternate_phrasings:
+          - "cal {year}"
+          - "show me all twelve months of {year}"
+          - "full year calendar for {year}"
+          - "calendar year {year}"
+        pattern: "cal {year}"
+        example: "cal 2025"
+    key_flags:
+      - flag: "{month} {year}"
+        meaning: "Display calendar for the specified month (1-12) and year"
+      - flag: "{year}"
+        meaning: "Display all 12 months for the specified year"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "cal is read-only; no undo required"
+    related_commands:
+      - date
+      - timedatectl
+
+  - name: who
+    description: "Show which users are currently logged into the system, on which terminal, and since when"
+    common_intents:
+      - intent: "show who is currently logged in"
+        alternate_phrasings:
+          - "who"
+          - "who is logged into this machine right now"
+          - "how many users are on this system"
+          - "list logged-in users"
+          - "is anyone else on this box"
+        pattern: "who"
+        example: "who"
+      - intent: "show all login information with column headers"
+        alternate_phrasings:
+          - "who -aH"
+          - "show everything about current sessions with labels"
+          - "give me full who output including boot time and runlevel"
+          - "verbose who"
+        pattern: "who -aH"
+        example: "who -aH"
+      - intent: "show when the system last booted"
+        alternate_phrasings:
+          - "who -b"
+          - "when was the last system restart"
+          - "what time did this machine come back up"
+          - "boot time"
+        pattern: "who -b"
+        example: "who -b"
+    key_flags:
+      - flag: "-a / --all"
+        meaning: "Show all information: boot time, dead processes, login processes, runlevel"
+      - flag: "-b / --boot"
+        meaning: "Time of last system boot"
+      - flag: "-H / --heading"
+        meaning: "Print a header line with column labels"
+      - flag: "-q / --count"
+        meaning: "Print only login names and the count of users logged on"
+      - flag: "-r / --runlevel"
+        meaning: "Print the current system runlevel"
+      - flag: "-T / --mesg"
+        meaning: "Show whether each user's terminal accepts messages (+, -, or ?)"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "who is read-only; no undo required"
+    related_commands:
+      - w
+      - whoami
+      - id
+      - uptime
+
+  - name: w
+    description: "Show who is logged in and what each user is currently doing, with CPU usage and idle time"
+    common_intents:
+      - intent: "show logged-in users and their current activity"
+        alternate_phrasings:
+          - "w"
+          - "who is on this machine and what are they running"
+          - "show me active user sessions and what command each person is running"
+          - "are any users active right now"
+          - "user activity"
+        pattern: "w"
+        example: "w"
+        followup: "kill {pid} if a session is hung"
+      - intent: "show activity for a specific user"
+        alternate_phrasings:
+          - "w {username}"
+          - "what is alice doing on this server"
+          - "show me the session info for a specific user"
+          - "check on user {username}"
+        pattern: "w {username}"
+        example: "w alice"
+      - intent: "show user activity without the header line"
+        alternate_phrasings:
+          - "w -h"
+          - "w output with no header for scripting"
+          - "suppress the uptime header in w"
+        pattern: "w -h"
+        example: "w -h"
+    key_flags:
+      - flag: "-h / --no-header"
+        meaning: "Suppress the header line (useful for scripting)"
+      - flag: "-s / --short"
+        meaning: "Use short format; omit login time, JCPU, and PCPU columns"
+      - flag: "-f / --from"
+        meaning: "Toggle display of the remote hostname from field"
+      - flag: "-i / --ip-addr"
+        meaning: "Display IP address instead of hostname in the from field"
+      - flag: "-p / --pids"
+        meaning: "Display PID of the login process or current process"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "w is read-only; no undo required"
+    related_commands:
+      - who
+      - uptime
+      - ps
+      - top
+
+  - name: whoami
+    description: "Print the effective username of the current user (equivalent to id -un)"
+    common_intents:
+      - intent: "show what user I am running as"
+        alternate_phrasings:
+          - "whoami"
+          - "what user am I logged in as"
+          - "I ran sudo and now I'm not sure what account I'm in"
+          - "am I root right now"
+          - "what is my username"
+        pattern: "whoami"
+        example: "whoami"
+    key_flags: []
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "whoami is read-only; no undo required"
+    related_commands:
+      - id
+      - who
+      - sudo
+
+  - name: id
+    description: "Display the current user's UID, GID, and all group memberships"
+    common_intents:
+      - intent: "show current user identity including all groups"
+        alternate_phrasings:
+          - "id"
+          - "what user am I and what groups do I belong to"
+          - "show my UID and GID"
+          - "show my user and group ids"
+          - "check my permissions"
+        pattern: "id"
+        example: "id"
+      - intent: "show the numeric user ID only"
+        alternate_phrasings:
+          - "id -u"
+          - "just give me my UID as a number"
+          - "get the numeric uid for the current user"
+          - "my uid"
+        pattern: "id -u"
+        example: "id -u"
+      - intent: "show all groups the current user belongs to"
+        alternate_phrasings:
+          - "id -Gn"
+          - "what groups am I in"
+          - "list all groups for my account"
+          - "show group memberships"
+        pattern: "id -Gn"
+        example: "id -Gn"
+      - intent: "show identity for a specific user"
+        alternate_phrasings:
+          - "id {username}"
+          - "what groups does alice belong to"
+          - "show UID and GID for user {username}"
+          - "check another user's id"
+        pattern: "id {username}"
+        example: "id alice"
+    key_flags:
+      - flag: "-u / --user"
+        meaning: "Print only the effective user ID (numeric)"
+      - flag: "-un"
+        meaning: "Print only the effective username (name)"
+      - flag: "-g / --group"
+        meaning: "Print only the effective group ID (numeric)"
+      - flag: "-gn"
+        meaning: "Print only the effective primary group name"
+      - flag: "-G / --groups"
+        meaning: "Print all group IDs the user belongs to"
+      - flag: "-Gn"
+        meaning: "Print all group names the user belongs to"
+      - flag: "-n / --name"
+        meaning: "Print name instead of number (use with -u, -g, or -G)"
+      - flag: "-r / --real"
+        meaning: "Print the real ID rather than the effective ID"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "id is read-only; no undo required"
+    related_commands:
+      - whoami
+      - who
+      - groups
+
+  - name: lscpu
+    description: "Display detailed CPU architecture information including cores, threads, sockets, cache, and NUMA topology"
+    common_intents:
+      - intent: "show CPU architecture details"
+        alternate_phrasings:
+          - "lscpu"
+          - "how many CPUs and cores does this machine have"
+          - "show me everything about the processor"
+          - "what kind of CPU is in this machine"
+          - "cpu info"
+        pattern: "lscpu"
+        example: "lscpu"
+      - intent: "show CPU info in extended table format"
+        alternate_phrasings:
+          - "lscpu -e"
+          - "show per-CPU details in a table"
+          - "list each logical CPU with its socket, core, and node"
+          - "extended cpu table"
+        pattern: "lscpu -e"
+        example: "lscpu -e"
+      - intent: "show CPU cache details"
+        alternate_phrasings:
+          - "lscpu -C"
+          - "how big is the L1 and L2 and L3 cache"
+          - "show cache sizes for this CPU"
+          - "cpu cache info"
+        pattern: "lscpu -C"
+        example: "lscpu -C"
+      - intent: "show CPU info in JSON format for scripting"
+        alternate_phrasings:
+          - "lscpu -J"
+          - "get cpu information as JSON"
+          - "machine-readable cpu details"
+        pattern: "lscpu -J"
+        example: "lscpu -J"
+    key_flags:
+      - flag: "-e / --extended"
+        meaning: "Display per-CPU info in a human-readable table (cores, sockets, NUMA node)"
+      - flag: "-C / --caches"
+        meaning: "Display details about each CPU cache level (L1, L2, L3) including size and sharing"
+      - flag: "-J / --json"
+        meaning: "Output in JSON format"
+      - flag: "-p / --parse"
+        meaning: "Output in parseable format for scripts"
+      - flag: "-b / --online"
+        meaning: "Limit output to online CPUs only (use with -e or -p)"
+      - flag: "-c / --offline"
+        meaning: "Limit output to offline CPUs only (use with -e or -p)"
+      - flag: "-B / --bytes"
+        meaning: "Print cache sizes in bytes rather than human-readable units"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "lscpu is read-only; no undo required"
+    related_commands:
+      - lsmem
+      - free
+      - uname
+      - nproc
+
+  - name: lsmem
+    description: "List available memory ranges with their online/offline status and block size"
+    common_intents:
+      - intent: "show memory block information and online status"
+        alternate_phrasings:
+          - "lsmem"
+          - "show me how the system memory is arranged and what is online"
+          - "list available memory blocks"
+          - "memory topology"
+        pattern: "lsmem"
+        example: "lsmem"
+      - intent: "show memory info in JSON format"
+        alternate_phrasings:
+          - "lsmem -J"
+          - "get memory block info as JSON"
+          - "machine-readable memory layout"
+        pattern: "lsmem -J"
+        example: "lsmem -J"
+      - intent: "show memory sizes in bytes"
+        alternate_phrasings:
+          - "lsmem -b"
+          - "show memory block sizes as raw byte counts"
+          - "no human-readable units, just bytes"
+        pattern: "lsmem -b"
+        example: "lsmem -b"
+    key_flags:
+      - flag: "-J / --json"
+        meaning: "Use JSON output format"
+      - flag: "-b / --bytes"
+        meaning: "Print sizes in bytes rather than human-readable units"
+      - flag: "-a / --all"
+        meaning: "List each individual memory block rather than grouping similar ones"
+      - flag: "-o / --output list"
+        meaning: "Specify which output columns to print"
+      - flag: "--summary[=when]"
+        meaning: "Control summary line output (never, always, or only)"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "lsmem is read-only; no undo required"
+    related_commands:
+      - lscpu
+      - free
+      - dmidecode
+
+  - name: free
+    description: "Display the total, used, free, shared, and available RAM and swap memory"
+    common_intents:
+      - intent: "show current memory usage"
+        alternate_phrasings:
+          - "free -h"
+          - "how much RAM is being used"
+          - "how much memory is available on this system"
+          - "check my RAM"
+          - "am I running out of memory"
+        pattern: "free -h"
+        example: "free -h"
+        followup: "vmstat or top for live monitoring"
+      - intent: "show memory in megabytes"
+        alternate_phrasings:
+          - "free -m"
+          - "show memory usage in MB"
+          - "free memory in megabytes"
+          - "RAM in MB"
+        pattern: "free -m"
+        example: "free -m"
+      - intent: "show memory in gigabytes"
+        alternate_phrasings:
+          - "free -g"
+          - "show memory usage in GB"
+          - "how many gigabytes of RAM are free"
+        pattern: "free -g"
+        example: "free -g"
+      - intent: "continuously monitor memory usage"
+        alternate_phrasings:
+          - "free -h -s 2"
+          - "show memory usage every 2 seconds"
+          - "watch memory in real time"
+          - "refresh free output on an interval"
+        pattern: "free -h -s {interval}"
+        example: "free -h -s 2"
+      - intent: "show memory with a totals row"
+        alternate_phrasings:
+          - "free -ht"
+          - "show the sum of RAM and swap together at the bottom"
+          - "total memory including swap"
+        pattern: "free -ht"
+        example: "free -ht"
+    key_flags:
+      - flag: "-h / --human"
+        meaning: "Show values in human-readable units (Ki, Mi, Gi) auto-scaled"
+      - flag: "-m / --mebi"
+        meaning: "Display memory in mebibytes"
+      - flag: "-g / --gibi"
+        meaning: "Display memory in gibibytes"
+      - flag: "-k / --kibi"
+        meaning: "Display in kibibytes (default)"
+      - flag: "-b / --bytes"
+        meaning: "Display in bytes"
+      - flag: "-s / --seconds delay"
+        meaning: "Continuously refresh output every delay seconds"
+      - flag: "-t / --total"
+        meaning: "Add a row showing the totals for all columns"
+      - flag: "-w / --wide"
+        meaning: "Wide mode: report buffers and cache in separate columns"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "free is read-only; no undo required"
+    related_commands:
+      - vmstat
+      - top
+      - lsmem
+      - /proc/meminfo
+
+  - name: vmstat
+    description: "Report statistics about processes, memory, paging, block I/O, traps, and CPU activity"
+    common_intents:
+      - intent: "show a snapshot of virtual memory and CPU statistics"
+        alternate_phrasings:
+          - "vmstat"
+          - "quick overview of memory paging and CPU usage"
+          - "show me swapping activity and cpu breakdown"
+          - "vmstat snapshot"
+        pattern: "vmstat"
+        example: "vmstat"
+      - intent: "monitor system stats continuously at an interval"
+        alternate_phrasings:
+          - "vmstat 2 5"
+          - "show vmstat every 2 seconds, 5 times"
+          - "watch memory and CPU stats live"
+          - "is my system swapping right now"
+          - "continuous vmstat"
+        pattern: "vmstat {interval} {count}"
+        example: "vmstat 2 5"
+        followup: "check 'si' and 'so' columns for swap in/out activity"
+      - intent: "show memory statistics in megabytes"
+        alternate_phrasings:
+          - "vmstat -S M"
+          - "vmstat output in MB instead of KB"
+          - "make vmstat numbers readable"
+        pattern: "vmstat -S M"
+        example: "vmstat -S M"
+    key_flags:
+      - flag: "{interval}"
+        meaning: "Report every N seconds continuously"
+      - flag: "{interval} {count}"
+        meaning: "Report N times, once per interval seconds"
+      - flag: "-S {unit}"
+        meaning: "Scale output (k=1000, K=1024, m=1000000, M=1048576)"
+      - flag: "-a"
+        meaning: "Show active and inactive memory"
+      - flag: "-d"
+        meaning: "Show disk statistics"
+      - flag: "-s"
+        meaning: "Display a table of various event counters and memory statistics"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "vmstat is read-only; no undo required"
+    related_commands:
+      - free
+      - iostat
+      - sar
+      - top
+
+  - name: iostat
+    description: "Report CPU utilization and I/O statistics for block devices since last boot or at an interval"
+    common_intents:
+      - intent: "show a summary of CPU and disk I/O statistics"
+        alternate_phrasings:
+          - "iostat"
+          - "how is disk I/O performing since boot"
+          - "show me reads and writes per device"
+          - "disk throughput stats"
+        pattern: "iostat"
+        example: "iostat"
+      - intent: "show extended disk statistics with utilization"
+        alternate_phrasings:
+          - "iostat -x"
+          - "show disk utilization percentage and await times"
+          - "I want to know if a disk is saturated"
+          - "detailed io stats with await and util"
+          - "is my disk a bottleneck"
+        pattern: "iostat -x"
+        example: "iostat -x"
+        followup: "check %util column — values near 100% indicate saturation"
+      - intent: "monitor disk I/O continuously at an interval"
+        alternate_phrasings:
+          - "iostat 2"
+          - "show I/O stats every 2 seconds"
+          - "watch disk activity live"
+          - "continuous iostat"
+        pattern: "iostat {interval}"
+        example: "iostat 2"
+      - intent: "show disk stats for a specific device"
+        alternate_phrasings:
+          - "iostat -x {device}"
+          - "show I/O stats only for sda"
+          - "how is {device} performing"
+          - "iostat for one disk"
+        pattern: "iostat -x {device}"
+        example: "iostat -x sda"
+      - intent: "show stats in megabytes per second"
+        alternate_phrasings:
+          - "iostat -m"
+          - "show I/O throughput in MB/s"
+          - "iostat with MB instead of blocks"
+        pattern: "iostat -m"
+        example: "iostat -m"
+    key_flags:
+      - flag: "-x"
+        meaning: "Display extended statistics (await, %util, r/s, w/s, aqu-sz, etc.)"
+      - flag: "-c"
+        meaning: "Display only the CPU utilization report"
+      - flag: "-d"
+        meaning: "Display only the device utilization report"
+      - flag: "-m"
+        meaning: "Display statistics in megabytes per second"
+      - flag: "-k"
+        meaning: "Display statistics in kilobytes per second"
+      - flag: "-N"
+        meaning: "Display registered device mapper names (useful for LVM)"
+      - flag: "-p {device}"
+        meaning: "Show statistics for a device and all its partitions"
+      - flag: "-t"
+        meaning: "Print a timestamp with each report"
+      - flag: "-y"
+        meaning: "Omit the first (since-boot) report when using an interval"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "iostat is read-only; no undo required"
+    related_commands:
+      - vmstat
+      - sar
+      - iotop
+      - df
+
+  - name: sar
+    description: "Collect and report on CPU, memory, I/O, network, and other system activity metrics"
+    common_intents:
+      - intent: "report CPU utilization at an interval"
+        alternate_phrasings:
+          - "sar -u 2 5"
+          - "show CPU usage every 2 seconds"
+          - "monitor CPU with sar"
+          - "cpu utilization over time"
+          - "what is my CPU doing"
+        pattern: "sar -u {interval} {count}"
+        example: "sar -u 2 5"
+      - intent: "report memory utilization at an interval"
+        alternate_phrasings:
+          - "sar -r 1 5"
+          - "monitor memory usage with sar"
+          - "show RAM stats over time"
+          - "sar memory report"
+        pattern: "sar -r {interval} {count}"
+        example: "sar -r 1 5"
+      - intent: "report I/O and transfer rates"
+        alternate_phrasings:
+          - "sar -b 1"
+          - "show block device I/O rates with sar"
+          - "disk throughput from sar"
+          - "I/O activity per second"
+        pattern: "sar -b {interval}"
+        example: "sar -b 1"
+      - intent: "report network interface statistics"
+        alternate_phrasings:
+          - "sar -n DEV 2 5"
+          - "show network throughput per interface"
+          - "how much traffic is going through each NIC"
+          - "sar network stats"
+        pattern: "sar -n DEV {interval} {count}"
+        example: "sar -n DEV 2 5"
+      - intent: "show CPU usage for a specific core"
+        alternate_phrasings:
+          - "sar -P {core} 1 3"
+          - "show CPU stats for a single processor core"
+          - "per-cpu breakdown with sar"
+          - "sar individual core"
+        pattern: "sar -P {core} {interval} {count}"
+        example: "sar -P 0 1 3"
+    key_flags:
+      - flag: "-u [ALL]"
+        meaning: "CPU utilization report; ALL shows extra fields (steal, guest, etc.)"
+      - flag: "-r [ALL]"
+        meaning: "Memory utilization statistics"
+      - flag: "-b"
+        meaning: "I/O and transfer rate statistics for physical devices"
+      - flag: "-d"
+        meaning: "Activity statistics for each block device"
+      - flag: "-n {keyword}"
+        meaning: "Network statistics (DEV for interfaces, TCP, UDP, SOCK, etc.)"
+      - flag: "-q"
+        meaning: "Queue length and load averages"
+      - flag: "-B"
+        meaning: "Paging statistics (page faults, pages swapped)"
+      - flag: "-P {cpu|ALL}"
+        meaning: "Per-processor statistics for specified CPU(s)"
+      - flag: "-S"
+        meaning: "Swap space utilization"
+      - flag: "-f {filename}"
+        meaning: "Read activity data from a saved binary file instead of live data"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "sar is read-only; no undo required"
+    related_commands:
+      - iostat
+      - vmstat
+      - mpstat
+      - top
+
+  - name: dmesg
+    description: "Print or examine the kernel ring buffer — hardware events, driver messages, boot messages, and errors"
+    common_intents:
+      - intent: "show the kernel ring buffer messages"
+        alternate_phrasings:
+          - "dmesg"
+          - "show me kernel log messages"
+          - "look at dmesg output"
+          - "what has the kernel been saying"
+          - "show boot messages"
+        pattern: "dmesg"
+        example: "dmesg"
+        followup: "pipe to less or grep for specific keywords"
+      - intent: "show kernel error messages only"
+        alternate_phrasings:
+          - "dmesg -l err"
+          - "show only kernel errors"
+          - "filter dmesg to just the error lines"
+          - "are there any kernel errors"
+          - "dmesg errors only"
+        pattern: "dmesg -l err"
+        example: "dmesg -l err"
+      - intent: "show kernel messages with human-readable timestamps"
+        alternate_phrasings:
+          - "dmesg -T"
+          - "show dmesg with real dates and times instead of offsets"
+          - "when did each kernel message happen"
+          - "dmesg with timestamps"
+        pattern: "dmesg -T"
+        example: "dmesg -T"
+      - intent: "follow the kernel log for new messages"
+        alternate_phrasings:
+          - "dmesg -w"
+          - "watch dmesg for new kernel messages as they arrive"
+          - "I'm plugging in hardware and want to see what the kernel says"
+          - "live dmesg feed"
+          - "tail dmesg"
+        pattern: "dmesg -w"
+        example: "dmesg -w"
+      - intent: "show kernel messages in human-friendly format"
+        alternate_phrasings:
+          - "dmesg -H"
+          - "make dmesg output more readable"
+          - "pretty print the kernel log"
+          - "human readable dmesg"
+        pattern: "dmesg -H"
+        example: "dmesg -H"
+      - intent: "search kernel messages for hardware or driver info"
+        alternate_phrasings:
+          - "dmesg | grep -i {keyword}"
+          - "find kernel messages about a specific device or driver"
+          - "was my USB device recognized by the kernel"
+          - "check if a hardware error appeared in dmesg"
+        pattern: "dmesg | grep -i {keyword}"
+        example: "dmesg | grep -i usb"
+    key_flags:
+      - flag: "-T / --ctime"
+        meaning: "Print human-readable timestamps (note: may be inaccurate after suspend/resume)"
+      - flag: "-H / --human"
+        meaning: "Enable human-readable output with colors and relative timestamps"
+      - flag: "-w / --follow"
+        meaning: "Wait for and print new messages as they arrive (like tail -f)"
+      - flag: "-l / --level list"
+        meaning: "Filter to specific log levels (err, warn, info, debug, etc.)"
+      - flag: "-L / --color"
+        meaning: "Colorize output by message severity"
+      - flag: "-e / --reltime"
+        meaning: "Display local time and delta between messages in human-readable form"
+      - flag: "--since {time}"
+        meaning: "Show messages from a specific time (e.g. '1 hour ago')"
+      - flag: "--until {time}"
+        meaning: "Show messages up to a specific time"
+      - flag: "-C / --clear"
+        meaning: "Clear the ring buffer (requires root)"
+    safety:
+      level: "safe"
+      requires_sudo: true
+      confirmation_required_for:
+        - "clearing the ring buffer (dmesg -C or dmesg --clear)"
+      blocked_patterns:
+        - "dmesg -C"
+        - "dmesg --clear"
+        - "dmesg -c"
+        - "dmesg --read-clear"
+    undo:
+      "clear ring buffer": "cannot be undone — cleared messages are gone"
+      "read messages": "read-only"
+    related_commands:
+      - journalctl
+      - syslog
+      - lsmod
+      - lspci
+
+  - name: hostnamectl
+    description: "Query and persistently set the system hostname (static, pretty, and transient) via systemd"
+    common_intents:
+      - intent: "show the current hostname and system identity"
+        alternate_phrasings:
+          - "hostnamectl"
+          - "show me the hostname and machine info from systemd"
+          - "what is this system's hostname, chassis type, and kernel"
+          - "system identity summary"
+        pattern: "hostnamectl"
+        example: "hostnamectl"
+      - intent: "set the system hostname permanently"
+        alternate_phrasings:
+          - "hostnamectl set-hostname {hostname}"
+          - "permanently rename this machine"
+          - "change the hostname and make it survive a reboot"
+          - "set hostname to {hostname}"
+          - "rename this server"
+        pattern: "sudo hostnamectl set-hostname {hostname}"
+        example: "sudo hostnamectl set-hostname webserver-prod"
+      - intent: "set a human-friendly pretty hostname"
+        alternate_phrasings:
+          - "hostnamectl set-hostname --pretty {pretty_name}"
+          - "set a display name for this machine with spaces and special characters"
+          - "pretty hostname"
+        pattern: "sudo hostnamectl set-hostname --pretty \"{pretty_name}\""
+        example: "sudo hostnamectl set-hostname --pretty \"Kellogg's Workstation\""
+    key_flags:
+      - flag: "status"
+        meaning: "Show current hostname settings (default when no command given)"
+      - flag: "set-hostname {name}"
+        meaning: "Set the system hostname (updates static, pretty, and transient by default)"
+      - flag: "--static"
+        meaning: "When used with set-hostname or status, operate on the static hostname only"
+      - flag: "--pretty"
+        meaning: "When used with set-hostname or status, operate on the pretty hostname only"
+      - flag: "--transient"
+        meaning: "When used with set-hostname or status, operate on the transient hostname only"
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "set-hostname (changes system identity persistently)"
+      blocked_patterns: []
+    undo:
+      "set-hostname": "sudo hostnamectl set-hostname {old_hostname}"
+    related_commands:
+      - hostname
+      - uname
+      - timedatectl
+
+  - name: timedatectl
+    description: "Query and control the system clock, timezone, and NTP synchronization via systemd"
+    common_intents:
+      - intent: "show current time, timezone, and NTP status"
+        alternate_phrasings:
+          - "timedatectl"
+          - "show me the system clock settings and whether NTP is active"
+          - "check if the time is synchronized"
+          - "what timezone is this server in"
+          - "is NTP running"
+        pattern: "timedatectl"
+        example: "timedatectl"
+      - intent: "list all available timezones"
+        alternate_phrasings:
+          - "timedatectl list-timezones"
+          - "what timezones can I set on this system"
+          - "show me all valid timezone names"
+          - "list timezones"
+        pattern: "timedatectl list-timezones"
+        example: "timedatectl list-timezones"
+        followup: "pipe to grep to search: timedatectl list-timezones | grep America"
+      - intent: "set the system timezone"
+        alternate_phrasings:
+          - "timedatectl set-timezone {timezone}"
+          - "change this server's timezone to {timezone}"
+          - "the server is in the wrong timezone, fix it"
+          - "set timezone to UTC"
+          - "change timezone"
+        pattern: "timedatectl set-timezone {timezone}"
+        example: "timedatectl set-timezone America/New_York"
+      - intent: "enable NTP time synchronization"
+        alternate_phrasings:
+          - "timedatectl set-ntp true"
+          - "turn on automatic time sync"
+          - "the clock is drifting, enable NTP"
+          - "enable network time"
+          - "sync time with NTP"
+        pattern: "timedatectl set-ntp true"
+        example: "timedatectl set-ntp true"
+      - intent: "set the system time manually"
+        alternate_phrasings:
+          - "timedatectl set-time {datetime}"
+          - "manually set the system clock to a specific time"
+          - "the clock is wrong and NTP is unavailable"
+        pattern: "timedatectl set-time \"{yyyy-MM-dd hh:mm:ss}\""
+        example: "timedatectl set-time \"2024-06-15 14:30:00\""
+    key_flags:
+      - flag: "status"
+        meaning: "Show system clock, RTC, NTP sync status, and timezone (default)"
+      - flag: "set-timezone {TZ}"
+        meaning: "Set the system timezone (e.g. America/Chicago, UTC, Europe/London)"
+      - flag: "list-timezones"
+        meaning: "List all available timezone names"
+      - flag: "set-ntp {bool}"
+        meaning: "Enable (true) or disable (false) NTP synchronization"
+      - flag: "set-time {time}"
+        meaning: "Set system clock to a specific time (disables NTP)"
+      - flag: "set-local-rtc {bool}"
+        meaning: "Configure whether the hardware clock (RTC) stores local time (1) or UTC (0)"
+      - flag: "timesync-status"
+        meaning: "Show current status of systemd-timesyncd NTP service"
+    safety:
+      level: "moderate"
+      requires_sudo: true
+      confirmation_required_for:
+        - "set-timezone (changes system timezone persistently)"
+        - "set-time (sets system clock manually)"
+        - "set-ntp false (disables time synchronization)"
+      blocked_patterns: []
+    undo:
+      "set-timezone": "timedatectl set-timezone {old_timezone}"
+      "set-time": "timedatectl set-ntp true to re-enable NTP sync"
+      "set-ntp false": "timedatectl set-ntp true"
+    related_commands:
+      - date
+      - hwclock
+      - chronyc
+      - ntpq
+
+  - name: locale
+    description: "Display locale-specific environment settings including language, character encoding, and formatting"
+    common_intents:
+      - intent: "show the current locale settings"
+        alternate_phrasings:
+          - "locale"
+          - "what locale is this system configured for"
+          - "show language and encoding settings"
+          - "what is my LANG setting"
+          - "check locale"
+        pattern: "locale"
+        example: "locale"
+      - intent: "list all available locales installed on the system"
+        alternate_phrasings:
+          - "locale -a"
+          - "what locales are installed on this machine"
+          - "which language packs are available"
+          - "show all locales"
+          - "list available locales"
+        pattern: "locale -a"
+        example: "locale -a"
+      - intent: "show the current date format for the locale"
+        alternate_phrasings:
+          - "locale date_fmt"
+          - "what date format does this locale use"
+          - "show the strftime format for dates in this locale"
+        pattern: "locale date_fmt"
+        example: "locale date_fmt"
+      - intent: "show all locale settings with keyword names"
+        alternate_phrasings:
+          - "locale -ck LC_TIME"
+          - "show every setting in the time locale category with names"
+          - "dump the LC_TIME locale variables"
+        pattern: "locale -ck {category}"
+        example: "locale -ck LC_TIME"
+    key_flags:
+      - flag: "-a / --all-locales"
+        meaning: "Display a list of all available locales"
+      - flag: "-m / --charmaps"
+        meaning: "Display available character set description files"
+      - flag: "-c / --category-name"
+        meaning: "Print the locale category name before each keyword block"
+      - flag: "-k / --keyword-name"
+        meaning: "Print keyword names alongside their values (keyword=\"value\" format)"
+      - flag: "-v / --verbose"
+        meaning: "Include LC_IDENTIFICATION metadata for each locale when used with -a"
+    safety:
+      level: "safe"
+      requires_sudo: false
+      confirmation_required_for: []
+      blocked_patterns: []
+    undo:
+      "no state change": "locale is read-only; no undo required"
+    related_commands:
+      - localectl
+      - timedatectl
+      - date
