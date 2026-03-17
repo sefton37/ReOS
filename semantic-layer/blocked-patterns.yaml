@@ -1,0 +1,593 @@
+# Master list of command patterns that should NEVER be executed.
+# Aggregated from all domain files in the semantic layer.
+# Used as a fast-reject filter before any command reaches execution.
+
+categories:
+
+  - name: "filesystem-destruction"
+    description: "Commands that destroy critical system directories or bulk-delete the filesystem"
+    patterns:
+      - pattern: "rm -rf /"
+        source_domain: file-operations
+        source_command: rm
+        why: "Destroys the entire root filesystem"
+      - pattern: "rm -rf /*"
+        source_domain: file-operations
+        source_command: rm
+        why: "Deletes all files and directories under root"
+      - pattern: "rm -rf /home"
+        source_domain: file-operations
+        source_command: rm
+        why: "Destroys all user home directories"
+      - pattern: "rm -rf /etc"
+        source_domain: file-operations
+        source_command: rm
+        why: "Destroys system configuration directory"
+      - pattern: "rm -rf /usr"
+        source_domain: file-operations
+        source_command: rm
+        why: "Destroys user-space system binaries and libraries"
+      - pattern: "rm -rf /boot"
+        source_domain: file-operations
+        source_command: rm
+        why: "Destroys bootloader and kernel files"
+      - pattern: "rm -rf /var"
+        source_domain: file-operations
+        source_command: rm
+        why: "Destroys variable data including logs, databases, and spool files"
+      - pattern: "rm --no-preserve-root -rf /"
+        source_domain: file-operations
+        source_command: rm
+        why: "Explicitly bypasses the root protection guard to destroy the entire filesystem"
+      - pattern: "find / -delete"
+        source_domain: file-operations
+        source_command: find
+        why: "Recursively deletes every file on the system starting from root"
+      - pattern: "find / -exec rm -rf {} \\;"
+        source_domain: file-operations
+        source_command: find
+        why: "Recursively deletes every file on the system via exec"
+      - pattern: "chmod -R 777 /"
+        source_domain: file-operations
+        source_command: chmod
+        why: "Makes every file on the system world-writable, destroying security posture"
+      - pattern: "chmod 777 -R /"
+        source_domain: permissions-security
+        source_command: chmod
+        why: "Makes every file on the system world-writable, destroying security posture"
+      - pattern: "chmod -R 777 /etc"
+        source_domain: file-operations
+        source_command: chmod
+        why: "Makes all system configuration files world-writable"
+      - pattern: "chmod -R 777 /usr"
+        source_domain: file-operations
+        source_command: chmod
+        why: "Makes all system binaries and libraries world-writable"
+      - pattern: "chmod 777 /etc/passwd"
+        source_domain: file-operations
+        source_command: chmod
+        why: "Makes the user database world-writable — trivial privilege escalation vector"
+      - pattern: "chmod 777 /etc/shadow"
+        source_domain: file-operations
+        source_command: chmod
+        why: "Makes the hashed password database world-readable — exposes all credentials"
+      - pattern: "chmod 777 /etc"
+        source_domain: permissions-security
+        source_command: chmod
+        why: "Makes the entire /etc directory world-writable"
+      - pattern: "chmod 777 /usr"
+        source_domain: permissions-security
+        source_command: chmod
+        why: "Makes /usr world-writable, exposing system binaries to tampering"
+      - pattern: "chown -R root /"
+        source_domain: file-operations
+        source_command: chown
+        why: "Changes ownership of every file to root, breaking non-root service accounts"
+      - pattern: "chown -R nobody /"
+        source_domain: file-operations
+        source_command: chown
+        why: "Changes ownership of every file to nobody, breaking the entire system"
+
+  - name: "storage-destruction"
+    description: "Commands that overwrite or destroy disk partitions, raw block devices, or filesystems"
+    patterns:
+      - pattern: "dd if=/dev/zero of=/dev/sda"
+        source_domain: storage
+        source_command: dd
+        why: "Overwrites the entire primary disk with zeros — all data permanently destroyed"
+      - pattern: "dd if=/dev/urandom of=/dev/sd{any}"
+        source_domain: storage
+        source_command: dd
+        why: "Overwrites a disk with random data — all data permanently destroyed"
+      - pattern: "dd of= targeting a mounted filesystem's underlying device"
+        source_domain: storage
+        source_command: dd
+        why: "Writing to a mounted device causes immediate filesystem corruption"
+      - pattern: "mkfs on a currently mounted partition"
+        source_domain: storage
+        source_command: mkfs
+        why: "Formatting a mounted partition causes immediate filesystem corruption and data loss"
+      - pattern: "fsck on a mounted filesystem (causes corruption)"
+        source_domain: storage
+        source_command: fsck
+        why: "Running fsck on a live filesystem causes corruption"
+      - pattern: "fdisk on a mounted disk (data corruption risk)"
+        source_domain: storage
+        source_command: fdisk
+        why: "Modifying the partition table of a mounted disk causes data corruption"
+      - pattern: "parted mklabel on a disk with mounted partitions"
+        source_domain: storage
+        source_command: parted
+        why: "Overwrites the partition table while partitions are mounted — immediate data loss"
+
+  - name: "process-destruction"
+    description: "Commands that kill critical system processes (init, systemd, kernel)"
+    patterns:
+      - pattern: "kill -9 1"
+        source_domain: process-management
+        source_command: kill
+        why: "Sends SIGKILL to PID 1 (init/systemd) — immediately crashes the entire system"
+      - pattern: "kill -KILL 1"
+        source_domain: process-management
+        source_command: kill
+        why: "Sends SIGKILL to PID 1 (init/systemd) — immediately crashes the entire system"
+      - pattern: "kill -9 -1"
+        source_domain: process-management
+        source_command: kill
+        why: "Sends SIGKILL to all processes the user can signal — wipes all user sessions and daemons"
+      - pattern: "kill 1"
+        source_domain: process-management
+        source_command: kill
+        why: "Signals PID 1 (init/systemd) which can crash the system depending on signal handling"
+      - pattern: "killall init"
+        source_domain: process-management
+        source_command: killall
+        why: "Kills the init process — system immediately becomes unstable or crashes"
+      - pattern: "killall -9 init"
+        source_domain: process-management
+        source_command: killall
+        why: "Force-kills the init process — system immediately crashes"
+      - pattern: "killall -KILL init"
+        source_domain: process-management
+        source_command: killall
+        why: "Force-kills the init process — system immediately crashes"
+      - pattern: "killall systemd"
+        source_domain: process-management
+        source_command: killall
+        why: "Kills the systemd process manager — system immediately becomes unstable or crashes"
+      - pattern: "killall -9 systemd"
+        source_domain: process-management
+        source_command: killall
+        why: "Force-kills systemd — system immediately crashes"
+      - pattern: "killall kernel"
+        source_domain: process-management
+        source_command: killall
+        why: "Attempts to kill the kernel — immediate system crash"
+      - pattern: "pkill -9 init"
+        source_domain: process-management
+        source_command: pkill
+        why: "Force-kills the init process — system immediately crashes"
+      - pattern: "pkill -9 systemd"
+        source_domain: process-management
+        source_command: pkill
+        why: "Force-kills systemd — system immediately crashes"
+      - pattern: "pkill init"
+        source_domain: process-management
+        source_command: pkill
+        why: "Kills the init process — system becomes unstable or crashes"
+      - pattern: "pkill systemd"
+        source_domain: process-management
+        source_command: pkill
+        why: "Kills systemd — system becomes unstable or crashes"
+      - pattern: "fuser -k /"
+        source_domain: process-management
+        source_command: fuser
+        why: "Kills all processes accessing root — effectively shuts down the entire system"
+      - pattern: "fuser -k /usr"
+        source_domain: process-management
+        source_command: fuser
+        why: "Kills all processes using /usr — crashes most running services and daemons"
+      - pattern: "fuser -k /etc"
+        source_domain: process-management
+        source_command: fuser
+        why: "Kills all processes reading from /etc — crashes configuration-dependent services"
+      - pattern: "xargs kill -9 (mass force-kill without confirmation)"
+        source_domain: process-management
+        source_command: xargs
+        why: "Uncontrolled mass force-kill of processes without review"
+
+  - name: "service-disruption"
+    description: "Commands that disable or mask critical system services"
+    patterns:
+      - pattern: "systemctl mask sshd"
+        source_domain: service-management
+        source_command: systemctl
+        why: "Permanently prevents SSH from starting — locks out remote access"
+      - pattern: "systemctl mask ssh"
+        source_domain: service-management
+        source_command: systemctl
+        why: "Permanently prevents SSH from starting — locks out remote access"
+      - pattern: "systemctl mask systemd-*"
+        source_domain: service-management
+        source_command: systemctl
+        why: "Masking core systemd services can make the system unbootable or unmanageable"
+      - pattern: "systemctl disable networking"
+        source_domain: service-management
+        source_command: systemctl
+        why: "Disables network service at boot — remote system becomes unreachable after reboot"
+      - pattern: "systemctl disable NetworkManager"
+        source_domain: service-management
+        source_command: systemctl
+        why: "Disables network management — remote system becomes unreachable after reboot"
+      - pattern: "systemctl disable systemd-networkd"
+        source_domain: service-management
+        source_command: systemctl
+        why: "Disables network daemon — remote system becomes unreachable after reboot"
+      - pattern: "systemctl mask systemd-journald"
+        source_domain: service-management
+        source_command: systemctl
+        why: "Masks the journal daemon — system loses all logging capability"
+      - pattern: "systemctl mask systemd-logind"
+        source_domain: service-management
+        source_command: systemctl
+        why: "Masks the login manager — user sessions and TTY logins stop working"
+
+  - name: "network-disruption"
+    description: "Commands that disrupt network connectivity or firewall rules"
+    patterns:
+      - pattern: "iptables -P INPUT DROP"
+        source_domain: networking
+        source_command: iptables
+        why: "Sets default policy to DROP for all inbound traffic — immediately breaks remote access"
+      - pattern: "iptables -F"
+        source_domain: networking
+        source_command: iptables
+        why: "Flushes all firewall rules — may expose the system if default policies are DROP"
+      - pattern: "nft flush ruleset"
+        source_domain: networking
+        source_command: nft
+        why: "Destroys the entire nftables ruleset — may immediately expose the system or break access"
+      - pattern: "ufw disable"
+        source_domain: permissions-security
+        source_command: ufw
+        why: "Disables the firewall — exposes all ports to external access"
+      - pattern: "ufw reset"
+        source_domain: permissions-security
+        source_command: ufw
+        why: "Resets firewall to defaults — may expose the system depending on default policy"
+      - pattern: "firewall-cmd --panic-on"
+        source_domain: permissions-security
+        source_command: firewall-cmd
+        why: "Enables panic mode — drops all network traffic, immediately breaking connectivity"
+      - pattern: "firewall-cmd --permanent --zone block --change-interface"
+        source_domain: permissions-security
+        source_command: firewall-cmd
+        why: "Moves a network interface to the block zone — drops all traffic on that interface"
+
+  - name: "privilege-escalation"
+    description: "Commands that unsafely escalate privileges or weaken authentication"
+    patterns:
+      - pattern: "userdel root"
+        source_domain: user-management
+        source_command: userdel
+        why: "Deletes the root account — makes root-level recovery impossible without reinstallation"
+      - pattern: "userdel -r root"
+        source_domain: user-management
+        source_command: userdel
+        why: "Deletes root account and its home directory — recovery requires reinstallation"
+      - pattern: "passwd root  # use 'sudo passwd root' with explicit intent"
+        source_domain: user-management
+        source_command: passwd
+        why: "Changing the root password without explicit intent can lock out system administrators"
+      - pattern: "nano /etc/sudoers  # edit directly without visudo — no syntax check"
+        source_domain: user-management
+        source_command: visudo
+        why: "Editing sudoers without visudo skips syntax validation — a typo can break all sudo access"
+      - pattern: "vim /etc/sudoers   # edit directly without visudo — no syntax check"
+        source_domain: user-management
+        source_command: visudo
+        why: "Editing sudoers without visudo skips syntax validation — a typo can break all sudo access"
+      - pattern: "echo ... >> /etc/sudoers  # appending without visudo"
+        source_domain: user-management
+        source_command: visudo
+        why: "Appending to sudoers without visudo risks corruption and loss of all sudo access"
+      - pattern: "setenforce 0"
+        source_domain: permissions-security
+        source_command: setenforce
+        why: "Disables SELinux enforcement — removes mandatory access control protections system-wide"
+
+  - name: "security-weakening"
+    description: "Commands that weaken the security posture of the system or SSH daemon"
+    patterns:
+      - pattern: "PermitRootLogin yes in sshd_config on internet-facing hosts"
+        source_domain: ssh-remote
+        source_command: sshd
+        why: "Allows direct root login over SSH — high-value target for brute-force attacks"
+      - pattern: "PasswordAuthentication yes without fail2ban or rate limiting"
+        source_domain: ssh-remote
+        source_command: sshd
+        why: "Enables password auth without brute-force protection — vulnerable to automated attacks"
+      - pattern: "Restarting sshd without first running sshd -t to verify config"
+        source_domain: ssh-remote
+        source_command: sshd
+        why: "Restarting sshd with a broken config locks out all SSH access"
+      - pattern: "ssh -o StrictHostKeyChecking=no"
+        source_domain: ssh-remote
+        source_command: ssh
+        why: "Disables host key verification — enables MITM attacks without warning"
+      - pattern: "ssh -o StrictHostKeyChecking=accept-new in production automation"
+        source_domain: ssh-remote
+        source_command: ssh
+        why: "Auto-accepting new host keys in automation bypasses fingerprint verification"
+      - pattern: "Batch scripts that pipe passwords via stdin without key-based auth"
+        source_domain: ssh-remote
+        source_command: ssh
+        why: "Passwords in scripts are visible in process lists and shell history"
+      - pattern: "scp with -o StrictHostKeyChecking=no in scripts"
+        source_domain: ssh-remote
+        source_command: scp
+        why: "Disables host key verification for file transfers — enables MITM attacks"
+      - pattern: "Replacing (not appending to) authorized_keys manually — use ssh-copy-id to append safely"
+        source_domain: ssh-remote
+        source_command: ssh-copy-id
+        why: "Overwriting authorized_keys can permanently lock out all existing key-based access"
+      - pattern: "Blindly appending ssh-keyscan output to known_hosts without verifying the fingerprint out-of-band in security-sensitive environments"
+        source_domain: ssh-remote
+        source_command: ssh-keyscan
+        why: "Accepting unverified host keys enables MITM attacks in security-sensitive contexts"
+      - pattern: "sudo pip install"
+        source_domain: package-management
+        source_command: pip
+        why: "Running pip as root can corrupt the system Python and installs packages with root privileges"
+      - pattern: "sudo npm install -g"
+        source_domain: package-management
+        source_command: npm
+        why: "Global npm installs as root risk corrupting the Node environment; use nvm instead"
+      - pattern: "snap install --dangerous {untrusted_file}"
+        source_domain: package-management
+        source_command: snap
+        why: "Installs an unreviewed snap without signature verification"
+
+  - name: "container-destruction"
+    description: "Commands that bulk-destroy containers or images without review"
+    patterns:
+      - pattern: "docker run --privileged -v /:/host"
+        source_domain: docker
+        source_command: docker run
+        why: "Mounts the host root filesystem into a privileged container — full host compromise"
+      - pattern: "docker run --privileged.*-v /.*:/.*"
+        source_domain: docker
+        source_command: docker run
+        why: "Privileged container with host filesystem mount — trivial path to full host compromise"
+      - pattern: "docker rm -f $(docker ps -aq)"
+        source_domain: docker
+        source_command: docker rm
+        why: "Force-removes every container on the system including running ones"
+      - pattern: "docker rm -f \\$\\(docker ps"
+        source_domain: docker
+        source_command: docker rm
+        why: "Force-removes all containers via subshell — destroys running workloads"
+      - pattern: "docker system prune -f --volumes"
+        source_domain: docker
+        source_command: docker system prune
+        why: "Forcefully removes all unused resources including persistent volumes — irreversible data loss"
+      - pattern: "docker system prune -af"
+        source_domain: docker
+        source_command: docker system prune
+        why: "Aggressively prunes all images and containers without confirmation"
+
+  - name: "netcat-shell"
+    description: "Commands that open a reverse or bind shell via netcat"
+    patterns:
+      - pattern: "nc -l.*-e.*sh"
+        source_domain: networking
+        source_command: nc
+        why: "Creates a bind shell listener — anyone connecting receives a shell on the machine"
+      - pattern: "nc -l.*-e.*bash"
+        source_domain: networking
+        source_command: nc
+        why: "Creates a bash bind shell listener — any connection receives unauthenticated shell access"
+      - pattern: "nc.*-e /bin/sh"
+        source_domain: networking
+        source_command: nc
+        why: "Executes /bin/sh and connects its I/O to the network socket — reverse or bind shell"
+      - pattern: "nc.*-e /bin/bash"
+        source_domain: networking
+        source_command: nc
+        why: "Executes /bin/bash and connects its I/O to the network socket — reverse or bind shell"
+
+  - name: "network-scanning-exploits"
+    description: "Commands that attempt network exploitation or vulnerability scanning"
+    patterns:
+      - pattern: "nmap --script exploit"
+        source_domain: networking
+        source_command: nmap
+        why: "Runs nmap exploit scripts against hosts — active exploitation attempt"
+      - pattern: "nmap --script brute"
+        source_domain: networking
+        source_command: nmap
+        why: "Runs credential brute-force scripts against network services"
+      - pattern: "nmap --script dos"
+        source_domain: networking
+        source_command: nmap
+        why: "Runs denial-of-service scripts against hosts"
+
+  - name: "archive-extraction-to-system-dirs"
+    description: "Commands that extract archives directly into critical system directories"
+    patterns:
+      - pattern: "tar * -C /"
+        source_domain: compression
+        source_command: tar
+        why: "Extracts archive contents directly into the root filesystem — risks overwriting system files"
+      - pattern: "tar * -C /etc"
+        source_domain: compression
+        source_command: tar
+        why: "Extracts archive into /etc — risks overwriting system configuration files"
+      - pattern: "tar * -C /usr"
+        source_domain: compression
+        source_command: tar
+        why: "Extracts archive into /usr — risks overwriting system binaries and libraries"
+      - pattern: "tar * -C /bin"
+        source_domain: compression
+        source_command: tar
+        why: "Extracts archive into /bin — risks overwriting essential system binaries"
+      - pattern: "tar * -C /sbin"
+        source_domain: compression
+        source_command: tar
+        why: "Extracts archive into /sbin — risks overwriting essential system administration binaries"
+      - pattern: "tar xf * / "
+        source_domain: compression
+        source_command: tar
+        why: "Extracts archive into root directory — risks overwriting system files"
+
+  - name: "scheduling-destruction"
+    description: "Commands that irreversibly destroy scheduled job configurations"
+    patterns:
+      - pattern: "crontab -r"
+        source_domain: scheduling
+        source_command: crontab
+        why: "Permanently deletes all cron jobs for the current user with no confirmation or undo"
+
+  - name: "system-clock-manipulation"
+    description: "Commands that manipulate the system clock in unsafe ways"
+    patterns:
+      - pattern: "date -s *"
+        source_domain: system-info
+        source_command: date
+        why: "Setting the system clock can break SSL certificate validation, logs, and cron scheduling"
+      - pattern: "date [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*"
+        source_domain: system-info
+        source_command: date
+        why: "Positional date-setting syntax can silently corrupt the system clock"
+
+  - name: "kernel-log-destruction"
+    description: "Commands that destroy kernel ring buffer messages"
+    patterns:
+      - pattern: "dmesg -C"
+        source_domain: system-info
+        source_command: dmesg
+        why: "Clears the kernel ring buffer — destroys all pending kernel diagnostic messages"
+      - pattern: "dmesg --clear"
+        source_domain: system-info
+        source_command: dmesg
+        why: "Clears the kernel ring buffer — destroys all pending kernel diagnostic messages"
+      - pattern: "dmesg -c"
+        source_domain: system-info
+        source_command: dmesg
+        why: "Reads and then clears the kernel ring buffer — messages cannot be recovered"
+      - pattern: "dmesg --read-clear"
+        source_domain: system-info
+        source_command: dmesg
+        why: "Reads and then clears the kernel ring buffer — messages cannot be recovered"
+
+  - name: "package-system-destruction"
+    description: "Commands that remove essential packages, breaking the package manager or core libraries"
+    patterns:
+      - pattern: "apt remove --purge base-files"
+        source_domain: package-management
+        source_command: apt
+        why: "Removes the base-files package — breaks apt and core Debian/Ubuntu system functionality"
+      - pattern: "apt remove --purge libc6"
+        source_domain: package-management
+        source_command: apt
+        why: "Removes the C standard library — immediately breaks every dynamically linked binary"
+      - pattern: "apt remove --purge systemd"
+        source_domain: package-management
+        source_command: apt
+        why: "Removes systemd — breaks service management and system startup on systemd-based systems"
+      - pattern: "apt-get remove --purge libc6"
+        source_domain: package-management
+        source_command: apt-get
+        why: "Removes the C standard library — immediately breaks every dynamically linked binary"
+      - pattern: "apt-get remove --purge base-files"
+        source_domain: package-management
+        source_command: apt-get
+        why: "Removes base-files — breaks apt and core Debian/Ubuntu system functionality"
+      - pattern: "apt-get dist-upgrade -y"
+        source_domain: package-management
+        source_command: apt-get
+        why: "Unattended dist-upgrade can replace or remove packages non-interactively, causing breakage"
+      - pattern: "dpkg --purge libc6"
+        source_domain: package-management
+        source_command: dpkg
+        why: "Forcibly removes the C standard library — immediately breaks every dynamically linked binary"
+      - pattern: "dpkg --purge base-files"
+        source_domain: package-management
+        source_command: dpkg
+        why: "Removes base-files — breaks apt and core Debian/Ubuntu system functionality"
+      - pattern: "dpkg --force-remove-essential"
+        source_domain: package-management
+        source_command: dpkg
+        why: "Forces removal of packages marked essential — can render the system unbootable"
+      - pattern: "dnf remove glibc"
+        source_domain: package-management
+        source_command: dnf
+        why: "Removes glibc — immediately breaks every dynamically linked binary on the system"
+      - pattern: "dnf remove systemd"
+        source_domain: package-management
+        source_command: dnf
+        why: "Removes systemd — breaks service management and system startup"
+      - pattern: "dnf remove dnf"
+        source_domain: package-management
+        source_command: dnf
+        why: "Removes the package manager itself — no way to install or fix packages afterward"
+      - pattern: "yum remove glibc"
+        source_domain: package-management
+        source_command: yum
+        why: "Removes glibc — immediately breaks every dynamically linked binary on the system"
+      - pattern: "yum remove yum"
+        source_domain: package-management
+        source_command: yum
+        why: "Removes the package manager itself — no way to install or fix packages afterward"
+      - pattern: "pacman -Rns base"
+        source_domain: package-management
+        source_command: pacman
+        why: "Removes the base package group — destroys core Arch Linux system functionality"
+      - pattern: "pacman -Rns base-devel"
+        source_domain: package-management
+        source_command: pacman
+        why: "Removes the base-devel group — destroys build tools and development headers"
+      - pattern: "pacman -Rns linux"
+        source_domain: package-management
+        source_command: pacman
+        why: "Removes the Linux kernel package — system will not boot after next reboot"
+      - pattern: "pacman -Rns glibc"
+        source_domain: package-management
+        source_command: pacman
+        why: "Removes glibc — immediately breaks every dynamically linked binary on the system"
+      - pattern: "pacman -Rc systemd"
+        source_domain: package-management
+        source_command: pacman
+        why: "Removes systemd — breaks service management and system startup"
+      - pattern: "zypper remove glibc"
+        source_domain: package-management
+        source_command: zypper
+        why: "Removes glibc — immediately breaks every dynamically linked binary on the system"
+      - pattern: "zypper remove systemd"
+        source_domain: package-management
+        source_command: zypper
+        why: "Removes systemd — breaks service management and system startup"
+
+  - name: "shell-code-injection"
+    description: "Shell constructs that evaluate unvalidated or network-sourced input as code"
+    patterns:
+      - pattern: "eval with unvalidated user input"
+        source_domain: shell-operations
+        source_command: eval
+        why: "Evaluating unvalidated input allows arbitrary code execution from user-controlled data"
+      - pattern: "eval on data fetched from the network without verification"
+        source_domain: shell-operations
+        source_command: eval
+        why: "Executing network-fetched content as shell code is a remote code execution vector"
+      - pattern: "exec with an untrusted or user-supplied command string"
+        source_domain: shell-operations
+        source_command: exec
+        why: "Exec-ing user-supplied commands replaces the current process with arbitrary code"
+      - pattern: "xargs rm -rf / (would wipe filesystem)"
+        source_domain: process-management
+        source_command: xargs
+        why: "Passes root path to rm -rf via xargs — wipes the entire filesystem"
+      - pattern: "rsync --delete without --dry-run first on production data"
+        source_domain: ssh-remote
+        source_command: rsync
+        why: "Deletes production files from the destination without first verifying what would be removed"
