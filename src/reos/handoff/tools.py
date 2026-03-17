@@ -183,7 +183,7 @@ class SharedToolHandler:
     def __init__(
         self,
         current_agent: AgentType,
-        cairn_store: Any | None = None,
+        knowledge_store: Any | None = None,
         play_store: Any | None = None,
         on_handoff_proposed: Callable[[HandoffRequest], None] | None = None,
     ):
@@ -191,12 +191,12 @@ class SharedToolHandler:
 
         Args:
             current_agent: The currently active agent.
-            cairn_store: Optional CAIRN store for KB operations.
+            knowledge_store: Optional knowledge store for KB operations.
             play_store: Optional Play store for KB operations.
             on_handoff_proposed: Callback when handoff is proposed.
         """
         self.current_agent = current_agent
-        self.cairn_store = cairn_store
+        self.knowledge_store = knowledge_store
         self.play_store = play_store
         self.on_handoff_proposed = on_handoff_proposed
 
@@ -371,11 +371,11 @@ class SharedToolHandler:
         category = args.get("category", "all")
         limit = args.get("limit", 5)
 
-        # If we have a CAIRN store, search it
-        if self.cairn_store is not None:
+        # If we have a knowledge store, search it
+        if self.knowledge_store is not None:
             try:
                 # Search metadata
-                items = self.cairn_store.list_metadata(limit=limit)
+                items = self.knowledge_store.list_metadata(limit=limit)
 
                 results = []
                 query_lower = query.lower()

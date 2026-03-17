@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 AUTOSTART_DIR = Path.home() / ".config" / "autostart"
 
 # Desktop file name
-DESKTOP_FILE_NAME = "talking-rock.desktop"
+DESKTOP_FILE_NAME = "reos.desktop"
 
 # Full path to desktop file
 DESKTOP_FILE_PATH = AUTOSTART_DIR / DESKTOP_FILE_NAME
@@ -59,11 +59,11 @@ def _generate_desktop_content() -> str:
 
     return f"""[Desktop Entry]
 Type=Application
-Name=Talking Rock
+Name=ReOS
 Comment=Your Linux assistant - Start automatically on login
-Exec={reos_path} --ui tauri
+Exec={reos_path}
 Icon=assistant
-Terminal=false
+Terminal=true
 Categories=Utility;
 StartupNotify=false
 X-GNOME-Autostart-enabled=true

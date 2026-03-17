@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from typing import NoReturn
 
 from trcore.db import get_db
@@ -194,77 +195,118 @@ def is_safe_command(command: str) -> tuple[bool, str]:
 # Layer 4: Main Proposal Logic (with retry)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Standard prompt with examples
-STANDARD_PROMPT = """You are a Linux command translator. Convert natural language requests into shell commands.
+CONVERSATIONAL_PROMPT = """You are ReOS, a natural language assistant embedded in a Linux terminal.
+The user typed something the shell did not recognize. Help them.
 
-OUTPUT FORMAT (exactly two lines, no exceptions):
-LINE 1: The exact shell command to run (no backticks, no markdown, no code blocks)
-LINE 2: Brief explanation (one sentence)
+FORMAT YOUR RESPONSE IN TWO PARTS:
 
-CRITICAL RULES:
-- Output EXACTLY two lines, nothing more, nothing less
-- Line 1 must be a complete, runnable shell command
-- No markdown formatting whatsoever (no ```, no `, no *)
-- Use sudo when the operation requires root privileges
-- For package installation: sudo apt install <package>
-- For package removal: sudo apt remove <package>
+First, write 1-3 sentences explaining what the user likely wants and what
+tool or approach to use. Be direct. No markdown. Under 60 words.
+
+Second, if a specific runnable shell command applies, write exactly:
+COMMAND: <the full shell command here>
+
+If no specific command applies (greeting, question with no shell equivalent,
+etc.), omit the COMMAND line entirely.
+
+RULES:
+- No markdown formatting (no backticks, no asterisks, no hash symbols)
+- COMMAND line contains ONLY the bare command, nothing else
+- Use sudo when root privileges are required
+- Never suggest dangerous commands (rm -rf /, dd to block devices, etc.)
 
 EXAMPLES:
 
-Request: "install gimp"
-sudo apt install gimp
-Installs the GIMP image editor
+Input: show running processes
+It looks like you want to see what is running. Use ps for a snapshot or htop for a live interactive view.
+COMMAND: ps aux --sort=-%cpu | head -20
 
-Request: "remove firefox"
-sudo apt remove firefox
-Removes the Firefox browser
+Input: install vim
+You want to install the Vim text editor from the Ubuntu package repositories.
+COMMAND: sudo apt install vim
 
-Request: "list files"
-ls -la
-Lists all files including hidden ones
+Input: hello
+Hello. I am ReOS. Type Linux commands here, or describe what you want to do in plain English and I will suggest the right command.
 
-Request: "show running processes"
-ps aux
-Shows all running processes
+Input: what is my ip address
+To see your machine's network addresses, ip addr lists all interfaces with their IPs. Use curl ifconfig.me for your public internet IP.
+COMMAND: ip addr show
 
-Request: "start nginx"
-sudo systemctl start nginx
-Starts the nginx service
+Input: list running services
+This shows all systemd services that are currently active on your system.
+COMMAND: systemctl list-units --type=service --state=running"""
 
-Request: "show disk usage"
-df -h
-Shows disk space usage
 
-Request: "who am I"
-whoami
-Shows current username"""
-
-# Constrained prompt for retry
-CONSTRAINED_PROMPT = """Output ONLY a shell command. No explanation. No markdown. No backticks.
-One line only. If you cannot help, output exactly: NONE
+CONSTRAINED_FALLBACK_PROMPT = """Output exactly one line: COMMAND: <shell command>
+If no command applies, output: COMMAND: NONE
 
 Task: {intent}"""
 
 
-def propose_command(natural_language: str) -> tuple[str, str]:
-    """Propose a shell command for natural language input.
+def extract_conversational_response(raw: str) -> tuple[str, str | None]:
+    """Split LLM response into message and optional command.
 
-    Args:
-        natural_language: The user's natural language request
+    Looks for a COMMAND: sentinel line. Everything before it is the message.
+    Everything after is the command (passed through extract_command for cleanup).
+
+    Returns: (message, command_or_None)
+    """
+    text = raw.strip()
+
+    # Look for COMMAND: sentinel (case-insensitive)
+    sentinel_idx = -1
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.upper().startswith('COMMAND:'):
+            sentinel_idx = i
+            break
+
+    if sentinel_idx >= 0:
+        message_lines = lines[:sentinel_idx]
+        command_line = lines[sentinel_idx].strip()
+        # Strip the COMMAND: prefix
+        command_raw = command_line.split(':', 1)[1].strip() if ':' in command_line else ''
+
+        message = '\n'.join(message_lines).strip()
+
+        if command_raw and command_raw.upper() != 'NONE':
+            # Safety check
+            is_safe, reason = is_safe_command(command_raw)
+            if not is_safe:
+                message += f'\n(Command blocked: {reason})'
+                return message[:500], None
+            return message[:500], command_raw
+        return message[:500], None
+    else:
+        # No COMMAND: sentinel — purely conversational
+        return text[:500], None
+
+
+def propose_command_with_meta(
+    natural_language: str,
+) -> tuple[str, str | None, str, int, int]:
+    """Propose a conversational response and optional shell command with model metadata.
 
     Returns:
-        Tuple of (command, explanation)
-        - command: The shell command to run (empty string if failed)
-        - explanation: Brief explanation of what it does
+        Tuple of (message, command, model_name, latency_ms, attempt_count)
+        - message:       Conversational response text (always present on success)
+        - command:       The shell command to run, or None if not applicable
+        - model_name:    Ollama model name used, or 'unknown' if not determinable
+        - latency_ms:    Wall-clock time from first LLM call to last, in ms
+        - attempt_count: 1 (first attempt succeeded) or 2 (retry was needed)
 
-    Kernel: "Verify it's a command, or retry. Never propose garbage."
+    Kernel: "Explain what to do, then suggest a command if one applies."
     NEVER EXECUTES ANYTHING.
     """
     db = get_db()
     llm = get_provider(db)
 
+    # Resolve model name up front — _model may be None until first call.
+    model_name: str = getattr(llm, '_model', None) or getattr(llm, 'model', None) or 'unknown'
+
     # ═══════════════════════════════════════════════════════════════════════════
-    # NEW: Context Gathering (RIVA: Can I verify this intent?)
+    # Context Gathering (RIVA: Can I verify this intent?)
     # ═══════════════════════════════════════════════════════════════════════════
     context_string = ""
     try:
@@ -277,35 +319,39 @@ def propose_command(natural_language: str) -> tuple[str, str]:
         pass  # Context gathering is optional - fail open
 
     # Build enriched prompt
-    user_prompt = f"Request: {natural_language}"
+    user_prompt = f"Input: {natural_language}"
     if context_string:
         user_prompt = f"{context_string}\n{user_prompt}"
 
-    # First attempt: standard prompt
+    start = time.monotonic()
+
+    # First attempt: conversational prompt
     try:
         response = llm.chat_text(
-            system=STANDARD_PROMPT,
+            system=CONVERSATIONAL_PROMPT,
             user=user_prompt,
             temperature=0.3,
         )
 
-        command, explanation = extract_command(response)
+        message, command = extract_conversational_response(response)
 
-        if command:
-            # Safety check
-            is_safe, reason = is_safe_command(command)
-            if not is_safe:
-                return "", f"Safety: {reason}"
-            return command, explanation
+        if message:
+            # After LLM succeeds, try to resolve actual model name if still unknown.
+            if model_name == 'unknown':
+                model_name = getattr(llm, '_model', None) or 'unknown'
 
-    except Exception as e:
-        pass  # Fall through to retry
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            return message, command, model_name, elapsed_ms, 1
 
-    # Second attempt: constrained prompt
+    except Exception:
+        pass  # Fall through to constrained retry
+
+    # Second attempt: constrained fallback prompt — use only when first attempt
+    # completely failed (exception or empty response). Wraps result in a message.
     try:
         response = llm.chat_text(
             system="You are a shell command generator. Output only commands.",
-            user=CONSTRAINED_PROMPT.format(intent=natural_language),
+            user=CONSTRAINED_FALLBACK_PROMPT.format(intent=natural_language),
             temperature=0.1,  # Even lower temperature for more deterministic output
         )
 
@@ -313,21 +359,50 @@ def propose_command(natural_language: str) -> tuple[str, str]:
         text = response.strip().split("\n")[0].strip()
         text = text.strip("`").strip()
 
+        if model_name == 'unknown':
+            model_name = getattr(llm, '_model', None) or 'unknown'
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+
         # Check for explicit failure
-        if text.upper() == "NONE":
-            return "", "Could not determine a command for that request"
+        if text.upper() in ("NONE", "COMMAND: NONE"):
+            return "I could not determine a command for that request.", None, model_name, elapsed_ms, 2
+
+        # Strip COMMAND: prefix if present
+        if text.upper().startswith("COMMAND:"):
+            text = text.split(":", 1)[1].strip()
 
         # Validate
         if looks_like_command(text):
             is_safe, reason = is_safe_command(text)
             if not is_safe:
-                return "", f"Safety: {reason}"
-            return text, ""
+                return f"I found a command but it was blocked for safety: {reason}", None, model_name, elapsed_ms, 2
+            return "Here is what I suggest:", text, model_name, elapsed_ms, 2
 
     except Exception as e:
-        return "", f"Error: {e}"
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        return f"Error: {e}", None, model_name, elapsed_ms, 2
 
-    return "", "Could not interpret as a command"
+    elapsed_ms = int((time.monotonic() - start) * 1000)
+    return "I could not interpret that as a command.", None, model_name, elapsed_ms, 2
+
+
+def propose_command(natural_language: str) -> tuple[str, str]:
+    """Propose a shell command for natural language input.
+
+    Args:
+        natural_language: The user's natural language request
+
+    Returns:
+        Tuple of (command, message)
+        - command: The shell command to run (empty string if not applicable)
+        - message: Conversational response text
+
+    Delegates to ``propose_command_with_meta()`` and drops the extra metadata.
+    NEVER EXECUTES ANYTHING.
+    """
+    msg, cmd, _model, _latency, _attempts = propose_command_with_meta(natural_language)
+    return cmd or '', msg
 
 
 def main() -> NoReturn:
@@ -339,20 +414,17 @@ def main() -> NoReturn:
     # Join all arguments as the natural language input
     natural_language = ' '.join(sys.argv[1:])
 
-    command, explanation = propose_command(natural_language)
+    msg, command, _model, _latency, _attempts = propose_command_with_meta(natural_language)
 
-    if not command:
-        # If we got an error, print it and exit with error code
-        if explanation:
-            print(explanation, file=sys.stderr)
+    # Always print the message
+    if msg:
+        print(msg)
+
+    if command:
+        print(f"\nSuggested command: {command}")
+        sys.exit(0)
+    else:
         sys.exit(1)
-
-    # Output format: command on line 1, explanation on line 2+
-    print(command)
-    if explanation:
-        print(explanation)
-
-    sys.exit(0)
 
 
 if __name__ == "__main__":

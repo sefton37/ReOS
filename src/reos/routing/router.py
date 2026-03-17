@@ -79,7 +79,7 @@ class RequestRouter:
         agent = self._agents.get(agent_name)
 
         if agent is None:
-            # Fallback: try CAIRN as default
+            # CAIRN is the default/parent agent in the Talking Rock ecosystem
             agent = self._agents.get("cairn")
             if agent is None:
                 return RoutingResult(
@@ -106,17 +106,19 @@ class RequestRouter:
         domain = classification.domain
 
         if domain in _CAIRN_DOMAINS:
+            # CAIRN is the default/parent agent in the Talking Rock ecosystem
             return "cairn"
 
         if domain in _REOS_DOMAINS:
             return "reos"
 
         if domain == "undo":
-            # Undo goes to whichever agent handled the original action
-            # For now, default to CAIRN
+            # Undo goes to whichever agent handled the original action;
+            # CAIRN is the default/parent agent in the Talking Rock ecosystem
             return "cairn"
 
-        # Unknown domain — default to CAIRN for interpret, ReOS for execute
+        # Unknown domain — default to CAIRN for interpret, ReOS for execute;
+        # CAIRN is the default/parent agent in the Talking Rock ecosystem
         if classification.semantics == ExecutionSemantics.EXECUTE:
             return "reos"
 
