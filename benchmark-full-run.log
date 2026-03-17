@@ -45,4 +45,96 @@ pysqlcipher3 not installed — databases will remain unencrypted. Install with: 
 [qwen2.5:0.5b][43/415] files_tar_list_001 … → tar tvf {archive.tar.gz}
 [qwen2.5:0.5b][44/415] files_zip_001 … → zip -r {archive.zip} {directory}
 [qwen2.5:0.5b][45/415] files_unzip_001 … → unzip {archive_file.zip} {output_directory}
-[qwen2.5:0.5b][46/415] files_tar_bz2_001 …
+[qwen2.5:0.5b][46/415] files_tar_bz2_001 … → tar cjf archive.tar.bz2 /path/to/directory
+[qwen2.5:0.5b][47/415] files_tar_xz_001 … → tar cJf myarchive.tar.xz /path/to/directory
+[qwen2.5:0.5b][48/415] files_gzip_001 … → gzip
+[qwen2.5:0.5b][49/415] files_gunzip_001 … → gzip -d {file.gz}
+[qwen2.5:0.5b][50/415] files_tar_extract_dir_001 … → tar xf {archive.tar.gz} -C {destination_directory}
+[qwen2.5:0.5b][51/415] text_grep_basic_001 … → (none)
+[qwen2.5:0.5b][52/415] text_grep_recursive_001 … → grep -r 'TODO' {directory}
+[qwen2.5:0.5b][53/415] text_grep_count_001 … → grep -c '{pattern}' {file}
+[qwen2.5:0.5b][54/415] text_grep_line_001 … → (none)
+[qwen2.5:0.5b][55/415] text_grep_invert_001 … → grep -v '{pattern}' {file}
+[qwen2.5:0.5b][56/415] text_grep_case_001 … → (none)
+[qwen2.5:0.5b][57/415] text_grep_regex_001 … → (none)
+[qwen2.5:0.5b][58/415] text_grep_context_001 … → grep -C {n} '{pattern}' {file}
+[qwen2.5:0.5b][59/415] text_grep_multi_001 … → grep -rl '{pattern1} {pattern2} ...' /path/to/file
+[qwen2.5:0.5b][60/415] text_grep_files_001 … → ls -a {directory} --exclude-standard
+[qwen2.5:0.5b][61/415] text_grep_whole_word_001 … → grep -w 'word' filename
+[qwen2.5:0.5b][62/415] text_grep_binary_001 … → grep -E 'search_pattern' {binary_file}
+[qwen2.5:0.5b][63/415] text_awk_sum_001 … → (none)
+[qwen2.5:0.5b][64/415] text_awk_print_col_001 … → cat {file} | head -n 2
+[qwen2.5:0.5b][65/415] text_sed_replace_001 … → (none)
+[qwen2.5:0.5b][66/415] text_sed_delete_001 … → sed '/{pattern}/d' {file}
+[qwen2.5:0.5b][67/415] text_sed_extract_001 … → sed 's/^\(.*\)\(.*\)/\2/g' {file}
+[qwen2.5:0.5b][68/415] text_awk_filter_001 … → head -n {column_index} {file}
+[qwen2.5:0.5b][69/415] text_cut_001 … → (none)
+[qwen2.5:0.5b][70/415] text_sed_insert_001 … → (none)
+[qwen2.5:0.5b][71/415] text_tr_001 … → tr '[:lower:]' '[:upper:]' < {file}
+[qwen2.5:0.5b][72/415] text_awk_nf_001 … → cut -d '{delimiter}' -f {start}-{end} {file}
+[qwen2.5:0.5b][73/415] text_pipeline_top_words_001 … → wc -w {file}
+[qwen2.5:0.5b][74/415] text_pipeline_sort_uniq_001 … → comm -23 <(sort {file}) <(sort {file})
+[qwen2.5:0.5b][75/415] text_pipeline_dup_lines_001 … → sort {file} | uniq -d
+[qwen2.5:0.5b][76/415] text_pipeline_count_unique_001 … → awk 'NR==FNR {ips[$1]++; next} ips[$1]++' access.log | wc -l
+[qwen2.5:0.5b][77/415] text_pipeline_error_last_001 … → tail -n 50 {path/to/logfile}
+[qwen2.5:0.5b][78/415] text_pipeline_size_sort_001 … → (none)
+[qwen2.5:0.5b][79/415] text_pipeline_csv_field_001 … → csvparse -d ',' <input.csv | awk '{print $2}'
+[qwen2.5:0.5b][80/415] text_pipeline_combine_001 … → paste {file1} {file2} | sort -u | uniq
+[qwen2.5:0.5b][81/415] text_diff_001 … → (none)
+[qwen2.5:0.5b][82/415] text_diff_unified_001 … → diff -u file1 file2
+[qwen2.5:0.5b][83/415] text_diff_dir_001 … → diff -r {current_dir} {target_dir}/
+[qwen2.5:0.5b][84/415] text_diff_ignore_ws_001 … → diff two_files.txt two_other_files.txt -w
+[qwen2.5:0.5b][85/415] text_vimdiff_001 … → paste {file1} {file2}
+[qwen2.5:0.5b][86/415] text_comm_001 … → (none)
+[qwen2.5:0.5b][87/415] text_diff_stat_001 … → diff -r {dir1} {dir2}
+[qwen2.5:0.5b][88/415] text_patch_001 … → diff -u {file1} {file2}
+[qwen2.5:0.5b][89/415] text_diff_output_001 … → diff -u {file1} {file2} > {output_file}.patch
+[qwen2.5:0.5b][90/415] text_wdiff_001 … → (none)
+[qwen2.5:0.5b][91/415] sysmon_ps_cpu_001 … → top -o %CPU
+[qwen2.5:0.5b][92/415] sysmon_uptime_001 … → uptime
+[qwen2.5:0.5b][93/415] sysmon_who_001 … → who
+[qwen2.5:0.5b][94/415] sysmon_last_001 … → last --since {timespec}
+[qwen2.5:0.5b][95/415] sysmon_uname_001 … → uname -a
+[qwen2.5:0.5b][96/415] sysmon_lscpu_001 … → lscpu
+[qwen2.5:0.5b][97/415] sysmon_hostname_001 … → hostname
+[qwen2.5:0.5b][98/415] sysmon_dmesg_001 … → sudo dmesg
+[qwen2.5:0.5b][99/415] sysmon_ps_all_001 … → ps aux
+[qwen2.5:0.5b][100/415] sysmon_date_001 … → date
+[qwen2.5:0.5b][101/415] sysmon_top_001 … → (none)
+[qwen2.5:0.5b][102/415] sysmon_htop_001 … → top
+[qwen2.5:0.5b][103/415] sysmon_watch_001 … → (none)
+[qwen2.5:0.5b][104/415] sysmon_iotop_001 … → iostat
+[qwen2.5:0.5b][105/415] sysmon_nethogs_001 … → sar -n {process} {interval} {count}
+[qwen2.5:0.5b][106/415] sysmon_vmstat_001 … → vmstat
+[qwen2.5:0.5b][107/415] sysmon_iostat_001 … → iostat
+[qwen2.5:0.5b][108/415] sysmon_sar_001 … → sar -u 2 --format='%.1f' 'cpu{core}'
+[qwen2.5:0.5b][109/415] sysmon_dmesg_follow_001 … → sudo dmesg -w
+[qwen2.5:0.5b][110/415] sysmon_strace_001 … → sudo strace -p <process_id> | less
+[qwen2.5:0.5b][111/415] sysmon_free_001 … → free -h
+[qwen2.5:0.5b][112/415] sysmon_df_001 … → df -h
+[qwen2.5:0.5b][113/415] sysmon_du_large_001 … → du -sh {directory}/*
+[qwen2.5:0.5b][114/415] sysmon_du_home_001 … → du -sh /home
+[qwen2.5:0.5b][115/415] sysmon_lsmem_001 … → lsmem
+[qwen2.5:0.5b][116/415] sysmon_nproc_001 … → lscpu
+[qwen2.5:0.5b][117/415] sysmon_proc_mem_001 … → free -h
+[qwen2.5:0.5b][118/415] sysmon_loadavg_001 … → (none)
+[qwen2.5:0.5b][119/415] sysmon_lsof_001 … → lsof +D {path/to/directory}
+[qwen2.5:0.5b][120/415] sysmon_lsof_port_001 … → ss -tlnp src :8080
+[qwen2.5:0.5b][121/415] network_ping_001 … → ping {google.com} -n -c 10
+[qwen2.5:0.5b][122/415] network_ping_count_001 … → ping -c 10
+[qwen2.5:0.5b][123/415] network_traceroute_001 … → traceroute -n {host}
+[qwen2.5:0.5b][124/415] network_mtr_001 … → traceroute -n {host}
+[qwen2.5:0.5b][125/415] network_nc_port_001 … → nc -zv {host} {port}
+[qwen2.5:0.5b][126/415] network_curl_test_001 … → curl -I {web_server_url}
+[qwen2.5:0.5b][127/415] network_nmap_001 … → nmap -p {port1,port2,...} {host}
+[qwen2.5:0.5b][128/415] network_ping_broadcast_001 … → ping -c 1 www.example.com
+[qwen2.5:0.5b][129/415] network_dig_001 … → (none)
+[qwen2.5:0.5b][130/415] network_dig_mx_001 … → (none)
+[qwen2.5:0.5b][131/415] network_dig_ns_001 … → nslookup example.com
+[qwen2.5:0.5b][132/415] network_dig_reverse_001 … → (none)
+[qwen2.5:0.5b][133/415] network_host_001 … → hostname -I
+[qwen2.5:0.5b][134/415] network_resolvconf_001 … → dig -x
+[qwen2.5:0.5b][135/415] network_dig_short_001 … → dig +short {domain}
+[qwen2.5:0.5b][136/415] network_curl_download_001 … → wget {url}
+[qwen2.5:0.5b][137/415] network_wget_001 … → wget {URL}
+[qwen2.5:0.5b][138/415] network_curl_post_001 …
