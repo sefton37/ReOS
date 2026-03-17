@@ -19,7 +19,6 @@ import time
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
-
 from dataclasses import dataclass
 
 from benchmarks.corpus import TestCase, load_corpus
@@ -583,7 +582,8 @@ class ConversationalBenchmarkRunner(BenchmarkRunner):
     # ──────────────────────────────────────────────────────────────────────────
 
     def _init_run(self) -> None:
-        """Open the benchmark DB, insert a conversational benchmark_runs row, and set up provider."""
+        """Open the benchmark DB, insert a conversational benchmark_runs row, and set up provider.
+        """  # noqa: D200
         self._conn = init_db(self.db_path)
 
         self._provider = InstrumentedOllamaProvider(
@@ -797,7 +797,8 @@ class ConversationalBenchmarkRunner(BenchmarkRunner):
           "command"          -> turn_type in ("propose", "danger")   [command is present in both]
           "explanation_only" -> turn_type == "inform"
           "refuse"           -> turn_type == "refuse"
-          "clarify"          -> turn_type in ("clarify", "inform")   [both are non-command responses]
+          "clarify"          -> turn_type in ("clarify", "inform")   [both are non-command
+                              responses]
 
         Args:
             turn_type: The conversational pipeline's turn_type for this case.
