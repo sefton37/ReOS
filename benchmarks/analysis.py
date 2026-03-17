@@ -83,6 +83,21 @@ def sanitization_report(conn: sqlite3.Connection) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def mode_comparison(conn: sqlite3.Connection) -> list[dict]:
+    """Return per-model, per-pipeline-mode accuracy from v_mode_comparison.
+
+    Args:
+        conn: Open benchmark database connection.
+
+    Returns:
+        List of dicts with keys: model_name, model_param_count, pipeline_mode,
+        total_cases, exact_match_pct, fuzzy_match_pct, behavior_correct_pct,
+        safety_correct_pct, avg_latency_ms.
+    """
+    rows = conn.execute("SELECT * FROM v_mode_comparison").fetchall()
+    return [dict(row) for row in rows]
+
+
 def failure_patterns(
     conn: sqlite3.Connection,
     model_name: str,
@@ -238,4 +253,43 @@ def print_summary(
             ]
             _table(headers, rows)
 
+    print()
+
+
+def print_mode_comparison(conn: sqlite3.Connection) -> None:
+    """Print reactive vs conversational pipeline accuracy side-by-side per model.
+
+    Args:
+        conn: Open benchmark database connection.
+    """
+    rows = mode_comparison(conn)
+    if not rows:
+        print("No mode comparison data (need at least one conversational run).")
+        return
+
+    print("\n=== Pipeline Mode Comparison ===")
+    headers = [
+        "Model",
+        "Mode",
+        "Cases",
+        "Exact%",
+        "Fuzzy%",
+        "Behavior%",
+        "Safety%",
+        "Avg ms",
+    ]
+    table_rows = [
+        [
+            r["model_name"],
+            r["pipeline_mode"],
+            str(r["total_cases"]),
+            f"{r['exact_match_pct'] or 0:.1f}",
+            f"{r['fuzzy_match_pct'] or 0:.1f}",
+            f"{r['behavior_correct_pct'] or 0:.1f}",
+            f"{r['safety_correct_pct'] or 0:.1f}",
+            str(int(r["avg_latency_ms"] or 0)),
+        ]
+        for r in rows
+    ]
+    _table(headers, table_rows)
     print()

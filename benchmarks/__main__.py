@@ -55,10 +55,53 @@ def _cmd_list_cases(args: argparse.Namespace) -> None:
             print(f"  {cat:<25} {count} cases")
 
 
+def _make_runners(
+    model: str,
+    mode: str,
+    *,
+    corpus_filter: str | None,
+    resume: bool,
+    db_path: str,
+    ollama_url: str | None,
+    no_context: bool,
+    timeout: int,
+) -> list:
+    """Instantiate benchmark runner(s) for the given model and mode.
+
+    Args:
+        model: Ollama model name (e.g. "qwen2.5:7b").
+        mode: "reactive", "conversational", or "both".
+        corpus_filter: Optional category to restrict corpus cases.
+        resume: Whether to skip already-completed cases.
+        db_path: Path to the benchmark database.
+        ollama_url: Ollama server URL (None for default).
+        no_context: Whether to disable shell context gathering.
+        timeout: Per-case timeout in seconds.
+
+    Returns:
+        List of BenchmarkRunner (and/or ConversationalBenchmarkRunner) instances.
+    """
+    from benchmarks.runner import BenchmarkRunner, ConversationalBenchmarkRunner
+
+    kwargs = {
+        "model_name": model,
+        "corpus_filter": corpus_filter,
+        "resume": resume,
+        "db_path": db_path,
+        "ollama_url": ollama_url,
+        "no_context": no_context,
+        "timeout": timeout,
+    }
+    runners = []
+    if mode in ("reactive", "both"):
+        runners.append(BenchmarkRunner(**kwargs))
+    if mode in ("conversational", "both"):
+        runners.append(ConversationalBenchmarkRunner(**kwargs))
+    return runners
+
+
 def _cmd_run(args: argparse.Namespace) -> None:
     """Run the benchmark for one or all models."""
-    from benchmarks.runner import BenchmarkRunner
-
     db_path = args.db or str(DEFAULT_DB_PATH)
     ollama_url = args.ollama_url or None
 
@@ -72,8 +115,9 @@ def _cmd_run(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     for model in models_to_run:
-        runner = BenchmarkRunner(
-            model_name=model,
+        runners = _make_runners(
+            model,
+            args.mode,
             corpus_filter=args.category if args.category else None,
             resume=args.resume,
             db_path=db_path,
@@ -81,16 +125,17 @@ def _cmd_run(args: argparse.Namespace) -> None:
             no_context=args.no_context,
             timeout=args.timeout,
         )
-        try:
-            run_uuid = runner.run()
-            print(f"Run complete: {run_uuid}")
-        except KeyboardInterrupt:
-            print(f"\nInterrupted. Partial results saved (run UUID: {runner.run_uuid})")
-            break
-        except Exception as exc:
-            print(f"Error running {model}: {exc}", file=sys.stderr)
-            if not args.all_models:
-                sys.exit(1)
+        for runner in runners:
+            try:
+                run_uuid = runner.run()
+                print(f"Run complete: {run_uuid}")
+            except KeyboardInterrupt:
+                print(f"\nInterrupted. Partial results saved (run UUID: {runner.run_uuid})")
+                return
+            except Exception as exc:
+                print(f"Error running {model}: {exc}", file=sys.stderr)
+                if not args.all_models:
+                    sys.exit(1)
 
 
 def _cmd_analyze(args: argparse.Namespace) -> None:
@@ -107,6 +152,9 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         analysis.print_summary(conn)
     else:
         analysis.print_summary(conn, model_name=model_name)
+
+    if args.compare_modes:
+        analysis.print_mode_comparison(conn)
 
     if model_name:
         failures = analysis.failure_patterns(conn, model_name, limit=args.failures)
@@ -222,6 +270,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_run.add_argument("--db", metavar="PATH", help="Path to benchmark database")
     p_run.add_argument("--ollama-url", metavar="URL", help="Ollama server URL")
+    p_run.add_argument(
+        "--mode",
+        choices=["reactive", "conversational", "both"],
+        default="reactive",
+        metavar="MODE",
+        help="Pipeline to benchmark: reactive (default), conversational, or both",
+    )
 
     # ── analyze ───────────────────────────────────────────────────────────────
     p_ana = sub.add_parser("analyze", help="Print analysis tables")
@@ -240,6 +295,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Number of failure patterns to show (default: 20)",
     )
     p_ana.add_argument("--db", metavar="PATH", help="Path to benchmark database")
+    p_ana.add_argument(
+        "--compare-modes",
+        action="store_true",
+        default=False,
+        help="Show reactive vs conversational pipeline comparison table",
+    )
 
     # ── export ────────────────────────────────────────────────────────────────
     p_exp = sub.add_parser("export", help="Export results to CSV")

@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS benchmark_runs (
     temperature_2       REAL    NOT NULL DEFAULT 0.1,  -- attempt 2 temperature
     corpus_version      TEXT,                       -- git hash or version tag of corpus.json
     host_info           TEXT,                       -- JSON: {hostname, cpu, ram_gb, gpu}
-    notes               TEXT
+    notes               TEXT,
+    pipeline_mode       TEXT    NOT NULL DEFAULT 'reactive'  -- reactive | conversational
 );
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -120,6 +121,11 @@ CREATE TABLE IF NOT EXISTS benchmark_results (
     behavior_correct        INTEGER,           -- NULL/present matches expected_behavior
     safety_correct          INTEGER,           -- safety handling matches expected safety_level
 
+    -- ── Conversational pipeline columns (NULL for reactive runs) ─────────────
+    turn_type                TEXT,     -- clarify | inform | propose | danger | refuse
+    classification_intent    TEXT,     -- greeting|question|diagnostic|execute|dangerous|unclear
+    classification_confident INTEGER,  -- bool (0/1)
+
     UNIQUE (run_id, case_id)
 );
 
@@ -132,6 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_results_model  ON benchmark_results (run_id, case
 CREATE INDEX IF NOT EXISTS idx_cases_category ON test_cases (category, difficulty);
 CREATE INDEX IF NOT EXISTS idx_cases_safety   ON test_cases (safety_level);
 CREATE INDEX IF NOT EXISTS idx_runs_model     ON benchmark_runs (model_name);
+CREATE INDEX IF NOT EXISTS idx_runs_mode      ON benchmark_runs (pipeline_mode);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Views (pre-built analysis queries)
@@ -206,6 +213,27 @@ FROM benchmark_runs r
 JOIN benchmark_results br ON br.run_id = r.id
 GROUP BY r.model_name
 ORDER BY any_sanitization_pct DESC;
+
+-- NOTE: v_model_accuracy, v_category_accuracy, v_safety_detection, and
+-- v_sanitization_rates aggregate by model_name without filtering on
+-- pipeline_mode.  Once conversational runs are added, these views will average
+-- across both pipelines.  Use v_mode_comparison for cross-pipeline analysis,
+-- or add WHERE r.pipeline_mode = 'reactive' for reactive-only queries.
+CREATE VIEW IF NOT EXISTS v_mode_comparison AS
+SELECT
+    r.model_name,
+    r.model_param_count,
+    r.pipeline_mode,
+    COUNT(br.id)                                                AS total_cases,
+    ROUND(100.0 * SUM(br.match_exact)      / COUNT(br.id), 1) AS exact_match_pct,
+    ROUND(100.0 * SUM(br.match_fuzzy)      / COUNT(br.id), 1) AS fuzzy_match_pct,
+    ROUND(100.0 * SUM(br.behavior_correct) / COUNT(br.id), 1) AS behavior_correct_pct,
+    ROUND(100.0 * SUM(br.safety_correct)   / COUNT(br.id), 1) AS safety_correct_pct,
+    ROUND(AVG(br.latency_ms_total), 0)                         AS avg_latency_ms
+FROM benchmark_runs r
+JOIN benchmark_results br ON br.run_id = r.id
+GROUP BY r.model_name, r.model_param_count, r.pipeline_mode
+ORDER BY r.model_name, r.pipeline_mode;
 
 CREATE VIEW IF NOT EXISTS v_failure_patterns AS
 SELECT
@@ -285,6 +313,7 @@ def insert_run(
     corpus_version: str | None = None,
     host_info: str | None = None,
     notes: str | None = None,
+    pipeline_mode: str = "reactive",
 ) -> int:
     """Insert a new benchmark_runs row and return the assigned id.
 
@@ -301,6 +330,7 @@ def insert_run(
         corpus_version: Git hash or tag for corpus.json.
         host_info: JSON string with host hardware info.
         notes: Optional free-text notes for this run.
+        pipeline_mode: Which pipeline was benchmarked ("reactive" or "conversational").
 
     Returns:
         The auto-assigned integer id of the inserted row.
@@ -309,8 +339,9 @@ def insert_run(
         """
         INSERT INTO benchmark_runs
             (run_uuid, started_at, model_name, model_family, model_param_count,
-             ollama_url, temperature_1, temperature_2, corpus_version, host_info, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ollama_url, temperature_1, temperature_2, corpus_version, host_info, notes,
+             pipeline_mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run_uuid,
@@ -324,6 +355,7 @@ def insert_run(
             corpus_version,
             host_info,
             notes,
+            pipeline_mode,
         ),
     )
     conn.commit()
