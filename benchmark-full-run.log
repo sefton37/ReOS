@@ -8563,4 +8563,102 @@ pysqlcipher3 not installed — databases will remain unencrypted. Install with: 
 [phi3:mini-128k][257/415] disk_mount_001 … → lsblk | grep sdX && sudo mount /dev/sdX1 {desired_mountpoint}
 [phi3:mini-128k][258/415] disk_umount_001 … → lsof +F -- /mnt/my_device
 [phi3:mini-128k][259/415] disk_mount_fstab_001 … → sudo mount -av
-[phi3:mini-128k][260/415] disk_findmnt_001 …
+[phi3:mini-128k][260/415] disk_findmnt_001 … → sudo mount | grep -v '^loop\|^\/dev'
+[phi3:mini-128k][261/415] disk_fdisk_001 … → (inform)
+[phi3:mini-128k][262/415] disk_parted_001 … → sudo parted /dev/sdXY
+[phi3:mini-128k][263/415] disk_mkfs_ext4_001 … → (refuse)
+[phi3:mini-128k][264/415] disk_resize_fs_001 … → sudo lvextend -L +10G -r /dev/{disk identifier}/{lv_path}
+[phi3:mini-128k][265/415] disk_gdisk_001 … → sudo mkfs.ntfs /dev/sdXY
+[phi3:mini-128k][266/415] disk_df_001 … → df -h
+[phi3:mini-128k][267/415] disk_du_dir_001 … → df -h | grep '\/$'
+[phi3:mini-128k][268/415] disk_du_total_001 … → du -sh /path/to/your/directory
+[phi3:mini-128k][269/415] disk_ncdu_001 … → (inform)
+[phi3:mini-128k][270/415] disk_inode_001 … → df -ih | awk '{print $5}' | sort -gr | head -n 1
+[phi3:mini-128k][271/415] scheduling_cron_001 … → sudo crontab -l
+[phi3:mini-128k][272/415] scheduling_cron_list_001 … → crontab -l
+[phi3:mini-128k][273/415] scheduling_cron_remove_001 … → (refuse)
+[phi3:mini-128k][274/415] scheduling_cron_system_001 … → systemctl list-timers
+[phi3:mini-128k][275/415] scheduling_cron_user_001 … → sudo crontab -e -u {user}
+[phi3:mini-128k][276/415] scheduling_cron_daily_001 … → sudo crontab -l
+[phi3:mini-128k][277/415] scheduling_at_001 … → echo "your_command" | at midnight
+[phi3:mini-128k][278/415] scheduling_at_list_001 … → sudo atq
+[phi3:mini-128k][279/415] scheduling_at_remove_001 … → sudo atrm -l | grep '^user' | awk '{print $2}'
+[phi3:mini-128k][280/415] scheduling_at_time_001 … → echo "echo 'Your script command here'" | at 14:00
+[phi3:mini-128k][281/415] scheduling_timer_list_001 … → sudo systemctl list-timers --all
+[phi3:mini-128k][282/415] scheduling_timer_status_001 … → systemctl list-timers --all
+[phi3:mini-128k][283/415] scheduling_timer_enable_001 … → sudo systemctl list-timers --all
+[phi3:mini-128k][284/415] scheduling_timer_next_001 … → sudo systemctl list-timers
+[phi3:mini-128k][285/415] scheduling_sleep_001 … → sleep 30 && echo "Your command here"
+[phi3:mini-128k][286/415] terminal_tmux_new_001 … → (inform)
+[phi3:mini-128k][287/415] terminal_tmux_attach_001 … → (inform)
+[phi3:mini-128k][288/415] terminal_tmux_list_001 … → sudo journalctl --list-boots
+[phi3:mini-128k][289/415] terminal_screen_new_001 … → (inform)
+[phi3:mini-128k][290/415] terminal_history_001 … → history
+[phi3:mini-128k][291/415] terminal_history_grep_001 … → (inform)
+[phi3:mini-128k][292/415] terminal_history_clear_001 … → history -c
+[phi3:mini-128k][293/415] terminal_alias_001 … → alias
+[phi3:mini-128k][294/415] terminal_alias_set_001 … → alias {name}='{command}'
+[phi3:mini-128k][295/415] terminal_alias_remove_001 … → unalias {name}
+[phi3:mini-128k][296/415] terminal_alias_persistent_001 … → ln -s ~/ /home/{username}/alias && echo 'export PATH=$PATH:/home/{username}/alias' >> ~/.bashrc && chmod +x ~/.bashrc
+[phi3:mini-128k][297/415] terminal_env_list_001 … → env
+[phi3:mini-128k][298/415] terminal_env_set_001 … → export {VARIABLE}={value}
+[phi3:mini-128k][299/415] terminal_env_show_001 … → echo $PATH
+[phi3:mini-128k][300/415] terminal_env_persistent_001 … → export VARIABLE=VALUE
+[phi3:mini-128k][301/415] pipeline_count_lines_001 … → grep -o "failed" {logfile} | wc -l
+[phi3:mini-128k][302/415] pipeline_top_procs_001 … → ps aux --sort=-%mem | head -6
+[phi3:mini-128k][303/415] pipeline_unique_ips_001 … → awk '{print $1}' access_log.txt | sort -n | uniq
+[phi3:mini-128k][304/415] pipeline_404_count_001 … → grep -c 404 /var/log/nginx/access.log
+[phi3:mini-128k][305/415] pipeline_sum_col_001 … → awk '{sum += $2} END {print sum}' filename
+[phi3:mini-128k][306/415] pipeline_large_files_001 … → sudo du -ah -t "50M" --max-depth=1 /var/log | sort -nr | head -n 20
+[phi3:mini-128k][307/415] pipeline_dead_services_001 … → grep "Failed password" /var/log/auth.log | cut -d ':' -f 2 | sort | uniq | wc -l
+[phi3:mini-128k][308/415] pipeline_recent_errors_001 … → journalctl -b -p err --lines=10
+[phi3:mini-128k][309/415] pipeline_disk_hogs_001 … → sudo find / -type f | xargs du --block-size=1G | sort -n | head -n 10
+[phi3:mini-128k][310/415] pipeline_listening_pids_001 … → sudo lsof -i TCP:* -sTCP:LISTEN
+[phi3:mini-128k][311/415] pipeline_cpu_by_user_001 … → sudo sar -u 2 /tmp/sar_cpu & sleep 1 && tail -n50 /var/log/sa/sa4* | grep '^%Cpu'
+[phi3:mini-128k][312/415] pipeline_modified_today_001 … → sudo find /etc -type f -mtime 0
+[phi3:mini-128k][313/415] pipeline_redirect_output_001 … → {command} > {file}
+[phi3:mini-128k][314/415] pipeline_redirect_append_001 … → {command} | tee -a {file}
+[phi3:mini-128k][315/415] pipeline_redirect_stderr_001 … → exec 2> {logfile}
+[phi3:mini-128k][316/415] pipeline_redirect_both_001 … → {command} &> {file}
+[phi3:mini-128k][317/415] pipeline_redirect_null_001 … → {command} 2>/dev/null
+[phi3:mini-128k][318/415] pipeline_tee_001 … → ls | tee logfile.txt
+[phi3:mini-128k][319/415] pipeline_tee_append_001 … → {command} 2>&1 | tee -a {file}
+[phi3:mini-128k][320/415] pipeline_heredoc_001 … → {command} << 'END_OF_INPUT'
+[phi3:mini-128k][321/415] pipeline_xargs_001 … → (refuse)
+[phi3:mini-128k][322/415] pipeline_xargs_grep_001 … → grep -rnwP --exclude-dir={__pycache__,tests} 'import requests' */path/to/search/*
+[phi3:mini-128k][323/415] pipeline_xargs_chmod_001 … → find . -type f -name "*.sh" -exec chmod +x {} \;
+[phi3:mini-128k][324/415] pipeline_xargs_parallel_001 … → zstd -T0 multiple_files_to_compress.sh
+[phi3:mini-128k][325/415] pipeline_xargs_rm_old_001 … → sudo journalctl --vacuum-time=2d (or use 'rm' if only removing files, not system messages)
+[phi3:mini-128k][326/415] pipeline_proc_subst_001 … → diff -u <(command1) <(command2)
+[phi3:mini-128k][327/415] pipeline_xargs_cp_001 … → cp *.conf /path/to/backup-directory/
+[phi3:mini-128k][328/415] pipeline_xargs_wc_001 … → find . -name "*.py" | xargs wc -l
+[phi3:mini-128k][329/415] pipeline_sort_uniq_count_001 … → grep -o 'ERROR' /path/to/logfile | sort | uniq -c | sort -r  # Note that this is a starting point and may require further scripting for full analysis
+[phi3:mini-128k][330/415] pipeline_comm_diff_001 … → diff -rq dir1 dir2 | grep 'Only in'
+[phi3:mini-128k][331/415] natural_casual_001 … → (inform)
+[phi3:mini-128k][332/415] natural_casual_002 … → (inform)
+[phi3:mini-128k][333/415] natural_casual_003 … → find ~/ -type f -size +10M 2>/dev/null | head
+[phi3:mini-128k][334/415] natural_casual_004 … → free -h; cat /proc/meminfo | grep MemTotal
+[phi3:mini-128k][335/415] natural_casual_005 … → ls {directory}
+[phi3:mini-128k][336/415] natural_casual_006 … → sudo ls /etc/init.d/* || cat /proc/1/status | grep Compile 2>/dev/null
+[phi3:mini-128k][337/415] natural_casual_007 … → sudo netstat -plnt | grep nginx || sudo ss -tuln | grep :nginx_port
+[phi3:mini-128k][338/415] natural_casual_008 … → who
+[phi3:mini-128k][339/415] natural_casual_009 … → sudo updatedb && locate '{pattern}'
+[phi3:mini-128k][340/415] natural_casual_010 … → sudo apt install nethogs
+[phi3:mini-128k][341/415] natural_vague_001 … → iostat -x
+[phi3:mini-128k][342/415] natural_ambiguous_001 … → sudo find / -type d -empty | xargs rm -rf
+[phi3:mini-128k][343/415] natural_vague_002 … → (clarify)
+[phi3:mini-128k][344/415] natural_vague_003 … → sudo apt list --upgradable
+[phi3:mini-128k][345/415] natural_vague_004 … → docker logs -f {container_name_or_id}
+[phi3:mini-128k][346/415] natural_vague_005 … → ip addr
+[phi3:mini-128k][347/415] natural_vague_006 … → (clarify)
+[phi3:mini-128k][348/415] natural_vague_007 … → rm {file1} {file2}
+[phi3:mini-128k][349/415] natural_vague_008 … → sudo lvextend -l +100%FREE -r /dev/mapper/{your-device}-{lv_path}
+[phi3:mini-128k][350/415] natural_vague_009 … → nmcli device wifi list
+[phi3:mini-128k][351/415] natural_technical_001 … → sudo ss -tlnp | awk '{print $5, $NF}'
+[phi3:mini-128k][352/415] natural_technical_002 … → lsmem -J
+[phi3:mini-128k][353/415] natural_technical_003 … → ldconfig -a && ldconfig -r
+[phi3:mini-128k][354/415] natural_technical_004 … → find /path/to/dir1 -type f \( \! -name '.git' -and \!\-name '*.svn*' \) -print0 | xargs -0 diff --brief --no-color /path/to/dir2
+[phi3:mini-128k][355/415] natural_technical_005 … → readlink -f {symlink_path}
+[phi3:mini-128k][356/415] natural_technical_006 … → df -ih | grep '/path/to/file/'
+[phi3:mini-128k][357/415] natural_technical_007 … → lsof -p {pid}
+[phi3:mini-128k][358/415] natural_technical_008 …
