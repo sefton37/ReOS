@@ -225,6 +225,7 @@ class BenchmarkRunner:
         no_rag: bool = False,
         anthropic_key: str | None = None,
         corpus_file: "Path | None" = None,
+        run_tag: str | None = None,
     ) -> None:
         self.model_name = model_name
         self.corpus_filter = corpus_filter
@@ -236,6 +237,7 @@ class BenchmarkRunner:
         self.no_rag = no_rag
         self.anthropic_key = anthropic_key
         self.corpus_file = corpus_file
+        self.run_tag = run_tag
 
         self.run_uuid: str = str(uuid.uuid4())
         self.run_id: int = 0
@@ -334,6 +336,7 @@ class BenchmarkRunner:
             model_param_count=param_count,
             host_info=_host_info(),
             pipeline_mode=pipeline_mode,
+            notes=self.run_tag,
         )
 
     def _patch_trcore_model(self) -> None:
@@ -703,6 +706,7 @@ class ConversationalBenchmarkRunner(BenchmarkRunner):
             model_param_count=param_count,
             host_info=_host_info(),
             pipeline_mode=pipeline_mode,
+            notes=self.run_tag,
         )
 
     # ──────────────────────────────────────────────────────────────────────────

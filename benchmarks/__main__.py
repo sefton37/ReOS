@@ -71,6 +71,7 @@ def _make_runners(
     rag_mode: str = "rag",
     anthropic_key: str | None = None,
     corpus_file: Path | None = None,
+    run_tag: str | None = None,
 ) -> list:
     """Instantiate benchmark runner(s) for the given model and mode.
 
@@ -117,6 +118,7 @@ def _make_runners(
             "no_rag": nr,
             "anthropic_key": anthropic_key,
             "corpus_file": corpus_file,
+            "run_tag": run_tag,
         }
         if mode in ("reactive", "both"):
             runners.append(BenchmarkRunner(**kwargs))
@@ -158,6 +160,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
             rag_mode=args.rag_mode,
             anthropic_key=getattr(args, "anthropic_key", None),
             corpus_file=corpus_file,
+            run_tag=getattr(args, "tag", None),
         )
         for runner in runners:
             try:
@@ -351,6 +354,12 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["full", "top50"],
         default="full",
         help="Test corpus: full (all cases) or top50 (50 essential commands)",
+    )
+    p_run.add_argument(
+        "--tag",
+        metavar="TAG",
+        default=None,
+        help="Version tag stored in run notes (e.g. 'v2-hybrid-tiers')",
     )
 
     # ── analyze ───────────────────────────────────────────────────────────────

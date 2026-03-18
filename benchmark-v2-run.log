@@ -1,0 +1,16 @@
+pysqlcipher3 not installed — databases will remain unencrypted. Install with: pip install pysqlcipher3  (requires libsqlcipher-dev)
+[qwen2.5:0.5b] Checking model availability …
+[qwen2.5:0.5b][1/415] files_ls_basic_001 … → ls /
+[qwen2.5:0.5b][2/415] files_ls_hidden_001 … → ls -a /
+[qwen2.5:0.5b][3/415] files_ls_long_001 … → ls -la /path/to/directory
+[qwen2.5:0.5b][4/415] files_cp_001 … → cp filename.txt /path/to/destination
+[qwen2.5:0.5b][5/415] files_mv_001 … → (none)
+[qwen2.5:0.5b][6/415] files_mv_rename_001 … → mv old_file new_file
+[qwen2.5:0.5b][7/415] files_rm_001 … → rm -f filename
+[qwen2.5:0.5b][8/415] files_mkdir_001 … → mkdir test_directory
+[qwen2.5:0.5b][9/415] files_mkdir_p_001 … → mkdir -p /path/to/directory/ and then use the command below.
+[qwen2.5:0.5b][10/415] files_touch_001 … → touch none
+[qwen2.5:0.5b][11/415] files_cat_001 … → cat {file}
+[qwen2.5:0.5b][12/415] files_head_001 … → head -n 10 file
+[qwen2.5:0.5b][13/415] files_tail_001 … → (none)
+[qwen2.5:0.5b][14/415] files_tail_follow_001 …
