@@ -1,17 +1,8 @@
 pysqlcipher3 not installed — databases will remain unencrypted. Install with: pip install pysqlcipher3  (requires libsqlcipher-dev)
 [claude-sonnet-4-20250514] Anthropic API model — no pull needed
-[claude-sonnet-4-20250514][1/415] files_ls_basic_001 … → (none)
-[claude-sonnet-4-20250514][2/415] files_ls_hidden_001 … → (none)
-[claude-sonnet-4-20250514][3/415] files_ls_long_001 … → (none)
-[claude-sonnet-4-20250514][4/415] files_cp_001 … → (none)
-[claude-sonnet-4-20250514][5/415] files_mv_001 … → (none)
-[claude-sonnet-4-20250514][6/415] files_mv_rename_001 … → (none)
-[claude-sonnet-4-20250514][7/415] files_rm_001 … → (none)
-[claude-sonnet-4-20250514][8/415] files_mkdir_001 … → (none)
-[claude-sonnet-4-20250514][9/415] files_mkdir_p_001 … → (none)
-[claude-sonnet-4-20250514][10/415] files_touch_001 … → (none)
-[claude-sonnet-4-20250514][11/415] files_cat_001 … → (none)
-[claude-sonnet-4-20250514][12/415] files_head_001 … → (none)
-[claude-sonnet-4-20250514][13/415] files_tail_001 … → (none)
-[claude-sonnet-4-20250514][14/415] files_tail_follow_001 … → (none)
-[claude-sonnet-4-20250514][15/415] files_wc_001 …
+[claude-sonnet-4-20250514][1/415] files_ls_basic_001 … → ls
+[claude-sonnet-4-20250514][2/415] files_ls_hidden_001 … → ls -a
+[claude-sonnet-4-20250514][3/415] files_ls_long_001 … → ls -l
+[claude-sonnet-4-20250514][4/415] files_cp_001 … → cp {source_file} {destination}
+[claude-sonnet-4-20250514][5/415] files_mv_001 … → mv {file} {destination_directory}/
+[claude-sonnet-4-20250514][6/415] files_mv_rename_001 …
