@@ -67,6 +67,7 @@ def _make_runners(
     timeout: int,
     no_rag: bool = False,
     rag_mode: str = "rag",
+    anthropic_key: str | None = None,
 ) -> list:
     """Instantiate benchmark runner(s) for the given model and mode.
 
@@ -110,6 +111,7 @@ def _make_runners(
             "no_context": no_context,
             "timeout": timeout,
             "no_rag": nr,
+            "anthropic_key": anthropic_key,
         }
         if mode in ("reactive", "both"):
             runners.append(BenchmarkRunner(**kwargs))
@@ -144,6 +146,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
             timeout=args.timeout,
             no_rag=args.no_rag,
             rag_mode=args.rag_mode,
+            anthropic_key=getattr(args, "anthropic_key", None),
         )
         for runner in runners:
             try:
@@ -312,6 +315,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default="rag",
         metavar="RAG_MODE",
         help="RAG mode: rag (default), no-rag, or both (run twice for A/B)",
+    )
+    p_run.add_argument(
+        "--anthropic-credential",
+        metavar="KEY",
+        dest="anthropic_key",
+        default=None,
+        help="Anthropic credential (or set ANTHROPIC_API_KEY env var)",
     )
 
     # ── analyze ───────────────────────────────────────────────────────────────

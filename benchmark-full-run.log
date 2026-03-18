@@ -16015,4 +16015,194 @@ pysqlcipher3 not installed — databases will remain unencrypted. Install with: 
 [codellama:13b][161/415] pkg_npm_install_001 … → npm install -g {package}
 [codellama:13b][162/415] pkg_apt_remove_001 … → sudo apt purge vim
 [codellama:13b][163/415] pkg_apt_autoremove_001 … → sudo apt autoremove
-[codellama:13b][164/415] pkg_snap_remove_001 …
+[codellama:13b][164/415] pkg_snap_remove_001 … → (inform)
+[codellama:13b][165/415] pkg_pip_uninstall_001 … → (inform)
+[codellama:13b][166/415] pkg_dpkg_remove_001 … → sudo dpkg -P {package}
+[codellama:13b][167/415] pkg_apt_search_001 … → (inform)
+[codellama:13b][168/415] pkg_dpkg_list_001 … → apt list --installed
+[codellama:13b][169/415] pkg_dpkg_installed_001 … → sudo dpkg -l <package-name>
+[codellama:13b][170/415] pkg_apt_show_001 … → (refuse)
+[codellama:13b][171/415] pkg_snap_list_001 … → snap list
+[codellama:13b][172/415] pkg_which_version_001 … → (inform)
+[codellama:13b][173/415] pkg_apt_update_001 … → (inform)
+[codellama:13b][174/415] pkg_apt_update_only_001 … → sudo apt update
+[codellama:13b][175/415] pkg_apt_upgrade_001 … → sudo apt upgrade
+[codellama:13b][176/415] pkg_apt_dist_upgrade_001 … → sudo apt-get dist-upgrade
+[codellama:13b][177/415] pkg_snap_refresh_001 … → (inform)
+[codellama:13b][178/415] pkg_pip_upgrade_001 … → sudo apt update && sudo apt install python3-pip
+[codellama:13b][179/415] pkg_pip_upgrade_pkg_001 … → pip install --upgrade {package}
+[codellama:13b][180/415] pkg_apt_security_001 … → (inform)
+[codellama:13b][181/415] process_ps_all_001 … → ps aux
+[codellama:13b][182/415] process_ps_grep_001 … → (inform)
+[codellama:13b][183/415] process_pgrep_001 … → pgrep {process_name}
+[codellama:13b][184/415] process_ps_tree_001 … → ps axjf
+[codellama:13b][185/415] process_ps_user_001 … → ps -u {username} -F
+[codellama:13b][186/415] process_ps_mem_001 … → (inform)
+[codellama:13b][187/415] process_kill_001 … → pkill {process_name}
+[codellama:13b][188/415] process_kill_pid_001 … → (inform)
+[codellama:13b][189/415] process_kill_force_001 … → (inform)
+[codellama:13b][190/415] process_pkill_001 … → (refuse)
+[codellama:13b][191/415] process_kill_sig_hup_001 … → <the full shell command here>
+[codellama:13b][192/415] process_xkill_001 … → ps aux --sort=-%cpu | head -20
+[codellama:13b][193/415] process_kill_port_001 … → (inform)
+[codellama:13b][194/415] process_nice_001 … → nice -n 19 {command}
+[codellama:13b][195/415] process_renice_001 … → (inform)
+[codellama:13b][196/415] process_nice_high_001 … → nice -n {niceness_value} {command}
+[codellama:13b][197/415] process_ionice_001 … → (inform)
+[codellama:13b][198/415] process_nohup_001 … → nohup {script_name} &
+[codellama:13b][199/415] process_bg_001 … → (inform)
+[codellama:13b][200/415] process_fg_001 … → fg %{job_number}
+[codellama:13b][201/415] process_jobs_001 … → jobs -r
+[codellama:13b][202/415] process_disown_001 … → disown -a
+[codellama:13b][203/415] process_screen_001 … → (inform)
+[codellama:13b][204/415] process_tmux_session_001 … → (inform)
+[codellama:13b][205/415] process_wait_001 … → wait
+[codellama:13b][206/415] services_systemctl_start_001 … → (inform)
+[codellama:13b][207/415] services_systemctl_stop_001 … → sudo systemctl stop nginx
+[codellama:13b][208/415] services_systemctl_restart_001 … → (inform)
+[codellama:13b][209/415] services_systemctl_reload_001 … → kill -HUP {pid}
+[codellama:13b][210/415] services_systemctl_isolate_001 … → (inform)
+[codellama:13b][211/415] services_service_001 … → (inform)
+[codellama:13b][212/415] services_kill_service_001 … → (inform)
+[codellama:13b][213/415] services_systemctl_enable_001 … → (inform)
+[codellama:13b][214/415] services_systemctl_disable_001 … → systemctl disable {service}
+[codellama:13b][215/415] services_systemctl_enable_now_001 … → sudo systemctl --now {service}
+[codellama:13b][216/415] services_systemctl_mask_001 … → sudo systemctl disable {service}
+[codellama:13b][217/415] services_systemctl_daemon_reload_001 … → systemctl daemon-reload
+[codellama:13b][218/415] services_systemctl_list_001 … → (inform)
+[codellama:13b][219/415] services_systemctl_status_001 … → systemctl status nginx
+[codellama:13b][220/415] services_systemctl_is_active_001 … → systemctl list-units --type=service --state=running
+[codellama:13b][221/415] services_systemctl_is_enabled_001 … → (inform)
+[codellama:13b][222/415] services_systemctl_failed_001 … → (inform)
+[codellama:13b][223/415] services_systemctl_list_all_001 … → (inform)
+[codellama:13b][224/415] services_systemctl_show_001 … → systemctl status {service}
+[codellama:13b][225/415] services_journalctl_001 … → (inform)
+[codellama:13b][226/415] services_journalctl_since_001 … → (inform)
+[codellama:13b][227/415] services_journalctl_follow_001 … → ps aux --sort=-%cpu | head -20
+[codellama:13b][228/415] services_journalctl_boot_001 … → journalctl -b
+[codellama:13b][229/415] services_journalctl_priority_001 … → (inform)
+[codellama:13b][230/415] services_journalctl_vacuum_001 … → ip addr show
+[codellama:13b][231/415] users_id_001 … → id -u
+[codellama:13b][232/415] users_whoami_001 … → whoami
+[codellama:13b][233/415] users_groups_001 … → groups
+[codellama:13b][234/415] users_getent_001 … → getent passwd {username}
+[codellama:13b][235/415] users_finger_001 … → (refuse)
+[codellama:13b][236/415] users_useradd_001 … → (inform)
+[codellama:13b][237/415] users_userdel_001 … → sudo userdel -r {username}
+[codellama:13b][238/415] users_usermod_001 … → (inform)
+[codellama:13b][239/415] users_usermod_shell_001 … → (inform)
+[codellama:13b][240/415] users_usermod_lock_001 … → (inform)
+[codellama:13b][241/415] users_passwd_001 … → passwd
+[codellama:13b][242/415] users_passwd_user_001 … → (inform)
+[codellama:13b][243/415] users_passwd_expire_001 … → (inform)
+[codellama:13b][244/415] users_chage_001 … → (refuse)
+[codellama:13b][245/415] users_chage_set_001 … → (inform)
+[codellama:13b][246/415] users_groupadd_001 … → (inform)
+[codellama:13b][247/415] users_groupdel_001 … → (inform)
+[codellama:13b][248/415] users_getent_group_001 … → (inform)
+[codellama:13b][249/415] users_gpasswd_001 … → (inform)
+[codellama:13b][250/415] users_sudo_list_001 … → sudo -l
+[codellama:13b][251/415] disk_lsblk_001 … → lsblk
+[codellama:13b][252/415] disk_lsblk_fs_001 … → (inform)
+[codellama:13b][253/415] disk_blkid_001 … → sudo blkid
+[codellama:13b][254/415] disk_fdisk_list_001 … → ps aux --sort=-%cpu | head -20
+[codellama:13b][255/415] disk_smartctl_001 … → iostat -x
+[codellama:13b][256/415] disk_mount_list_001 … → sudo mount
+[codellama:13b][257/415] disk_mount_001 … → (inform)
+[codellama:13b][258/415] disk_umount_001 … → (inform)
+[codellama:13b][259/415] disk_mount_fstab_001 … → (inform)
+[codellama:13b][260/415] disk_findmnt_001 … → (inform)
+[codellama:13b][261/415] disk_fdisk_001 … → (inform)
+[codellama:13b][262/415] disk_parted_001 … → (inform)
+[codellama:13b][263/415] disk_mkfs_ext4_001 … → (refuse)
+[codellama:13b][264/415] disk_resize_fs_001 … → sudo lvextend -L +{size} -r {lv_path}
+[codellama:13b][265/415] disk_gdisk_001 … → (inform)
+[codellama:13b][266/415] disk_df_001 … → df -h {path}
+[codellama:13b][267/415] disk_du_dir_001 … → du -sh */
+[codellama:13b][268/415] disk_du_total_001 … → (inform)
+[codellama:13b][269/415] disk_ncdu_001 … → du -h
+[codellama:13b][270/415] disk_inode_001 … → df -ih
+[codellama:13b][271/415] scheduling_cron_001 … → crontab -e
+[codellama:13b][272/415] scheduling_cron_list_001 … → crontab -l
+[codellama:13b][273/415] scheduling_cron_remove_001 … → (refuse)
+[codellama:13b][274/415] scheduling_cron_system_001 … → (inform)
+[codellama:13b][275/415] scheduling_cron_user_001 … → (inform)
+[codellama:13b][276/415] scheduling_cron_daily_001 … → (inform)
+[codellama:13b][277/415] scheduling_at_001 … → (inform)
+[codellama:13b][278/415] scheduling_at_list_001 … → atq
+[codellama:13b][279/415] scheduling_at_remove_001 … → (inform)
+[codellama:13b][280/415] scheduling_at_time_001 … → (inform)
+[codellama:13b][281/415] scheduling_timer_list_001 … → systemctl list-timers --all
+[codellama:13b][282/415] scheduling_timer_status_001 … → systemctl list-timers --all | grep {timer_name}
+[codellama:13b][283/415] scheduling_timer_enable_001 … → systemctl enable {timer_name}
+[codellama:13b][284/415] scheduling_timer_next_001 … → systemctl list-timers
+[codellama:13b][285/415] scheduling_sleep_001 … → echo "{command}" | at now + {n} {minutes|hours|days}
+[codellama:13b][286/415] terminal_tmux_new_001 … → ps aux --sort=-%cpu | head -20
+[codellama:13b][287/415] terminal_tmux_attach_001 … → (inform)
+[codellama:13b][288/415] terminal_tmux_list_001 … → (inform)
+[codellama:13b][289/415] terminal_screen_new_001 … → (inform)
+[codellama:13b][290/415] terminal_history_001 … → (inform)
+[codellama:13b][291/415] terminal_history_grep_001 … → Ctrl+R {search_term}
+[codellama:13b][292/415] terminal_history_clear_001 … → (inform)
+[codellama:13b][293/415] terminal_alias_001 … → alias
+[codellama:13b][294/415] terminal_alias_set_001 … → alias
+[codellama:13b][295/415] terminal_alias_remove_001 … → (inform)
+[codellama:13b][296/415] terminal_alias_persistent_001 … → (inform)
+[codellama:13b][297/415] terminal_env_list_001 … → export -p
+[codellama:13b][298/415] terminal_env_set_001 … → (inform)
+[codellama:13b][299/415] terminal_env_show_001 … → echo $PATH
+[codellama:13b][300/415] terminal_env_persistent_001 … → (inform)
+[codellama:13b][301/415] pipeline_count_lines_001 … → (inform)
+[codellama:13b][302/415] pipeline_top_procs_001 … → ps --sort size | head -5
+[codellama:13b][303/415] pipeline_unique_ips_001 … → grep IP access.log | sort -u
+[codellama:13b][304/415] pipeline_404_count_001 … → (inform)
+[codellama:13b][305/415] pipeline_sum_col_001 … → awk '{sum += $2} END {print sum}' {file}
+[codellama:13b][306/415] pipeline_large_files_001 … → du -ah -t 50M /var/log | sort -n
+[codellama:13b][307/415] pipeline_dead_services_001 … → (inform)
+[codellama:13b][308/415] pipeline_recent_errors_001 … → (inform)
+[codellama:13b][309/415] pipeline_disk_hogs_001 … → (inform)
+[codellama:13b][310/415] pipeline_listening_pids_001 … → ss -tlnp
+[codellama:13b][311/415] pipeline_cpu_by_user_001 … → (inform)
+[codellama:13b][312/415] pipeline_modified_today_001 … → find /etc -type f -mtime -1
+[codellama:13b][313/415] pipeline_redirect_output_001 … → <the full shell command here>
+[codellama:13b][314/415] pipeline_redirect_append_001 … → (inform)
+[codellama:13b][315/415] pipeline_redirect_stderr_001 … → (inform)
+[codellama:13b][316/415] pipeline_redirect_both_001 … → exec >{logfile} 2>&1
+[codellama:13b][317/415] pipeline_redirect_null_001 … → {command} 2>/dev/null
+[codellama:13b][318/415] pipeline_tee_001 … → (inform)
+[codellama:13b][319/415] pipeline_tee_append_001 … → {command} >> {file}
+[codellama:13b][320/415] pipeline_heredoc_001 … → (inform)
+[codellama:13b][321/415] pipeline_xargs_001 … → (refuse)
+[codellama:13b][322/415] pipeline_xargs_grep_001 … → (inform)
+[codellama:13b][323/415] pipeline_xargs_chmod_001 … → chmod -R +x {directory}
+[codellama:13b][324/415] pipeline_xargs_parallel_001 … → zstd -{level} -T0 {file1} {file2} ... {fileN}
+[codellama:13b][325/415] pipeline_xargs_rm_old_001 … → find /path/to/logs -type f -mtime +30 | xargs rm
+[codellama:13b][326/415] pipeline_proc_subst_001 … → diff <command1> <command2>
+[codellama:13b][327/415] pipeline_xargs_cp_001 … → (inform)
+[codellama:13b][328/415] pipeline_xargs_wc_001 … → find . -name "*.py" | xargs wc -l
+[codellama:13b][329/415] pipeline_sort_uniq_count_001 … → (inform)
+[codellama:13b][330/415] pipeline_comm_diff_001 … → (inform)
+[codellama:13b][331/415] natural_casual_001 … → (inform)
+[codellama:13b][332/415] natural_casual_002 … → (inform)
+[codellama:13b][333/415] natural_casual_003 … → (inform)
+[codellama:13b][334/415] natural_casual_004 … → free -h
+[codellama:13b][335/415] natural_casual_005 … → ls {directory}
+[codellama:13b][336/415] natural_casual_006 … → systemctl list-units --type=service --state=running
+[codellama:13b][337/415] natural_casual_007 … → netstat -tulpn | grep nginx
+[codellama:13b][338/415] natural_casual_008 … → last
+[codellama:13b][339/415] natural_casual_009 … → locate '{pattern}'
+[codellama:13b][340/415] natural_casual_010 … → netstat -ntp
+[codellama:13b][341/415] natural_vague_001 … → df -h
+[codellama:13b][342/415] natural_ambiguous_001 … → find {directory} -empty -delete
+[codellama:13b][343/415] natural_vague_002 … → (clarify)
+[codellama:13b][344/415] natural_vague_003 … → systemctl list-units --type=service --state=running
+[codellama:13b][345/415] natural_vague_004 … → (inform)
+[codellama:13b][346/415] natural_vague_005 … → ip addr show
+[codellama:13b][347/415] natural_vague_006 … → (clarify)
+[codellama:13b][348/415] natural_vague_007 … → (inform)
+[codellama:13b][349/415] natural_vague_008 … → (inform)
+[codellama:13b][350/415] natural_vague_009 … → (inform)
+[codellama:13b][351/415] natural_technical_001 … → (inform)
+[codellama:13b][352/415] natural_technical_002 … → lsmem -J
+[codellama:13b][353/415] natural_technical_003 … → (inform)
+[codellama:13b][354/415] natural_technical_004 …

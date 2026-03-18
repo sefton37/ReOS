@@ -88,6 +88,11 @@ def _detect_soft_risky(command: str | None) -> tuple[bool, str | None]:
     return False, None
 
 
+def _is_anthropic_model(model_name: str) -> bool:
+    """Return True if the model name is an Anthropic API model."""
+    return model_name.startswith("claude-") or "anthropic" in model_name.lower()
+
+
 def _parse_model_name(model_name: str) -> tuple[str | None, str | None]:
     """Extract model family and parameter count from an Ollama model name.
 
@@ -208,6 +213,7 @@ class BenchmarkRunner:
         no_context: bool = False,
         timeout: int = 120,
         no_rag: bool = False,
+        anthropic_key: str | None = None,
     ) -> None:
         self.model_name = model_name
         self.corpus_filter = corpus_filter
@@ -217,6 +223,7 @@ class BenchmarkRunner:
         self.no_context = no_context
         self.timeout = timeout
         self.no_rag = no_rag
+        self.anthropic_key = anthropic_key
 
         self.run_uuid: str = str(uuid.uuid4())
         self.run_id: int = 0
@@ -273,11 +280,19 @@ class BenchmarkRunner:
 
         self._conn = init_db(self.db_path)
 
-        # Build an InstrumentedOllamaProvider for direct use (token capture).
-        self._provider = InstrumentedOllamaProvider(
-            url=self.ollama_url,
-            model=self.model_name,
-        )
+        # Build an instrumented provider for direct use (token capture).
+        if _is_anthropic_model(self.model_name):
+            from benchmarks.anthropic_provider import InstrumentedAnthropicProvider
+
+            self._provider = InstrumentedAnthropicProvider(
+                credential=self.anthropic_key,
+                model=self.model_name,
+            )
+        else:
+            self._provider = InstrumentedOllamaProvider(
+                url=self.ollama_url,
+                model=self.model_name,
+            )
 
         # Set the model in the trcore DB so propose_command_with_trace picks it up.
         self._patch_trcore_model()
@@ -329,7 +344,17 @@ class BenchmarkRunner:
             )
 
     def _pull_model(self) -> None:
-        """Pull the model via Ollama if it is not already present (best-effort)."""
+        """Pull the model via Ollama if it is not already present (best-effort).
+
+        Skipped for Anthropic API models — no local pull required.
+        """
+        if _is_anthropic_model(self.model_name):
+            print(
+                f"[{self.model_name}] Anthropic API model — no pull needed",
+                file=sys.stderr,
+            )
+            return
+
         import subprocess
 
         print(
@@ -611,10 +636,19 @@ class ConversationalBenchmarkRunner(BenchmarkRunner):
         """  # noqa: D200
         self._conn = init_db(self.db_path)
 
-        self._provider = InstrumentedOllamaProvider(
-            url=self.ollama_url,
-            model=self.model_name,
-        )
+        # Build an instrumented provider for direct use (token capture).
+        if _is_anthropic_model(self.model_name):
+            from benchmarks.anthropic_provider import InstrumentedAnthropicProvider
+
+            self._provider = InstrumentedAnthropicProvider(
+                credential=self.anthropic_key,
+                model=self.model_name,
+            )
+        else:
+            self._provider = InstrumentedOllamaProvider(
+                url=self.ollama_url,
+                model=self.model_name,
+            )
 
         self._patch_trcore_model()
 

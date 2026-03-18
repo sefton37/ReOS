@@ -106,4 +106,11 @@ MODEL_MATRIX = [
         "params": "16b",
         "rationale": "DeepSeek code model; command generation hypothesis",
     },
+    # ── Anthropic API models ──────────────────────────────────────────────────
+    {
+        "name": "claude-sonnet-4-20250514",
+        "family": "claude",
+        "params": "api",
+        "rationale": "Anthropic Sonnet 4; API baseline for comparison with local models",
+    },
 ]
