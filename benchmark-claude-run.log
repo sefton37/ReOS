@@ -14,7 +14,4 @@ pysqlcipher3 not installed — databases will remain unencrypted. Install with: 
 [claude-sonnet-4-20250514][12/415] files_head_001 … → (none)
 [claude-sonnet-4-20250514][13/415] files_tail_001 … → (none)
 [claude-sonnet-4-20250514][14/415] files_tail_follow_001 … → (none)
-[claude-sonnet-4-20250514][15/415] files_wc_001 … → (none)
-[claude-sonnet-4-20250514][16/415] files_ln_soft_001 … → (none)
-[claude-sonnet-4-20250514][17/415] files_cp_dir_001 … → (none)
-[claude-sonnet-4-20250514][18/415] files_rm_dir_001 …
+[claude-sonnet-4-20250514][15/415] files_wc_001 …
