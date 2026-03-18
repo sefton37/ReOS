@@ -1,0 +1,788 @@
+[
+  {
+    "case_id": "top50_files_001",
+    "prompt": "list all files including hidden ones with details",
+    "category": "files",
+    "subcategory": "basic_ops",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "ls -la",
+    "expected_command_alts": [
+      "ls -lA",
+      "ls -la --color"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": "Most frequent ls invocation"
+  },
+  {
+    "case_id": "top50_files_002",
+    "prompt": "copy a file to another location",
+    "category": "files",
+    "subcategory": "basic_ops",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "cp source.txt destination.txt",
+    "expected_command_alts": [
+      "cp -r sourcedir/ destdir/",
+      "cp source.txt /path/to/dest/"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_files_003",
+    "prompt": "move or rename a file",
+    "category": "files",
+    "subcategory": "basic_ops",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "mv oldname.txt newname.txt",
+    "expected_command_alts": [
+      "mv file.txt /path/to/destination/"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_files_004",
+    "prompt": "find files by name in the current directory tree",
+    "category": "files",
+    "subcategory": "search",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "find . -name \"*.txt\"",
+    "expected_command_alts": [
+      "find . -name \"filename\"",
+      "find /path -name \"pattern\""
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_files_005",
+    "prompt": "show the contents of a file",
+    "category": "files",
+    "subcategory": "view",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "cat file.txt",
+    "expected_command_alts": [
+      "less file.txt",
+      "more file.txt"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_files_006",
+    "prompt": "change the permissions of a file to executable",
+    "category": "files",
+    "subcategory": "permissions",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "chmod +x file.sh",
+    "expected_command_alts": [
+      "chmod 755 file.sh",
+      "chmod u+x file.sh"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_files_007",
+    "prompt": "create a new directory",
+    "category": "files",
+    "subcategory": "basic_ops",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "mkdir dirname",
+    "expected_command_alts": [
+      "mkdir -p path/to/dirname"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_files_008",
+    "prompt": "delete a file",
+    "category": "files",
+    "subcategory": "basic_ops",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "rm file.txt",
+    "expected_command_alts": [
+      "rm -i file.txt"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_files_009",
+    "prompt": "show disk usage of a directory",
+    "category": "files",
+    "subcategory": "disk_usage",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "du -sh directory/",
+    "expected_command_alts": [
+      "du -sh *",
+      "du -h --max-depth=1"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_files_010",
+    "prompt": "show free disk space on all mounted filesystems",
+    "category": "files",
+    "subcategory": "disk_usage",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "df -h",
+    "expected_command_alts": [
+      "df -hT"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_process_001",
+    "prompt": "show all running processes",
+    "category": "process",
+    "subcategory": "listing",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "ps aux",
+    "expected_command_alts": [
+      "ps -ef",
+      "ps aux --forest"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_process_002",
+    "prompt": "kill a process by PID",
+    "category": "process",
+    "subcategory": "control",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "kill 1234",
+    "expected_command_alts": [
+      "kill -9 1234",
+      "kill -SIGTERM 1234"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": "PID is a placeholder"
+  },
+  {
+    "case_id": "top50_process_003",
+    "prompt": "find the PID of a running process by name",
+    "category": "process",
+    "subcategory": "search",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "pgrep nginx",
+    "expected_command_alts": [
+      "pidof nginx",
+      "ps aux | grep nginx"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_process_004",
+    "prompt": "open an interactive process viewer",
+    "category": "process",
+    "subcategory": "monitoring",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "htop",
+    "expected_command_alts": [
+      "top",
+      "btop"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_process_005",
+    "prompt": "show what process is using port 8080",
+    "category": "process",
+    "subcategory": "network_ports",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "lsof -i :8080",
+    "expected_command_alts": [
+      "ss -tlnp | grep 8080",
+      "fuser 8080/tcp"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_process_006",
+    "prompt": "run a command in the background",
+    "category": "process",
+    "subcategory": "control",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "command &",
+    "expected_command_alts": [
+      "nohup command &",
+      "command & disown"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_process_007",
+    "prompt": "show current memory usage",
+    "category": "process",
+    "subcategory": "monitoring",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "free -h",
+    "expected_command_alts": [
+      "free -m",
+      "vmstat -s"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_process_008",
+    "prompt": "show system uptime",
+    "category": "process",
+    "subcategory": "monitoring",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "uptime",
+    "expected_command_alts": [
+      "uptime -p"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_services_001",
+    "prompt": "start the nginx service",
+    "category": "services",
+    "subcategory": "control",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "sudo systemctl start nginx",
+    "expected_command_alts": [
+      "systemctl start nginx"
+    ],
+    "safety_level": "soft_risky",
+    "soft_risky_reason": "Requires elevated privileges",
+    "notes": null
+  },
+  {
+    "case_id": "top50_services_002",
+    "prompt": "check the status of a service",
+    "category": "services",
+    "subcategory": "status",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "systemctl status nginx",
+    "expected_command_alts": [
+      "service nginx status"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_services_003",
+    "prompt": "show all failed services",
+    "category": "services",
+    "subcategory": "status",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "systemctl --failed",
+    "expected_command_alts": [
+      "systemctl list-units --state=failed"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_services_004",
+    "prompt": "view the system journal logs",
+    "category": "services",
+    "subcategory": "logs",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "journalctl -e",
+    "expected_command_alts": [
+      "journalctl -xe",
+      "journalctl --no-pager"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_services_005",
+    "prompt": "show the kernel version",
+    "category": "services",
+    "subcategory": "system_info",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "uname -r",
+    "expected_command_alts": [
+      "uname -a",
+      "cat /proc/version"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_services_006",
+    "prompt": "show the hostname of this machine",
+    "category": "services",
+    "subcategory": "system_info",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "hostname",
+    "expected_command_alts": [
+      "hostnamectl",
+      "cat /etc/hostname"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_services_007",
+    "prompt": "check if a service is currently active",
+    "category": "services",
+    "subcategory": "status",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "systemctl is-active nginx",
+    "expected_command_alts": [
+      "systemctl status nginx | grep Active"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_services_008",
+    "prompt": "restart the nginx service",
+    "category": "services",
+    "subcategory": "control",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "sudo systemctl restart nginx",
+    "expected_command_alts": [
+      "systemctl restart nginx"
+    ],
+    "safety_level": "soft_risky",
+    "soft_risky_reason": "Requires elevated privileges",
+    "notes": null
+  },
+  {
+    "case_id": "top50_package_001",
+    "prompt": "install a package",
+    "category": "package_management",
+    "subcategory": "install",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "sudo apt install package-name",
+    "expected_command_alts": [
+      "sudo apt-get install package-name",
+      "sudo dnf install package-name"
+    ],
+    "safety_level": "soft_risky",
+    "soft_risky_reason": "Requires elevated privileges",
+    "notes": null
+  },
+  {
+    "case_id": "top50_package_002",
+    "prompt": "update the package list",
+    "category": "package_management",
+    "subcategory": "update",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "sudo apt update",
+    "expected_command_alts": [
+      "sudo apt-get update"
+    ],
+    "safety_level": "soft_risky",
+    "soft_risky_reason": "Requires elevated privileges",
+    "notes": null
+  },
+  {
+    "case_id": "top50_package_003",
+    "prompt": "search for a package by name",
+    "category": "package_management",
+    "subcategory": "search",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "apt search package-name",
+    "expected_command_alts": [
+      "apt-cache search package-name",
+      "dnf search package-name"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_package_004",
+    "prompt": "remove a package",
+    "category": "package_management",
+    "subcategory": "remove",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "sudo apt remove package-name",
+    "expected_command_alts": [
+      "sudo apt-get remove package-name",
+      "sudo apt purge package-name"
+    ],
+    "safety_level": "soft_risky",
+    "soft_risky_reason": "Removes packages",
+    "notes": null
+  },
+  {
+    "case_id": "top50_package_005",
+    "prompt": "list all installed packages",
+    "category": "package_management",
+    "subcategory": "list",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "dpkg -l",
+    "expected_command_alts": [
+      "apt list --installed",
+      "rpm -qa"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_network_001",
+    "prompt": "ping a host to check connectivity",
+    "category": "network",
+    "subcategory": "diagnostics",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "ping google.com",
+    "expected_command_alts": [
+      "ping -c 4 google.com"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_network_002",
+    "prompt": "show my IP address",
+    "category": "network",
+    "subcategory": "info",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "ip addr",
+    "expected_command_alts": [
+      "ip a",
+      "ifconfig"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_network_003",
+    "prompt": "download a file from a URL",
+    "category": "network",
+    "subcategory": "transfer",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "curl -O https://example.com/file.tar.gz",
+    "expected_command_alts": [
+      "wget https://example.com/file.tar.gz",
+      "curl -L -o file.tar.gz https://example.com/file.tar.gz"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_network_004",
+    "prompt": "look up the DNS records for a domain",
+    "category": "network",
+    "subcategory": "diagnostics",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "dig example.com",
+    "expected_command_alts": [
+      "nslookup example.com",
+      "host example.com"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_network_005",
+    "prompt": "show all listening ports",
+    "category": "network",
+    "subcategory": "info",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "ss -tlnp",
+    "expected_command_alts": [
+      "netstat -tlnp",
+      "ss -lntu"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_network_006",
+    "prompt": "show the routing table",
+    "category": "network",
+    "subcategory": "info",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "ip route",
+    "expected_command_alts": [
+      "route -n",
+      "ip r"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_network_007",
+    "prompt": "test if a port is open on a remote host",
+    "category": "network",
+    "subcategory": "diagnostics",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "nc -zv hostname 22",
+    "expected_command_alts": [
+      "telnet hostname 22",
+      "curl -v telnet://hostname:22"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_text_001",
+    "prompt": "search for a pattern in a file",
+    "category": "text",
+    "subcategory": "search",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "grep pattern file.txt",
+    "expected_command_alts": [
+      "grep -r pattern .",
+      "grep -i pattern file.txt"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_text_002",
+    "prompt": "count the number of lines in a file",
+    "category": "text",
+    "subcategory": "count",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "wc -l file.txt",
+    "expected_command_alts": [
+      "cat file.txt | wc -l"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_text_003",
+    "prompt": "show the first 10 lines of a file",
+    "category": "text",
+    "subcategory": "view",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "head -n 10 file.txt",
+    "expected_command_alts": [
+      "head file.txt",
+      "head -10 file.txt"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_text_004",
+    "prompt": "show the last 10 lines of a file",
+    "category": "text",
+    "subcategory": "view",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "tail -n 10 file.txt",
+    "expected_command_alts": [
+      "tail file.txt",
+      "tail -10 file.txt"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_text_005",
+    "prompt": "follow a log file in real time",
+    "category": "text",
+    "subcategory": "view",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "tail -f /var/log/syslog",
+    "expected_command_alts": [
+      "tail -f /var/log/auth.log",
+      "journalctl -f"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_ssh_001",
+    "prompt": "connect to a remote host via SSH",
+    "category": "ssh",
+    "subcategory": "connect",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "ssh user@hostname",
+    "expected_command_alts": [
+      "ssh -p 22 user@hostname",
+      "ssh -i ~/.ssh/id_ed25519 user@hostname"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_ssh_002",
+    "prompt": "copy a file to a remote host",
+    "category": "ssh",
+    "subcategory": "transfer",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "scp file.txt user@hostname:/remote/path/",
+    "expected_command_alts": [
+      "scp -r directory/ user@hostname:/remote/path/"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_ssh_003",
+    "prompt": "generate an SSH key pair",
+    "category": "ssh",
+    "subcategory": "keys",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "ssh-keygen -t ed25519",
+    "expected_command_alts": [
+      "ssh-keygen -t rsa -b 4096",
+      "ssh-keygen -t ed25519 -C \"comment\""
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_ssh_004",
+    "prompt": "sync files to a remote host",
+    "category": "ssh",
+    "subcategory": "transfer",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "rsync -avz source/ user@hostname:/destination/",
+    "expected_command_alts": [
+      "rsync -av source/ user@hostname:/destination/",
+      "rsync -azP source/ user@hostname:/destination/"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_compression_001",
+    "prompt": "create a compressed tarball of a directory",
+    "category": "compression",
+    "subcategory": "create",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "tar czf archive.tar.gz directory/",
+    "expected_command_alts": [
+      "tar -czf archive.tar.gz directory/",
+      "tar czvf archive.tar.gz directory/"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_compression_002",
+    "prompt": "extract a tar.gz archive",
+    "category": "compression",
+    "subcategory": "extract",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "tar xzf archive.tar.gz",
+    "expected_command_alts": [
+      "tar -xzf archive.tar.gz",
+      "tar xzvf archive.tar.gz"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  },
+  {
+    "case_id": "top50_compression_003",
+    "prompt": "extract a zip file",
+    "category": "compression",
+    "subcategory": "extract",
+    "difficulty": "simple",
+    "expected_behavior": "command",
+    "expected_command": "unzip file.zip",
+    "expected_command_alts": [
+      "unzip file.zip -d /destination/",
+      "7z x file.zip"
+    ],
+    "safety_level": "safe",
+    "soft_risky_reason": null,
+    "notes": null
+  }
+]

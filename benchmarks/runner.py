@@ -31,7 +31,15 @@ from benchmarks.db import (
     insert_test_case,
 )
 from benchmarks.instrumented_provider import InstrumentedOllamaProvider
-from benchmarks.matching import exact_match, fuzzy_match, semantic_match
+from benchmarks.matching import (
+    exact_match,
+    fuzzy_match,
+    semantic_match,
+    structural_match,
+    sudo_normalized_match,
+    command_equivalence_match,
+    placeholder_normalized_match,
+)
 
 
 @dataclass
@@ -201,6 +209,8 @@ class BenchmarkRunner:
         no_context: If True, disable shell context gathering during the run.
         timeout: Per-case timeout in seconds (0 = unlimited).
         no_rag: If True, disable semantic layer RAG retrieval via REOS_RAG_DISABLED env var.
+        corpus_file: Path to an alternate corpus JSON file (e.g. corpus_top50.json).
+            Defaults to the standard corpus.json when None.
     """
 
     def __init__(
@@ -214,6 +224,7 @@ class BenchmarkRunner:
         timeout: int = 120,
         no_rag: bool = False,
         anthropic_key: str | None = None,
+        corpus_file: "Path | None" = None,
     ) -> None:
         self.model_name = model_name
         self.corpus_filter = corpus_filter
@@ -224,6 +235,7 @@ class BenchmarkRunner:
         self.timeout = timeout
         self.no_rag = no_rag
         self.anthropic_key = anthropic_key
+        self.corpus_file = corpus_file
 
         self.run_uuid: str = str(uuid.uuid4())
         self.run_id: int = 0
@@ -380,7 +392,7 @@ class BenchmarkRunner:
 
     def _load_cases(self) -> list[TestCase]:
         """Load corpus cases (with optional category filter) and upsert into test_cases table."""
-        cases = load_corpus(category=self.corpus_filter)
+        cases = load_corpus(category=self.corpus_filter, corpus_file=self.corpus_file)
         for case in cases:
             insert_test_case(self._conn, case)  # type: ignore[arg-type]
         return cases
@@ -472,6 +484,7 @@ class BenchmarkRunner:
             fields["rag_top_distance"] = getattr(trace, 'rag_top_distance', None)
             fields["rag_pattern_used"] = getattr(trace, 'rag_pattern_used', None)
             fields["rag_safety_level"] = getattr(trace, 'rag_safety_level', None)
+            fields["generation_tier"] = getattr(trace, 'generation_tier', 'free')
 
             # Soft-risky detection
             is_risky, risky_reason = _detect_soft_risky(trace.command)
@@ -489,6 +502,20 @@ class BenchmarkRunner:
             fields["match_semantic"] = int(sem) if sem is not None else None
             fields["behavior_correct"] = int(self._score_behavior(trace.command, case))
             fields["safety_correct"] = int(self._score_safety(trace.command, case))
+
+            # Extended scoring (Plan A)
+            fields["match_structural"] = int(
+                structural_match(trace.command, case.expected_command, case.expected_command_alts)
+            )
+            fields["match_sudo_normalized"] = int(
+                sudo_normalized_match(trace.command, case.expected_command, case.expected_command_alts)
+            )
+            fields["match_command_equiv"] = int(
+                command_equivalence_match(trace.command, case.expected_command, case.expected_command_alts)
+            )
+            fields["match_placeholder_norm"] = int(
+                placeholder_normalized_match(trace.command, case.expected_command, case.expected_command_alts)
+            )
 
             cmd_display = trace.command or "(none)"
             print(f" → {cmd_display}", file=sys.stderr)
@@ -838,6 +865,20 @@ class ConversationalBenchmarkRunner(BenchmarkRunner):
             fields["match_semantic"] = int(sem) if sem is not None else None
             fields["behavior_correct"] = int(self._score_behavior_conv(turn.turn_type, case))
             fields["safety_correct"] = int(self._score_safety_conv(turn.turn_type, case))
+
+            # Extended scoring (Plan A)
+            fields["match_structural"] = int(
+                structural_match(turn.command, case.expected_command, case.expected_command_alts)
+            )
+            fields["match_sudo_normalized"] = int(
+                sudo_normalized_match(turn.command, case.expected_command, case.expected_command_alts)
+            )
+            fields["match_command_equiv"] = int(
+                command_equivalence_match(turn.command, case.expected_command, case.expected_command_alts)
+            )
+            fields["match_placeholder_norm"] = int(
+                placeholder_normalized_match(turn.command, case.expected_command, case.expected_command_alts)
+            )
 
             cmd_display = turn.command or f"({turn.turn_type})"
             print(f" → {cmd_display}", file=sys.stderr)

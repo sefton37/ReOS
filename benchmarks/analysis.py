@@ -113,6 +113,102 @@ def rag_comparison(conn: sqlite3.Connection) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def weighted_accuracy(
+    conn: sqlite3.Connection,
+    model_name: str | None = None,
+    pipeline_mode: str | None = None,
+) -> list[dict]:
+    """Calculate frequency-weighted accuracy scores per model and pipeline mode.
+
+    Each result row is weighted by CATEGORY_WEIGHTS before aggregation, so
+    high-frequency categories (files, text, process) influence the final score
+    more than low-frequency ones (dangerous, edge_cases).
+
+    Args:
+        conn: Open benchmark database connection.
+        model_name: If given, restrict to a single model.
+        pipeline_mode: If given, restrict to a single pipeline mode.
+
+    Returns:
+        List of dicts with keys: model_name, pipeline_mode, cases,
+        weighted_exact_pct, unweighted_exact_pct, weighted_fuzzy_pct,
+        unweighted_fuzzy_pct.
+    """
+    from benchmarks.corpus import CATEGORY_WEIGHTS
+
+    # Build the CASE expression for category weights inline in SQL.
+    weight_case = "CASE tc.category\n" + "\n".join(
+        f"        WHEN {cat!r} THEN {w}"
+        for cat, w in CATEGORY_WEIGHTS.items()
+    ) + "\n        ELSE 1.0 END"
+
+    filters: list[str] = []
+    params: list = []
+    if model_name is not None:
+        filters.append("r.model_name = ?")
+        params.append(model_name)
+    if pipeline_mode is not None:
+        filters.append("r.pipeline_mode = ?")
+        params.append(pipeline_mode)
+
+    where_clause = ("WHERE " + " AND ".join(filters)) if filters else ""
+
+    sql = f"""
+    SELECT
+        r.model_name,
+        r.pipeline_mode,
+        COUNT(br.id) AS cases,
+        ROUND(100.0 * SUM(br.match_exact * ({weight_case}))
+              / SUM({weight_case}), 1) AS weighted_exact_pct,
+        ROUND(100.0 * SUM(br.match_exact) / COUNT(br.id), 1) AS unweighted_exact_pct,
+        ROUND(100.0 * SUM(br.match_fuzzy * ({weight_case}))
+              / SUM({weight_case}), 1) AS weighted_fuzzy_pct,
+        ROUND(100.0 * SUM(br.match_fuzzy) / COUNT(br.id), 1) AS unweighted_fuzzy_pct
+    FROM benchmark_results br
+    JOIN benchmark_runs r  ON r.id  = br.run_id
+    JOIN test_cases tc     ON tc.case_id = br.case_id
+    {where_clause}
+    GROUP BY r.model_name, r.pipeline_mode
+    ORDER BY weighted_exact_pct DESC
+    """
+    rows = conn.execute(sql, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def print_weighted_accuracy(conn: sqlite3.Connection) -> None:
+    """Print frequency-weighted vs unweighted accuracy comparison to stdout.
+
+    Args:
+        conn: Open benchmark database connection.
+    """
+    rows = weighted_accuracy(conn)
+    if not rows:
+        print("No benchmark results found in database.")
+        return
+
+    print("\n=== Frequency-Weighted Accuracy ===")
+    print("(High-frequency categories like files/text/process count more)")
+    headers = [
+        "Model", "Mode", "Cases",
+        "Wtd Exact%", "Unwt Exact%",
+        "Wtd Fuzzy%", "Unwt Fuzzy%",
+    ]
+    table_rows = [
+        [
+            r["model_name"],
+            r["pipeline_mode"],
+            str(r["cases"]),
+            f"{r['weighted_exact_pct'] or 0:.1f}",
+            f"{r['unweighted_exact_pct'] or 0:.1f}",
+            f"{r['weighted_fuzzy_pct'] or 0:.1f}",
+            f"{r['unweighted_fuzzy_pct'] or 0:.1f}",
+        ]
+        for r in rows
+    ]
+    _table(headers, table_rows)
+    print()
+
+
 def failure_patterns(
     conn: sqlite3.Connection,
     model_name: str,
@@ -303,6 +399,87 @@ def print_mode_comparison(conn: sqlite3.Connection) -> None:
             f"{r['behavior_correct_pct'] or 0:.1f}",
             f"{r['safety_correct_pct'] or 0:.1f}",
             str(int(r["avg_latency_ms"] or 0)),
+        ]
+        for r in rows
+    ]
+    _table(headers, table_rows)
+    print()
+
+
+def extended_accuracy_summary(conn: sqlite3.Connection) -> list[dict]:
+    """Return per-model extended accuracy metrics (Plan A scoring).
+
+    Computes exact, fuzzy, sudo-normalized, structural, placeholder-normalized,
+    and command-equivalence match rates, plus a "best" column that is 1 when
+    any match type is 1.
+
+    Args:
+        conn: Open benchmark database connection.
+
+    Returns:
+        List of dicts with keys: model_name, total_cases, exact_pct, fuzzy_pct,
+        sudo_pct, structural_pct, placeholder_pct, equiv_pct, best_pct.
+        Rows are ordered by best_pct descending.
+    """
+    rows = conn.execute(
+        """
+        SELECT
+            r.model_name,
+            COUNT(br.id) AS total_cases,
+            ROUND(100.0 * SUM(COALESCE(br.match_exact, 0))            / COUNT(br.id), 1) AS exact_pct,
+            ROUND(100.0 * SUM(COALESCE(br.match_fuzzy, 0))            / COUNT(br.id), 1) AS fuzzy_pct,
+            ROUND(100.0 * SUM(COALESCE(br.match_sudo_normalized, 0))  / COUNT(br.id), 1) AS sudo_pct,
+            ROUND(100.0 * SUM(COALESCE(br.match_structural, 0))       / COUNT(br.id), 1) AS structural_pct,
+            ROUND(100.0 * SUM(COALESCE(br.match_placeholder_norm, 0)) / COUNT(br.id), 1) AS placeholder_pct,
+            ROUND(100.0 * SUM(COALESCE(br.match_command_equiv, 0))    / COUNT(br.id), 1) AS equiv_pct,
+            ROUND(100.0 * SUM(
+                CASE WHEN COALESCE(br.match_exact, 0)            = 1
+                       OR COALESCE(br.match_fuzzy, 0)            = 1
+                       OR COALESCE(br.match_sudo_normalized, 0)  = 1
+                       OR COALESCE(br.match_structural, 0)       = 1
+                       OR COALESCE(br.match_placeholder_norm, 0) = 1
+                       OR COALESCE(br.match_command_equiv, 0)    = 1
+                     THEN 1 ELSE 0 END
+            ) / COUNT(br.id), 1) AS best_pct
+        FROM benchmark_runs r
+        JOIN benchmark_results br ON br.run_id = r.id
+        GROUP BY r.model_name
+        ORDER BY best_pct DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def print_extended_accuracy(conn: sqlite3.Connection) -> None:
+    """Print the Plan A extended accuracy table to stdout.
+
+    Shows exact, fuzzy, sudo-normalized, structural, placeholder-normalized,
+    command-equivalence, and "best" (union of all) match rates per model.
+
+    Args:
+        conn: Open benchmark database connection.
+    """
+    rows = extended_accuracy_summary(conn)
+    if not rows:
+        print("No benchmark results found in database.")
+        return
+
+    print("\n=== Extended Accuracy (Plan A) ===")
+    headers = [
+        "Model", "Cases", "Exact%", "Fuzzy%", "Sudo%",
+        "Structural%", "PlaceNorm%", "Equiv%", "Best%",
+    ]
+    table_rows = [
+        [
+            r["model_name"],
+            str(r["total_cases"]),
+            f"{r['exact_pct'] or 0:.1f}",
+            f"{r['fuzzy_pct'] or 0:.1f}",
+            f"{r['sudo_pct'] or 0:.1f}",
+            f"{r['structural_pct'] or 0:.1f}",
+            f"{r['placeholder_pct'] or 0:.1f}",
+            f"{r['equiv_pct'] or 0:.1f}",
+            f"{r['best_pct'] or 0:.1f}",
         ]
         for r in rows
     ]

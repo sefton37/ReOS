@@ -288,6 +288,29 @@ def _migrate_rag_columns(conn: sqlite3.Connection) -> None:
         ("rag_top_distance", "REAL"),       # cosine distance of top match
         ("rag_pattern_used", "TEXT"),       # pattern string of top match
         ("rag_safety_level", "TEXT"),       # safety level from retrieved entry
+        ("generation_tier", "TEXT"),        # "deterministic", "slot_fill", or "free"
+    ]
+    for col_name, col_type in new_cols:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE benchmark_results ADD COLUMN {col_name} {col_type}")
+    conn.commit()
+
+
+def _migrate_scoring_columns(conn: sqlite3.Connection) -> None:
+    """Add Plan A extended scoring columns to benchmark_results if not present.
+
+    Uses ALTER TABLE to add columns idempotently — safe on both new and
+    existing databases.
+
+    Args:
+        conn: Active database connection.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(benchmark_results)").fetchall()}
+    new_cols = [
+        ("match_structural", "INTEGER"),       # base command match ignoring args/sudo
+        ("match_sudo_normalized", "INTEGER"),  # exact match after stripping sudo
+        ("match_command_equiv", "INTEGER"),    # known equivalent commands (e.g. netstat/ss)
+        ("match_placeholder_norm", "INTEGER"), # exact after collapsing placeholder patterns
     ]
     for col_name, col_type in new_cols:
         if col_name not in existing:
@@ -333,6 +356,8 @@ def init_db(path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn.commit()
     # Add RAG columns to existing databases that predate this feature.
     _migrate_rag_columns(conn)
+    # Add Plan A extended scoring columns to existing databases.
+    _migrate_scoring_columns(conn)
     return conn
 
 

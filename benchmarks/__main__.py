@@ -21,16 +21,18 @@ import csv
 import sys
 from pathlib import Path
 
-from benchmarks.corpus import load_corpus, summarize_corpus
+from benchmarks.corpus import TOP50_CORPUS_PATH, load_corpus, summarize_corpus
 from benchmarks.db import DEFAULT_DB_PATH, get_connection
 from benchmarks.models import MODEL_MATRIX
 
 
 def _cmd_list_cases(args: argparse.Namespace) -> None:
     """List corpus test cases, optionally filtered by category."""
+    corpus_file = TOP50_CORPUS_PATH if getattr(args, "corpus", "full") == "top50" else None
     cases = load_corpus(
         category=args.category if args.category else None,
         difficulty=args.difficulty if args.difficulty else None,
+        corpus_file=corpus_file,
     )
     if not cases:
         print("No cases found matching the given filters.")
@@ -51,7 +53,7 @@ def _cmd_list_cases(args: argparse.Namespace) -> None:
     # Print corpus summary by category
     if not args.category:
         print("\nCorpus summary by category:")
-        for cat, count in summarize_corpus().items():
+        for cat, count in summarize_corpus(corpus_file=corpus_file).items():
             print(f"  {cat:<25} {count} cases")
 
 
@@ -68,6 +70,7 @@ def _make_runners(
     no_rag: bool = False,
     rag_mode: str = "rag",
     anthropic_key: str | None = None,
+    corpus_file: Path | None = None,
 ) -> list:
     """Instantiate benchmark runner(s) for the given model and mode.
 
@@ -85,6 +88,7 @@ def _make_runners(
         timeout: Per-case timeout in seconds.
         no_rag: If True, disable RAG (overridden by rag_mode).
         rag_mode: "rag" (default), "no-rag", or "both" (runs twice for A/B).
+        corpus_file: Path to alternate corpus JSON (e.g. corpus_top50.json).
 
     Returns:
         List of BenchmarkRunner (and/or ConversationalBenchmarkRunner) instances.
@@ -112,6 +116,7 @@ def _make_runners(
             "timeout": timeout,
             "no_rag": nr,
             "anthropic_key": anthropic_key,
+            "corpus_file": corpus_file,
         }
         if mode in ("reactive", "both"):
             runners.append(BenchmarkRunner(**kwargs))
@@ -134,6 +139,11 @@ def _cmd_run(args: argparse.Namespace) -> None:
         print("Error: specify --model MODEL or --all-models", file=sys.stderr)
         sys.exit(1)
 
+    # Resolve corpus file path from --corpus flag.
+    corpus_file: Path | None = None
+    if getattr(args, "corpus", "full") == "top50":
+        corpus_file = TOP50_CORPUS_PATH
+
     for model in models_to_run:
         runners = _make_runners(
             model,
@@ -147,6 +157,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
             no_rag=args.no_rag,
             rag_mode=args.rag_mode,
             anthropic_key=getattr(args, "anthropic_key", None),
+            corpus_file=corpus_file,
         )
         for runner in runners:
             try:
@@ -181,6 +192,12 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
 
     if args.compare_rag:
         analysis.print_rag_comparison(conn)
+
+    if args.extended:
+        analysis.print_extended_accuracy(conn)
+
+    if args.weighted:
+        analysis.print_weighted_accuracy(conn)
 
     if model_name:
         failures = analysis.failure_patterns(conn, model_name, limit=args.failures)
@@ -266,6 +283,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_list = sub.add_parser("list-cases", help="List corpus test cases")
     p_list.add_argument("--category", metavar="CAT", help="Filter by category")
     p_list.add_argument("--difficulty", metavar="DIFF", help="Filter by difficulty")
+    p_list.add_argument(
+        "--corpus",
+        choices=["full", "top50"],
+        default="full",
+        help="Test corpus: full (all cases) or top50 (50 essential commands)",
+    )
 
     # ── run ───────────────────────────────────────────────────────────────────
     p_run = sub.add_parser("run", help="Run the benchmark")
@@ -323,6 +346,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Anthropic credential (or set ANTHROPIC_API_KEY env var)",
     )
+    p_run.add_argument(
+        "--corpus",
+        choices=["full", "top50"],
+        default="full",
+        help="Test corpus: full (all cases) or top50 (50 essential commands)",
+    )
 
     # ── analyze ───────────────────────────────────────────────────────────────
     p_ana = sub.add_parser("analyze", help="Print analysis tables")
@@ -352,6 +381,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Show RAG vs no-RAG comparison table",
+    )
+    p_ana.add_argument(
+        "--extended",
+        action="store_true",
+        default=False,
+        help="Show Plan A extended accuracy table (sudo, structural, placeholder, equiv, best)",
+    )
+    p_ana.add_argument(
+        "--weighted",
+        action="store_true",
+        default=False,
+        help="Show frequency-weighted accuracy (high-frequency categories count more)",
     )
 
     # ── export ────────────────────────────────────────────────────────────────

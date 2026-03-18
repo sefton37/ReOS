@@ -4,12 +4,19 @@ Provides three levels of match:
   - exact_match: normalized string equality
   - fuzzy_match: Jaccard token overlap >= threshold (default 0.8)
 
+Extended scoring (Plan A) adds four more matchers:
+  - structural_match: same base command ignoring arguments and sudo
+  - sudo_normalized_match: exact after stripping "sudo " from both sides
+  - command_equivalence_match: known equivalent commands (e.g. netstat/ss)
+  - placeholder_normalized_match: exact after collapsing common placeholder patterns
+
 The semantic_match function (cosine similarity via sentence embeddings) is
 defined as a stub here; it requires an optional embedding model dependency and
 is populated by the runner when the dependency is available.
 """
 
 import re
+import re as _re
 import shlex
 
 
@@ -189,3 +196,200 @@ def semantic_match(
             return True
 
     return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Plan A: extended scoring matchers
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def structural_match(
+    actual: str | None,
+    expected: str | None,
+    alts: list[str] | None = None,
+) -> bool:
+    """Match if the base command (first token, ignoring sudo) is the same.
+
+    Strips a leading "sudo " prefix and takes the first token before any pipe.
+    This catches cases where the model produces the right command with different
+    arguments or a sudo prefix the corpus did not anticipate.
+
+    Args:
+        actual: The command produced by the pipeline (may be None).
+        expected: The canonical expected command (may be None).
+        alts: Optional list of acceptable alternative commands.
+
+    Returns:
+        True if the base command of actual matches any candidate.
+    """
+    if actual is None or expected is None:
+        return False
+
+    def base_cmd(cmd: str) -> str:
+        """Extract the base command, stripping sudo and taking first token."""
+        cmd = cmd.strip()
+        if cmd.startswith("sudo "):
+            cmd = cmd[5:].strip()
+        # Handle pipes — take the first command segment
+        cmd = cmd.split("|")[0].strip()
+        parts = cmd.split()
+        return parts[0] if parts else ""
+
+    actual_base = base_cmd(actual)
+    if not actual_base:
+        return False
+    candidates = [expected] + (alts or [])
+    return any(base_cmd(c) == actual_base for c in candidates if c)
+
+
+def sudo_normalized_match(
+    actual: str | None,
+    expected: str | None,
+    alts: list[str] | None = None,
+) -> bool:
+    """Exact match after normalizing the sudo prefix on both sides.
+
+    Handles cases where the model adds or omits "sudo " relative to the corpus
+    expected command.  Normalization also applies normalize_command().
+
+    Args:
+        actual: The command produced by the pipeline (may be None).
+        expected: The canonical expected command (may be None).
+        alts: Optional list of acceptable alternative commands.
+
+    Returns:
+        True if the sudo-stripped commands are equal.
+    """
+    if actual is None:
+        return expected is None and not alts
+
+    def strip_sudo(cmd: str) -> str:
+        cmd = normalize_command(cmd)
+        return cmd[5:].strip() if cmd.startswith("sudo ") else cmd
+
+    norm = strip_sudo(actual)
+    candidates: list[str] = []
+    if expected is not None:
+        candidates.append(strip_sudo(expected))
+    if alts:
+        candidates.extend(strip_sudo(a) for a in alts)
+    return norm in candidates
+
+
+# Groups of commands that are functionally equivalent for scoring purposes.
+# A match is declared when actual and expected both fall into the same group.
+EQUIVALENT_COMMANDS: list[set[str]] = [
+    {"pgrep", "ps aux | grep", "ps -ef | grep"},
+    {"killall", "pkill"},
+    {"ls -la", "ls -al", "ls -a -l"},
+    {"netstat", "ss"},
+    {"ifconfig", "ip addr", "ip a"},
+    {"route", "ip route", "ip r"},
+    {"find . -name", "locate"},
+    {"cat /etc/passwd", "getent passwd"},
+    {"free -h", "free -m", "free --human"},
+    {"df -h", "df --human-readable"},
+    {"which", "type", "command -v"},
+    {"wget", "curl -O", "curl -o"},
+    {"nslookup", "dig", "host"},
+    {"dmesg", "journalctl -k"},
+    {"systemctl --failed", "systemctl list-units --failed"},
+]
+
+
+def command_equivalence_match(
+    actual: str | None,
+    expected: str | None,
+    alts: list[str] | None = None,
+) -> bool:
+    """Match if actual and expected are known equivalent commands.
+
+    Uses EQUIVALENT_COMMANDS groups.  A command is "in" a group if it starts
+    with any member of the group (prefix match to handle arguments).
+
+    Args:
+        actual: The command produced by the pipeline (may be None).
+        expected: The canonical expected command (may be None).
+        alts: Optional list of acceptable alternative commands.
+
+    Returns:
+        True if actual and any candidate fall into the same equivalence group.
+    """
+    if actual is None or expected is None:
+        return False
+
+    def base_form(cmd: str) -> str:
+        cmd = normalize_command(cmd)
+        if cmd.startswith("sudo "):
+            cmd = cmd[5:].strip()
+        return cmd
+
+    a = base_form(actual)
+    candidates = [base_form(expected)]
+    if alts:
+        candidates.extend(base_form(x) for x in alts)
+
+    for group in EQUIVALENT_COMMANDS:
+        a_in = any(a.startswith(eq) for eq in group)
+        if a_in:
+            for cand in candidates:
+                if any(cand.startswith(eq) for eq in group):
+                    return True
+    return False
+
+
+# Placeholder normalization: map common generic/example tokens to canonical forms
+# so that "adduser newuser" and "adduser USER" score as equivalent.
+_PLACEHOLDER_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (_re.compile(r"/path/to/\S+"), "/PATH"),
+    (_re.compile(r"/home/\w+/\S*"), "/PATH"),
+    (_re.compile(r"filename\S*"), "FILE"),
+    (_re.compile(r"file\.\w+"), "FILE"),
+    (_re.compile(r"<[^>]+>"), "PARAM"),
+    (_re.compile(r"\{[^}]+\}"), "PARAM"),
+    (_re.compile(r"/dev/sd[a-z]\d*"), "/dev/DISK"),
+    (_re.compile(r"/dev/sdX\d*"), "/dev/DISK"),
+    (_re.compile(r"your_\w+"), "PARAM"),
+    (_re.compile(r"package[_-]?name"), "PACKAGE"),
+    (_re.compile(r"process[_-]?name"), "PROCESS"),
+    (_re.compile(r"\bnewadmin\b|\badmin_user\b|\bnewuser\b"), "USER"),
+]
+
+
+def placeholder_normalized_match(
+    actual: str | None,
+    expected: str | None,
+    alts: list[str] | None = None,
+) -> bool:
+    """Match after collapsing common placeholder patterns to canonical forms.
+
+    Handles cases where the model uses generic placeholders (e.g. "<filename>",
+    "/path/to/file", "your_package") while the corpus uses a concrete example
+    (or vice versa).
+
+    Args:
+        actual: The command produced by the pipeline (may be None).
+        expected: The canonical expected command (may be None).
+        alts: Optional list of acceptable alternative commands.
+
+    Returns:
+        True if the placeholder-normalized commands are equal.
+    """
+    if actual is None:
+        return expected is None and not alts
+
+    def normalize_placeholders(cmd: str) -> str:
+        cmd = normalize_command(cmd)
+        if cmd.startswith("sudo "):
+            cmd = cmd[5:].strip()
+        for pattern, replacement in _PLACEHOLDER_PATTERNS:
+            cmd = pattern.sub(replacement, cmd)
+        return cmd
+
+    norm = normalize_placeholders(actual)
+    candidates: list[str] = []
+    if expected is not None:
+        candidates.append(normalize_placeholders(expected))
+    if alts:
+        candidates.extend(normalize_placeholders(a) for a in alts)
+    return norm in candidates

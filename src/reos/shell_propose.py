@@ -117,6 +117,9 @@ class ProposalTrace:
     rag_safety_level: str | None = None
     rag_undo: dict[str, str] | None = None
 
+    # Generation tier
+    generation_tier: str = "free"  # "deterministic", "slot_fill", or "free"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Layer 1: Output Sanitization (assume garbage in)
@@ -407,6 +410,35 @@ This shows all systemd services that are currently active on your system.
 COMMAND: systemctl list-units --type=service --state=running"""
 
 
+SLOT_FILL_PROMPT = """You are a parameter extractor. Given a user request and a command pattern, fill in the {placeholders} with concrete values from the user's request.
+
+RULES:
+- Output ONLY the filled command on a single line starting with COMMAND:
+- Replace every {placeholder} with a concrete value from the user's request
+- If the user doesn't specify a value for a placeholder, use the most reasonable default
+- Do not change the command structure — only fill placeholders
+- Do not add flags or options not in the pattern
+- If the pattern has no placeholders, return it exactly as-is
+
+EXAMPLES:
+
+Pattern: tar czf {archive} {directory}
+User: compress the docs folder
+COMMAND: tar czf docs.tar.gz docs/
+
+Pattern: find {directory} -type f -size +{size}
+User: find files bigger than 100mb in /var
+COMMAND: find /var -type f -size +100M
+
+Pattern: systemctl status {service}
+User: is nginx running
+COMMAND: systemctl status nginx
+
+Pattern: kill {pid}
+User: kill process 4523
+COMMAND: kill 4523"""
+
+
 CONSTRAINED_FALLBACK_PROMPT = """Output exactly one line: COMMAND: <shell command>
 If no command applies, output: COMMAND: NONE
 {pattern_hint}
@@ -516,7 +548,7 @@ def propose_command_with_trace(
         pass  # Context gathering is optional - fail open
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # Semantic Layer RAG Retrieval
+    # Semantic Layer RAG Retrieval + Tier Selection
     # ═══════════════════════════════════════════════════════════════════════════
     rag_context_string = ""
     rag_retrieved = False
@@ -524,6 +556,7 @@ def propose_command_with_trace(
     rag_pattern_used: str | None = None
     rag_safety_level: str | None = None
     rag_undo: dict[str, str] | None = None
+    generation_tier: str = "free"  # "deterministic", "slot_fill", or "free"
 
     # Skip RAG if FTS5 already found a match (system context is better grounding)
     if not (context_can_verify and context_string) and not os.environ.get("REOS_RAG_DISABLED"):
@@ -546,28 +579,69 @@ def propose_command_with_trace(
 
                 entries = retriever.retrieve(query, top_k=5)
                 if entries:
-                    rag_context_string = retriever.format_for_prompt(entries)
                     rag_retrieved = True
                     rag_top_distance = entries[0].distance
                     rag_pattern_used = entries[0].pattern
                     rag_safety_level = entries[0].safety_level
                     rag_undo = entries[0].undo
+
+                    # Tier selection based on confidence
+                    if rag_top_distance < 0.12:
+                        generation_tier = "deterministic"
+                    elif rag_top_distance < 0.30:
+                        generation_tier = "slot_fill"
+                    else:
+                        generation_tier = "free"
+                        rag_context_string = retriever.format_for_prompt(entries)
         except Exception:
             pass  # RAG is always fail-open
 
-    # Build enriched prompt.  conversation_context (when non-empty) is injected
-    # as a prefix so the model has multi-turn history for pronoun resolution.
-    user_prompt = f"Input: {natural_language}"
-    if rag_context_string:
-        user_prompt = f"{rag_context_string}\n{user_prompt}"
-    if context_string:
-        user_prompt = f"{context_string}\n{user_prompt}"
-    if conversation_context:
-        user_prompt = f"{conversation_context}\n\n{user_prompt}"
-
     start = time.monotonic()
 
-    # ── Attempt 1: conversational prompt ────────────────────────────────────
+    # ── Tier 1: Deterministic return (very high confidence RAG match) ────────
+    if generation_tier == "deterministic" and rag_pattern_used:
+        has_placeholders = "{" in rag_pattern_used
+        if not has_placeholders:
+            # Pattern is a complete command — return directly, no LLM needed
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            return ProposalTrace(
+                message="Based on your request, this command should help.",
+                command=rag_pattern_used,
+                model_name="semantic-layer-direct",
+                latency_ms=elapsed_ms,
+                attempt_count=0,
+                rag_retrieved=rag_retrieved,
+                rag_top_distance=rag_top_distance,
+                rag_pattern_used=rag_pattern_used,
+                rag_safety_level=rag_safety_level,
+                rag_undo=rag_undo,
+                context_can_verify=context_can_verify,
+                context_string=context_string,
+                generation_tier="deterministic",
+            )
+        else:
+            # Pattern has unfilled placeholders — promote to Tier 2
+            generation_tier = "slot_fill"
+
+    # Build the appropriate prompt based on tier
+    if generation_tier == "slot_fill" and rag_pattern_used:
+        # Tier 2: Focused slot-fill — simpler prompt, lower temperature
+        attempt1_system = SLOT_FILL_PROMPT
+        user_prompt = f"Pattern: {rag_pattern_used}\nUser: {natural_language}"
+        attempt1_temp = 0.1
+    else:
+        # Tier 3: Free generation (current behavior)
+        attempt1_system = CONVERSATIONAL_PROMPT
+        user_prompt = f"Input: {natural_language}"
+        if rag_context_string:
+            user_prompt = f"{rag_context_string}\n{user_prompt}"
+        if context_string:
+            user_prompt = f"{context_string}\n{user_prompt}"
+        if conversation_context:
+            user_prompt = f"{conversation_context}\n\n{user_prompt}"
+        attempt1_temp = 0.3
+
+    # ── Attempt 1: conversational or slot-fill prompt ────────────────────────
     raw_response_1: str | None = None
     latency_ms_attempt1 = 0
     sentinel_found_1 = False
@@ -581,9 +655,9 @@ def propose_command_with_trace(
 
     try:
         response = llm.chat_text(
-            system=CONVERSATIONAL_PROMPT,
+            system=attempt1_system,
             user=user_prompt,
-            temperature=0.3,
+            temperature=attempt1_temp,
         )
 
         t_after_attempt1 = time.monotonic()
@@ -637,6 +711,7 @@ def propose_command_with_trace(
             rag_pattern_used=rag_pattern_used,
             rag_safety_level=rag_safety_level,
             rag_undo=rag_undo,
+            generation_tier=generation_tier,
         )
 
     # ── Attempt 2: constrained fallback prompt ───────────────────────────────
@@ -698,6 +773,7 @@ def propose_command_with_trace(
                 rag_pattern_used=rag_pattern_used,
                 rag_safety_level=rag_safety_level,
                 rag_undo=rag_undo,
+                generation_tier=generation_tier,
             )
 
         # Strip COMMAND: prefix if present
@@ -742,6 +818,7 @@ def propose_command_with_trace(
                     rag_pattern_used=rag_pattern_used,
                     rag_safety_level=rag_safety_level,
                     rag_undo=rag_undo,
+                    generation_tier=generation_tier,
                 )
 
             return ProposalTrace(
@@ -770,6 +847,7 @@ def propose_command_with_trace(
                 rag_pattern_used=rag_pattern_used,
                 rag_safety_level=rag_safety_level,
                 rag_undo=rag_undo,
+                generation_tier=generation_tier,
             )
 
     except Exception as e:
@@ -796,6 +874,7 @@ def propose_command_with_trace(
             rag_pattern_used=rag_pattern_used,
             rag_safety_level=rag_safety_level,
             rag_undo=rag_undo,
+            generation_tier=generation_tier,
         )
 
     elapsed_ms = int((time.monotonic() - start) * 1000)
@@ -826,6 +905,7 @@ def propose_command_with_trace(
         rag_pattern_used=rag_pattern_used,
         rag_safety_level=rag_safety_level,
         rag_undo=rag_undo,
+        generation_tier=generation_tier,
     )
 
 
