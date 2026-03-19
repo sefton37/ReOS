@@ -6,4 +6,45 @@ pysqlcipher3 not installed — databases will remain unencrypted. Install with: 
 [claude-sonnet-4-20250514][4/415] files_cp_001 … → cp source_file destination
 [claude-sonnet-4-20250514][5/415] files_mv_001 … → mv {file} {destination_directory}/
 [claude-sonnet-4-20250514][6/415] files_mv_rename_001 … → mv old_filename new_filename
-[claude-sonnet-4-20250514][7/415] files_rm_001 …
+[claude-sonnet-4-20250514][7/415] files_rm_001 … → rm filename
+[claude-sonnet-4-20250514][8/415] files_mkdir_001 … → mkdir new_directory
+[claude-sonnet-4-20250514][9/415] files_mkdir_p_001 … → mkdir -p path/to/directory
+[claude-sonnet-4-20250514][10/415] files_touch_001 … → touch file
+[claude-sonnet-4-20250514][11/415] files_cat_001 … → cat {file}
+[claude-sonnet-4-20250514][12/415] files_head_001 … → head -n 10 {file}
+[claude-sonnet-4-20250514][13/415] files_tail_001 … → tail -n 10 {file}
+[claude-sonnet-4-20250514][14/415] files_tail_follow_001 … → tail -f /var/log/syslog
+[claude-sonnet-4-20250514][15/415] files_wc_001 … → wc -l {file}
+[claude-sonnet-4-20250514][16/415] files_ln_soft_001 … → ln -s
+[claude-sonnet-4-20250514][17/415] files_cp_dir_001 … → cp -r {source_directory} {destination_directory}
+[claude-sonnet-4-20250514][18/415] files_rm_dir_001 … → rm -d {directory}
+[claude-sonnet-4-20250514][19/415] files_find_name_001 … → find /var -name '*.log'
+[claude-sonnet-4-20250514][20/415] files_find_size_001 … → find ~ -type f -size +100M
+[claude-sonnet-4-20250514][21/415] files_find_mtime_001 … → find . -type f -mtime -1
+[claude-sonnet-4-20250514][22/415] files_find_type_dir_001 … → find /etc -type d
+[claude-sonnet-4-20250514][23/415] files_find_empty_001 … → find . -empty -type f
+[claude-sonnet-4-20250514][24/415] files_find_perm_001 … → find . -type f -perm -002
+[claude-sonnet-4-20250514][25/415] files_find_exec_001 … → find . -name "*.bak" -type f -delete
+[claude-sonnet-4-20250514][26/415] files_locate_001 … → locate '{pattern}'
+[claude-sonnet-4-20250514][27/415] files_which_001 … → which <program_name>
+[claude-sonnet-4-20250514][28/415] files_find_ext_py_001 … → find . -name "*.py" -type f
+[claude-sonnet-4-20250514][29/415] files_find_ctime_001 … → find . -type f -mtime -7
+[claude-sonnet-4-20250514][30/415] files_find_name_case_001 … → locate -i 'readme'
+[claude-sonnet-4-20250514][31/415] files_chmod_executable_001 … → chmod +x script
+[claude-sonnet-4-20250514][32/415] files_chmod_read_001 … → chmod 644 {file}
+[claude-sonnet-4-20250514][33/415] files_chmod_755_001 … → chmod 755
+[claude-sonnet-4-20250514][34/415] files_chmod_600_001 … → chmod 600 private_key_file
+[claude-sonnet-4-20250514][35/415] files_chown_001 … → sudo chown {user} {file}
+[claude-sonnet-4-20250514][36/415] files_chown_r_001 … → sudo chown -R user:group /path/to/directory
+[claude-sonnet-4-20250514][37/415] files_stat_001 … → stat {file}
+[claude-sonnet-4-20250514][38/415] files_umask_001 … → umask
+[claude-sonnet-4-20250514][39/415] files_chmod_r_001 … → chmod +r *
+[claude-sonnet-4-20250514][40/415] files_getfacl_001 … → getfacl filename
+[claude-sonnet-4-20250514][41/415] files_tar_create_001 … → tar czf docs.tar.gz docs
+[claude-sonnet-4-20250514][42/415] files_tar_extract_001 … → tar xf archive.tar.gz
+[claude-sonnet-4-20250514][43/415] files_tar_list_001 … → tar tvf archive.tar.gz
+[claude-sonnet-4-20250514][44/415] files_zip_001 … → (none)
+[claude-sonnet-4-20250514][45/415] files_unzip_001 … → unzip archive.zip
+[claude-sonnet-4-20250514][46/415] files_tar_bz2_001 … → tar cjf archive.tar.bz2 directory
+[claude-sonnet-4-20250514][47/415] files_tar_xz_001 … → tar cJf archive.tar.xz directory
+[claude-sonnet-4-20250514][48/415] files_gzip_001 …
