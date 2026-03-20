@@ -3,7 +3,7 @@ steps:
     image: python:3.12
     commands:
       - apt-get update -qq && apt-get install -y -qq libsqlcipher-dev > /dev/null 2>&1
-      - pip install git+http://100.91.184.86:3000/talking-rock/talking_rock_core.git --quiet
+      - pip install git+http://forgejo.local:3000/talking-rock/talking_rock_core.git --quiet
       - pip install -e ".[dev]" --quiet
       - pytest tests/ --tb=short -q --no-cov -m "not slow"
         --ignore=tests/test_alignment_trigger_context.py
