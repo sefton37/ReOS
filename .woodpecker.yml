@@ -1,7 +1,9 @@
 steps:
   - name: test
     image: python:3.12
+    secrets: [forgejo_token]
     commands:
+      - echo "machine forgejo.local login token password $${FORGEJO_TOKEN}" > ~/.netrc
       - apt-get update -qq && apt-get install -y -qq libsqlcipher-dev > /dev/null 2>&1
       - pip install git+http://forgejo.local:3000/talking-rock/talking_rock_core.git --quiet
       - pip install -e ".[dev]" --quiet
