@@ -162,6 +162,7 @@ def test_runner_db_fields(tmp_path: Path) -> None:
             model_name="test-model:1b",
             db_path=str(db_path),
             timeout=10,
+            no_rag=True,  # disable RAG so pipeline_mode is "conversational", not "conversational_rag"
         )
         runner.run()
 

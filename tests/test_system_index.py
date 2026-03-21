@@ -375,6 +375,11 @@ class TestGetOrRefreshContext:
 class TestAgentIntegration:
     """Tests for ChatAgent integration with system indexer."""
 
+    @pytest.mark.skip(
+        reason="ChatAgent was Cairn-specific dead code and has been removed from reos.agent. "
+        "ReOSAgent (the current agent) uses a different interface (llm: LLMProvider). "
+        "See IMPLEMENTATION_PLAN.md: 'from reos.agent import ChatAgent -> drop (Cairn-only)'."
+    )
     def test_agent_gets_system_context(
         self,
         isolated_db_singleton,  # noqa: ANN001
@@ -394,6 +399,11 @@ class TestAgentIntegration:
         # Should include certainty rules
         assert "CERTAINTY RULES" in context
 
+    @pytest.mark.skip(
+        reason="ChatAgent was Cairn-specific dead code and has been removed from reos.agent. "
+        "ReOSAgent (the current agent) uses a different interface (llm: LLMProvider). "
+        "See IMPLEMENTATION_PLAN.md: 'from reos.agent import ChatAgent -> drop (Cairn-only)'."
+    )
     def test_agent_handles_missing_context(
         self,
         isolated_db_singleton,  # noqa: ANN001
