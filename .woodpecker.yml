@@ -1,3 +1,7 @@
+when:
+  - event: push
+  - event: pull_request
+
 steps:
   - name: test
     image: python:3.12
